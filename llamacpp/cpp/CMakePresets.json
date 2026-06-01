@@ -1,0 +1,84 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GGML_LLAMAFILE": "OFF"
+      }
+    },
+    {
+      "name": "macosArm64",
+      "displayName": "macOS arm64",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+      }
+    },
+    {
+      "name": "macosX64",
+      "displayName": "macOS x86_64",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "12.0"
+      }
+    },
+    {
+      "name": "iosArm64",
+      "displayName": "iOS arm64 (device)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "15.0"
+      }
+    },
+    {
+      "name": "iosSimulatorArm64",
+      "displayName": "iOS Simulator arm64",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_SYSTEM_NAME": "iOS",
+        "CMAKE_OSX_SYSROOT": "iphonesimulator",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "15.0"
+      }
+    },
+    {
+      "name": "androidNativeArm64",
+      "displayName": "Android arm64-v8a",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        "ANDROID_ABI": "arm64-v8a",
+        "ANDROID_PLATFORM": "android-24",
+        "ANDROID_STL": "c++_static"
+      }
+    },
+    {
+      "name": "androidNativeX64",
+      "displayName": "Android x86_64",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        "ANDROID_ABI": "x86_64",
+        "ANDROID_PLATFORM": "android-24",
+        "ANDROID_STL": "c++_static"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "macosArm64",         "configurePreset": "macosArm64",         "targets": ["koinference-facade"] },
+    { "name": "macosX64",           "configurePreset": "macosX64",           "targets": ["koinference-facade"] },
+    { "name": "iosArm64",           "configurePreset": "iosArm64",           "targets": ["koinference-facade"] },
+    { "name": "iosSimulatorArm64",  "configurePreset": "iosSimulatorArm64",  "targets": ["koinference-facade"] },
+    { "name": "androidNativeArm64", "configurePreset": "androidNativeArm64", "targets": ["koinference-facade"] },
+    { "name": "androidNativeX64",   "configurePreset": "androidNativeX64",   "targets": ["koinference-facade"] }
+  ]
+}

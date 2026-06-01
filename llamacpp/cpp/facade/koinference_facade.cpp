@@ -139,7 +139,7 @@ int koi_generate(
 ) {
     if (!session || !user_prompt || !out_buf || buf_size <= 0) return -1;
 
-    llama_memory_clear(llama_get_memory(session->ctx), false);
+    llama_kv_cache_clear(session->ctx);
 
     // Build prompt string
     const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
@@ -213,7 +213,7 @@ int koi_generate(
 int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_size) {
     if (!session || !text || !out_buf || buf_size <= 0) return -1;
 
-    llama_memory_clear(llama_get_memory(session->ctx), false);
+    llama_kv_cache_clear(session->ctx);
 
     const auto tokens = common_tokenize(session->ctx, text, true, true);
     if (decode_in_batches(session->ctx, session->batch, tokens, 0, false) != 0) return -1;

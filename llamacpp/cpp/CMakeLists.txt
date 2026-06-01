@@ -7,7 +7,19 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── CPM ─────────────────────────────────────────────────────────────────────
+# Default CPM cache alongside the cmake project; override with CPM_SOURCE_CACHE env var.
+if(NOT DEFINED ENV{CPM_SOURCE_CACHE})
+    set(CPM_SOURCE_CACHE "${CMAKE_CURRENT_SOURCE_DIR}/.cpm" CACHE PATH "")
+endif()
 include(cmake/get_cpm.cmake)
+
+# Force-set before CPM includes llama.cpp so option() in its cmake picks up
+# these values from cache rather than re-defaulting to ON.
+set(GGML_NATIVE           OFF CACHE BOOL   "" FORCE)
+set(LLAMA_BUILD_TESTS     OFF CACHE BOOL   "" FORCE)
+set(LLAMA_BUILD_EXAMPLES  OFF CACHE BOOL   "" FORCE)
+set(LLAMA_BUILD_SERVER    OFF CACHE BOOL   "" FORCE)
+set(BUILD_SHARED_LIBS     OFF CACHE BOOL   "" FORCE)
 
 # ── llama.cpp ────────────────────────────────────────────────────────────────
 # Update GIT_TAG to the desired release (e.g. b5001, b5200, …).
@@ -16,13 +28,6 @@ CPMAddPackage(
     GITHUB_REPOSITORY ggerganov/llama.cpp
     GIT_TAG     b5001
     EXCLUDE_FROM_ALL TRUE
-    OPTIONS
-        "LLAMA_BUILD_TESTS     OFF"
-        "LLAMA_BUILD_EXAMPLES  OFF"
-        "LLAMA_BUILD_SERVER    OFF"
-        "BUILD_SHARED_LIBS     OFF"
-        "GGML_NATIVE           OFF"
-        "GGML_MATMUL_INT8      OFF"
 )
 
 # ── facade static library ────────────────────────────────────────────────────
