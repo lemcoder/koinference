@@ -22,6 +22,7 @@ CPMAddPackage(
         "LLAMA_BUILD_SERVER    OFF"
         "BUILD_SHARED_LIBS     OFF"
         "GGML_NATIVE           OFF"
+        "GGML_MATMUL_INT8      OFF"
 )
 
 # ── facade static library ────────────────────────────────────────────────────
