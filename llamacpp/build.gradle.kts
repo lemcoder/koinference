@@ -4,11 +4,7 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
 }
 
-// Directory where CMake places the compiled koinference-facade static lib.
-// Pass after running CMake: ./gradlew :llamacpp:build -PkoiLibDir=/path/to/cmake/output
-val koiLibDir: String = findProperty("koiLibDir")?.toString()
-    ?: "${projectDir}/cpp/build/facade"
-
+// Header location — used for cinterop.
 val koiFacadeHeader: String = "${projectDir}/cpp/facade"
 
 kotlin {
@@ -21,21 +17,18 @@ kotlin {
     macosX64()
 
     targets.withType<KotlinNativeTarget>().configureEach {
+        // koiLibDir overrides the prebuilt dir — useful when pointing at a local CMake output.
+        val libDir = findProperty("koiLibDir")?.toString() ?: "${projectDir}/prebuilt/$name"
         compilations["main"].apply {
-            // cinterop: parse the header and generate Kotlin bindings.
-            // Does NOT require the .a to exist at this stage — only the header.
             cinterops {
                 create("koinference") {
                     defFile(project.file("src/nativeInterop/koinference.def"))
                     compilerOpts("-I$koiFacadeHeader")
                 }
             }
-
-            // Link the static facade library when compiling a native binary.
-            // The .a must exist at koiLibDir by the time a binary is linked.
-            kotlinOptions.freeCompilerArgs += listOf(
-                "-linker-options", "-L$koiLibDir -lkoinference-facade"
-            )
+            compilerOptions.configure {
+                freeCompilerArgs.addAll("-linker-options", "-L$libDir -lkoinference-facade")
+            }
         }
     }
 

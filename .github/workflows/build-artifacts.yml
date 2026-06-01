@@ -1,0 +1,165 @@
+name: Build Native Artifacts
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm
+
+jobs:
+  build-apple:
+    name: Build Apple targets
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: .cpm
+          key: cpm-apple-${{ hashFiles('llamacpp/cpp/CMakeLists.txt') }}
+
+      - name: Build macosArm64
+        run: |
+          cmake -B build/macosArm64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build/macosArm64 --target koinference-facade -j$(sysctl -n hw.ncpu)
+          mkdir -p llamacpp/prebuilt/macosArm64
+          find build/macosArm64 -name "*.a" | xargs libtool -static -o llamacpp/prebuilt/macosArm64/libkoinference-facade.a
+
+      - name: Build macosX64
+        run: |
+          cmake -B build/macosX64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+          cmake --build build/macosX64 --target koinference-facade -j$(sysctl -n hw.ncpu)
+          mkdir -p llamacpp/prebuilt/macosX64
+          find build/macosX64 -name "*.a" | xargs libtool -static -o llamacpp/prebuilt/macosX64/libkoinference-facade.a
+
+      - name: Build iosArm64
+        run: |
+          cmake -B build/iosArm64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          cmake --build build/iosArm64 --target koinference-facade -j$(sysctl -n hw.ncpu)
+          mkdir -p llamacpp/prebuilt/iosArm64
+          find build/iosArm64 -name "*.a" | xargs libtool -static -o llamacpp/prebuilt/iosArm64/libkoinference-facade.a
+
+      - name: Build iosSimulatorArm64
+        run: |
+          cmake -B build/iosSimulatorArm64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0
+          cmake --build build/iosSimulatorArm64 --target koinference-facade -j$(sysctl -n hw.ncpu)
+          mkdir -p llamacpp/prebuilt/iosSimulatorArm64
+          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o llamacpp/prebuilt/iosSimulatorArm64/libkoinference-facade.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apple-prebuilt
+          path: llamacpp/prebuilt/
+
+  build-android:
+    name: Build Android targets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: .cpm
+          key: cpm-android-${{ hashFiles('llamacpp/cpp/CMakeLists.txt') }}
+
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Build androidNativeArm64
+        env:
+          NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake -B build/androidNativeArm64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_static
+          cmake --build build/androidNativeArm64 --target koinference-facade -j$(nproc)
+          mkdir -p llamacpp/prebuilt/androidNativeArm64
+          {
+            echo "CREATE llamacpp/prebuilt/androidNativeArm64/libkoinference-facade.a"
+            find build/androidNativeArm64 -name "*.a" | sed 's/^/ADDLIB /'
+            echo "SAVE"
+            echo "END"
+          } | ar -M
+
+      - name: Build androidNativeX64
+        env:
+          NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cmake -B build/androidNativeX64 -S llamacpp/cpp \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-24 \
+            -DANDROID_STL=c++_static
+          cmake --build build/androidNativeX64 --target koinference-facade -j$(nproc)
+          mkdir -p llamacpp/prebuilt/androidNativeX64
+          {
+            echo "CREATE llamacpp/prebuilt/androidNativeX64/libkoinference-facade.a"
+            find build/androidNativeX64 -name "*.a" | sed 's/^/ADDLIB /'
+            echo "SAVE"
+            echo "END"
+          } | ar -M
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-prebuilt
+          path: llamacpp/prebuilt/
+
+  push-artifacts:
+    name: Commit prebuilt artifacts to PR branch
+    runs-on: ubuntu-latest
+    needs: [build-apple, build-android]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apple-prebuilt
+          path: llamacpp/prebuilt/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-prebuilt
+          path: llamacpp/prebuilt/
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add llamacpp/prebuilt/
+          if git diff --staged --quiet; then
+            echo "Prebuilt artifacts unchanged, nothing to commit."
+            exit 0
+          fi
+          git commit -m "ci: update prebuilt native artifacts [skip ci]"
+          git push
