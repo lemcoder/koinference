@@ -1,0 +1,2 @@
+headers = koinference_facade.h
+headerFilter = koinference_facade.h

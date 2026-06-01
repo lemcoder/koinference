@@ -4,6 +4,7 @@ import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.RuntimeSettings
+import kotlin.test.assertIs
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,6 +58,7 @@ class LlamaCppModelLoaderTest {
     fun `runtime can generate response with schema constraints`() = runTest {
         val loader = LlamaCppModelLoader()
         val runtime = loader.load("test-model.gguf")
+        assertIs<LlamaCppTextRuntime>(runtime)
 
         val response = runtime.generateResponse(
             prompt = "hello",

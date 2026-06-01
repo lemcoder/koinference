@@ -1,14 +1,6 @@
 package io.github.lemcoder.koinference
 
-interface ModelRuntime {
-    suspend fun generateResponse(
-        prompt: String,
-        constraint: GenerationConstraint? = null,
-    ): String
-
-    fun updateGenerationParameters(parameters: GenerationParameters)
-    fun updateRuntimeSettings(settings: RuntimeSettings)
-}
+interface ModelRuntime
 
 data class GenerationParameters(
     val topK: Int? = null,
