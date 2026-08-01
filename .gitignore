@@ -14,3 +14,6 @@ xcuserdata
 # Tooling / local caches
 .codegraph/
 .cpm/
+
+# Prebuilt native artifacts — produced by CMake / CI, never committed
+*.a

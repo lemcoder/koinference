@@ -3,12 +3,14 @@ name: Build Native Artifacts
 on:
   pull_request:
     branches: [main]
+  # Called by the build and publish workflows, which need the natives before Gradle runs.
+  workflow_call:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
-  CPM_SOURCE_CACHE: ${{ github.workspace }}/llamacpp/cpp/.cpm
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/backends/llamacpp/native/.cpm
 
 jobs:
   build-macos:
@@ -16,41 +18,73 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: llamacpp/cpp
+        working-directory: backends/llamacpp/native
     steps:
       - uses: actions/checkout@v4
 
       - name: Cache CPM packages
         uses: actions/cache@v4
         with:
-          path: llamacpp/cpp/.cpm
-          key: cpm-macos-${{ hashFiles('llamacpp/cpp/CMakeLists.txt') }}
+          path: backends/llamacpp/native/.cpm
+          key: cpm-macos-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
       - name: Build macosArm64
         run: |
           cmake --preset macosArm64
           cmake --build --preset macosArm64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../../prebuilt/macosArm64
-          find build/macosArm64 -name "*.a" | xargs libtool -static -o ../../prebuilt/macosArm64/libkoinference-facade.a
+          mkdir -p ../build/prebuilt/macos_arm64
+          find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
 
       - name: Build macosX64
         run: |
           cmake --preset macosX64
           cmake --build --preset macosX64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../../prebuilt/macosX64
-          find build/macosX64 -name "*.a" | xargs libtool -static -o ../../prebuilt/macosX64/libkoinference-facade.a
+          mkdir -p ../build/prebuilt/macos_x64
+          find build/macosX64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_x64/libkoinference-facade.a
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-prebuilt
-          path: llamacpp/prebuilt/
+          path: backends/llamacpp/build/prebuilt/
+
+  build-linux:
+    name: Build Linux target
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backends/llamacpp/native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: backends/llamacpp/native/.cpm
+          key: cpm-linux-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
+
+      - name: Build linuxX64
+        run: |
+          cmake --preset linuxX64
+          cmake --build --preset linuxX64 -j$(nproc)
+          mkdir -p ../build/prebuilt/linux_x64
+          {
+            echo "CREATE ../build/prebuilt/linux_x64/libkoinference-facade.a"
+            find build/linuxX64 -name "*.a" | sed 's/^/ADDLIB /'
+            echo "SAVE"
+            echo "END"
+          } | ar -M
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-prebuilt
+          path: backends/llamacpp/build/prebuilt/
 
   build-ios:
     name: Build iOS targets
     runs-on: macos-latest
     defaults:
       run:
-        working-directory: llamacpp/cpp
+        working-directory: backends/llamacpp/native
     steps:
       - uses: actions/checkout@v4
 
@@ -60,44 +94,44 @@ jobs:
       - name: Cache CPM packages
         uses: actions/cache@v4
         with:
-          path: llamacpp/cpp/.cpm
-          key: cpm-ios-${{ hashFiles('llamacpp/cpp/CMakeLists.txt') }}
+          path: backends/llamacpp/native/.cpm
+          key: cpm-ios-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
       - name: Build iosArm64
         run: |
           cmake --preset iosArm64 \
             -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
           cmake --build --preset iosArm64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../../prebuilt/iosArm64
-          find build/iosArm64 -name "*.a" | xargs libtool -static -o ../../prebuilt/iosArm64/libkoinference-facade.a
+          mkdir -p ../build/prebuilt/ios_arm64
+          find build/iosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_arm64/libkoinference-facade.a
 
       - name: Build iosSimulatorArm64
         run: |
           cmake --preset iosSimulatorArm64 \
             -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
           cmake --build --preset iosSimulatorArm64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../../prebuilt/iosSimulatorArm64
-          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o ../../prebuilt/iosSimulatorArm64/libkoinference-facade.a
+          mkdir -p ../build/prebuilt/ios_simulator_arm64
+          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_simulator_arm64/libkoinference-facade.a
 
       - uses: actions/upload-artifact@v4
         with:
           name: ios-prebuilt
-          path: llamacpp/prebuilt/
+          path: backends/llamacpp/build/prebuilt/
 
   build-android:
     name: Build Android targets
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: llamacpp/cpp
+        working-directory: backends/llamacpp/native
     steps:
       - uses: actions/checkout@v4
 
       - name: Cache CPM packages
         uses: actions/cache@v4
         with:
-          path: llamacpp/cpp/.cpm
-          key: cpm-android-${{ hashFiles('llamacpp/cpp/CMakeLists.txt') }}
+          path: backends/llamacpp/native/.cpm
+          key: cpm-android-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
       - name: Setup Android NDK
         id: setup-ndk
@@ -111,9 +145,9 @@ jobs:
         run: |
           cmake --preset androidNativeArm64
           cmake --build --preset androidNativeArm64 -j$(nproc)
-          mkdir -p ../../prebuilt/androidNativeArm64
+          mkdir -p ../build/prebuilt/android_arm64
           {
-            echo "CREATE ../../prebuilt/androidNativeArm64/libkoinference-facade.a"
+            echo "CREATE ../build/prebuilt/android_arm64/libkoinference-facade.a"
             find build/androidNativeArm64 -name "*.a" | sed 's/^/ADDLIB /'
             echo "SAVE"
             echo "END"
@@ -125,9 +159,9 @@ jobs:
         run: |
           cmake --preset androidNativeX64
           cmake --build --preset androidNativeX64 -j$(nproc)
-          mkdir -p ../../prebuilt/androidNativeX64
+          mkdir -p ../build/prebuilt/android_x64
           {
-            echo "CREATE ../../prebuilt/androidNativeX64/libkoinference-facade.a"
+            echo "CREATE ../build/prebuilt/android_x64/libkoinference-facade.a"
             find build/androidNativeX64 -name "*.a" | sed 's/^/ADDLIB /'
             echo "SAVE"
             echo "END"
@@ -136,45 +170,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: android-prebuilt
-          path: llamacpp/prebuilt/
+          path: backends/llamacpp/build/prebuilt/
 
-  push-artifacts:
-    name: Commit prebuilt artifacts to PR branch
-    runs-on: ubuntu-latest
-    if: always()
-    needs: [build-macos, build-ios, build-android]
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: macos-prebuilt
-          path: llamacpp/prebuilt/
-
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: ios-prebuilt
-          path: llamacpp/prebuilt/
-
-      - uses: actions/download-artifact@v4
-        continue-on-error: true
-        with:
-          name: android-prebuilt
-          path: llamacpp/prebuilt/
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add llamacpp/prebuilt/
-          if git diff --staged --quiet; then
-            echo "Prebuilt artifacts unchanged, nothing to commit."
-            exit 0
-          fi
-          git commit -m "ci: update prebuilt native artifacts [skip ci]"
-          git push
+# The artifacts are not committed back to the branch: consumers of this workflow download them into
+# backends/llamacpp/build/prebuilt/ with `pattern: "*-prebuilt", merge-multiple: true` before invoking Gradle.
