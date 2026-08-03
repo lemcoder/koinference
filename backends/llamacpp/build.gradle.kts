@@ -1,4 +1,5 @@
 import io.github.lemcoder.KonanTarget
+import java.io.File
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -9,11 +10,10 @@ plugins {
 // Header location — used for cinterop.
 val koiFacadeHeader: String = "${projectDir}/native/facade"
 
-// NDK prebuilt toolchains are named after the build host, and are x86_64 even on Apple silicon.
-val isMacHost: Boolean = System.getProperty("os.name").lowercase().contains("mac")
-
-// The facade itself is built by CMake (it links llama.cpp), so the Konan plugin is used for the JNI
-// leg only: generate the bridges from the facade header, link the stub against the prebuilt .a.
+// The Konan plugin is used for generation only: it turns the facade header into the JVM bridges and
+// the JNI .c stub, and CMake compiles/links that stub (see native/CMakeLists.txt, KOI_BUILD_JNI).
+// Linking there rather than here keeps one toolchain end to end — konan's linker joining CMake/NDK
+// artifacts is what produced the libc++, compiler-rt and framework mismatches this replaced.
 konanConfig {
     headerDir.set("native/facade")
     libName.set("koinference-facade")
@@ -22,45 +22,67 @@ konanConfig {
 
     jvmInterop {
         packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
-        // Set on the nested property, not via targets(...) — that helper belongs to konanConfig and
-        // would switch on runKonanClang, which cannot build the C++ facade.
-        // Host for the JVM target, Android ABIs for the androidNative ones. iOS has no JVM, so no
-        // stub is built for it — those targets go through cinterop instead.
-        targets.set(listOf(KonanTarget.host(), KonanTarget.ANDROID_ARM64))
-        // The facade .a is C++ (llama.cpp + ggml), so every stub needs a C++ runtime — and on macOS
-        // the frameworks ggml's Metal/BLAS backends call into. These are per-target: the Android
-        // linker rejects -framework, and its libc++ is the NDK's static one.
-        linkerArgsFor(
-            KonanTarget.host(),
-            "-lc++",
-            "-framework", "Accelerate",
-            "-framework", "Metal",
-            "-framework", "MetalKit",
-            "-framework", "Foundation",
-        )
-        // The Android .a is built by CMake against $ANDROID_NDK_HOME, so its C++ runtime has to come
-        // from that same NDK — konan bundles a much older one, which is missing std::filesystem and
-        // the iostream vtables llama.cpp pulls in.
-        val ndkToolchain = providers.environmentVariable("ANDROID_NDK_HOME")
-            .map { file("$it/toolchains/llvm/prebuilt/${if (isMacHost) "darwin" else "linux"}-x86_64") }
-            .orNull
-        if (ndkToolchain != null) {
-            // libunwind ships with clang's runtime rather than the sysroot, under a versioned dir.
-            val unwindDir = ndkToolchain.resolve("lib/clang").listFiles()
-                ?.map { it.resolve("lib/linux/aarch64") }?.firstOrNull { it.isDirectory }
-            // Named as archives rather than -L/-l: a search path would also pull this NDK's libc and
-            // libdl in ahead of konan's, and lld cannot read their compressed debug sections.
-            val sysrootLib = ndkToolchain.resolve("sysroot/usr/lib/aarch64-linux-android")
-            linkerArgsFor(
-                KonanTarget.ANDROID_ARM64,
-                "${sysrootLib.resolve("libc++_static.a")}",
-                "${sysrootLib.resolve("libc++abi.a")}",
-                *listOfNotNull(unwindDir?.resolve("libunwind.a")?.toString()).toTypedArray(),
-            )
-        } else {
-            logger.warn("ANDROID_NDK_HOME is not set — linkJvmInteropAndroid_arm64 will fail to find libc++.")
-        }
+        // No targets: registers generateJvmInterop only, no link tasks.
+        targets.set(emptyList())
     }
+}
+
+// CMake preset for the machine running the build — the only one the JVM target can load.
+val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
+    val arm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }
+    when {
+        os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
+        else -> "linuxX64"
+    }
+}
+val nativeDir = layout.projectDirectory.dir("native")
+val hostStubDir = nativeDir.dir("build/$hostPreset")
+
+// The Gradle daemon does not inherit a login shell's PATH, so a Homebrew cmake is invisible to it.
+// Override with -PkoiCmake=/path/to/cmake or $CMAKE.
+val cmakeExecutable: String = findProperty("koiCmake")?.toString()
+    ?: System.getenv("CMAKE")
+    ?: sequenceOf("/opt/homebrew/bin/cmake", "/usr/local/bin/cmake", "/usr/bin/cmake")
+        .firstOrNull { File(it).canExecute() }
+    ?: "cmake"
+
+// A JDK that ships include/jni.h. Not necessarily the one running Gradle: IDE-bundled JBRs (Android
+// Studio's, which is the daemon JVM here) strip the headers. Override with -PkoiJniHome=/path/to/jdk.
+val jniHome: String = findProperty("koiJniHome")?.toString() ?: run {
+    val candidates = buildList {
+        System.getenv("JAVA_HOME")?.let { add(File(it)) }
+        add(File(System.getProperty("java.home")))
+        File(System.getProperty("user.home"), "Library/Java/JavaVirtualMachines").listFiles()?.let { addAll(it) }
+        File("/Library/Java/JavaVirtualMachines").listFiles()?.let { addAll(it) }
+        File("/usr/lib/jvm").listFiles()?.let { addAll(it) }
+    }
+    candidates.flatMap { listOf(it, it.resolve("Contents/Home")) }
+        .firstOrNull { it.resolve("include/jni.h").isFile }?.absolutePath
+        ?: throw GradleException(
+            "No JDK with include/jni.h found — the JNI stub cannot be compiled. Pass -PkoiJniHome=/path/to/jdk."
+        )
+}
+
+val cmakeConfigureJni by tasks.registering(Exec::class) {
+    group = "interop"
+    description = "Configure the CMake build with the generated JNI stub enabled."
+    dependsOn("generateJvmInterop")
+    workingDir = nativeDir.asFile
+    // CMake's FindJNI wants a full JDK; the stub only needs jni.h, which this one supplies.
+    environment("JAVA_HOME", jniHome)
+    commandLine(cmakeExecutable, "--preset", hostPreset, "-DKOI_BUILD_JNI=ON")
+}
+
+val buildJniStub by tasks.registering(Exec::class) {
+    group = "interop"
+    description = "Compile and link the generated JNI stub against the facade."
+    dependsOn(cmakeConfigureJni)
+    workingDir = nativeDir.asFile
+    commandLine(
+        cmakeExecutable, "--build", "build/$hostPreset",
+        "--target", "koinference-jni",
+        "-j", Runtime.getRuntime().availableProcessors().toString(),
+    )
 }
 
 kotlin {
@@ -109,12 +131,11 @@ kotlin {
     }
 }
 
-// The bridges resolve the stub library from java.library.path. Only the host stub is needed, so this
-// deliberately skips the umbrella task — a JVM-only machine has no Android NDK.
+// The bridges resolve the stub library from java.library.path. Locally it is built on demand; CI
+// builds it once in the natives job and passes the directory with -PkoiStubDir=.
+val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
+
 tasks.named<Test>("jvmTest") {
-    dependsOn("linkJvmInterop${KonanTarget.host().taskSuffix}")
-    systemProperty(
-        "java.library.path",
-        layout.buildDirectory.dir("jvmInterop/jniLibs/${KonanTarget.host().abiDir}").get().asFile.absolutePath,
-    )
+    if (prebuiltStubDir == null) dependsOn(buildJniStub)
+    systemProperty("java.library.path", prebuiltStubDir ?: hostStubDir.asFile.absolutePath)
 }

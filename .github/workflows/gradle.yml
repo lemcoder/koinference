@@ -34,6 +34,8 @@ jobs:
             os: macos-latest
           - target: :core:jvmTest :backends:llamacpp:jvmTest
             os: ubuntu-latest
+            # The stub is built by the natives job; do not rebuild it through CMake here.
+            extraArgs: -PkoiStubDir=${{ github.workspace }}/backends/llamacpp/build/prebuilt/jni/linux_x64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -59,4 +61,4 @@ jobs:
     - name: Build with Gradle
       uses: gradle/gradle-build-action@ce999babab2de1c4b649dc15f0ee67e6246c994f
       with:
-        arguments: ${{ matrix.target }}
+        arguments: ${{ matrix.target }} ${{ matrix.extraArgs }}
