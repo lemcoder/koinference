@@ -53,7 +53,8 @@ target_link_libraries(koinference-facade
 # Metal/BLAS backends need arrive transitively from koinference-facade.
 option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 
-# Where generateJvmInterop writes the stub, and the name its Kotlin System.loadLibrary() expects.
+# Where the plugin wrote the stub — Gradle passes this, since the layout is the plugin's to choose.
+# The fallback only serves a CMake run driven by hand.
 set(KOI_JNI_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/generated/jvmInterop/koinference/c"
     CACHE PATH "Directory holding the generated JNI .c sources")
 set(KOI_JNI_LIB_NAME "iogithublemcoderkoinferencellamacppinternaljnistubs"

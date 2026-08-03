@@ -1,4 +1,6 @@
 import io.github.lemcoder.interop.jvmInterops
+import io.github.lemcoder.jniHome
+import io.github.lemcoder.jvm.GenerateJvmInteropTask
 import java.io.File
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
@@ -31,45 +33,6 @@ val cmakeExecutable: String = findProperty("koiCmake")?.toString()
     ?: sequenceOf("/opt/homebrew/bin/cmake", "/usr/local/bin/cmake", "/usr/bin/cmake")
         .firstOrNull { File(it).canExecute() }
     ?: "cmake"
-
-// A JDK that ships include/jni.h. Not necessarily the one running Gradle: IDE-bundled JBRs (Android
-// Studio's, which is the daemon JVM here) strip the headers. Override with -PkoiJniHome=/path/to/jdk.
-val jniHome: String = findProperty("koiJniHome")?.toString() ?: run {
-    val candidates = buildList {
-        System.getenv("JAVA_HOME")?.let { add(File(it)) }
-        add(File(System.getProperty("java.home")))
-        File(System.getProperty("user.home"), "Library/Java/JavaVirtualMachines").listFiles()?.let { addAll(it) }
-        File("/Library/Java/JavaVirtualMachines").listFiles()?.let { addAll(it) }
-        File("/usr/lib/jvm").listFiles()?.let { addAll(it) }
-    }
-    candidates.flatMap { listOf(it, it.resolve("Contents/Home")) }
-        .firstOrNull { it.resolve("include/jni.h").isFile }?.absolutePath
-        ?: throw GradleException(
-            "No JDK with include/jni.h found — the JNI stub cannot be compiled. Pass -PkoiJniHome=/path/to/jdk."
-        )
-}
-
-val cmakeConfigureJni by tasks.registering(Exec::class) {
-    group = "interop"
-    description = "Configure the CMake build with the generated JNI stub enabled."
-    dependsOn("generateJvmInteropKoinference")
-    workingDir = nativeDir.asFile
-    // CMake's FindJNI wants a full JDK; the stub only needs jni.h, which this one supplies.
-    environment("JAVA_HOME", jniHome)
-    commandLine(cmakeExecutable, "--preset", hostPreset, "-DKOI_BUILD_JNI=ON")
-}
-
-val buildJniStub by tasks.registering(Exec::class) {
-    group = "interop"
-    description = "Compile and link the generated JNI stub against the facade."
-    dependsOn(cmakeConfigureJni)
-    workingDir = nativeDir.asFile
-    commandLine(
-        cmakeExecutable, "--build", "build/$hostPreset",
-        "--target", "koinference-jni",
-        "-j", Runtime.getRuntime().availableProcessors().toString(),
-    )
-}
 
 kotlin {
     jvm()
@@ -122,6 +85,38 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
     }
+}
+
+// Where the plugin writes the generated stub. Taken from the task rather than assumed, so a change
+// to the plugin's output layout cannot silently leave CMake compiling nothing.
+val generateJni = tasks.named<GenerateJvmInteropTask>("generateJvmInteropKoinference")
+val generatedStubDir: String = generateJni.get().outputDirectory.dir("c").get().asFile.absolutePath
+
+val cmakeConfigureJni by tasks.registering(Exec::class) {
+    group = "interop"
+    description = "Configure the CMake build with the generated JNI stub enabled."
+    dependsOn(generateJni)
+    workingDir = nativeDir.asFile
+    // CMake's FindJNI wants a full JDK; the stub only needs jni.h, and the plugin already knows
+    // which installed JDK has it.
+    environment("JAVA_HOME", jniHome())
+    commandLine(
+        cmakeExecutable, "--preset", hostPreset,
+        "-DKOI_BUILD_JNI=ON",
+        "-DKOI_JNI_STUB_DIR=$generatedStubDir",
+    )
+}
+
+val buildJniStub by tasks.registering(Exec::class) {
+    group = "interop"
+    description = "Compile and link the generated JNI stub against the facade."
+    dependsOn(cmakeConfigureJni)
+    workingDir = nativeDir.asFile
+    commandLine(
+        cmakeExecutable, "--build", "build/$hostPreset",
+        "--target", "koinference-jni",
+        "-j", Runtime.getRuntime().availableProcessors().toString(),
+    )
 }
 
 // The bridges resolve the stub library from java.library.path. Locally it is built on demand; CI
