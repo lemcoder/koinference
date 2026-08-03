@@ -1,6 +1,4 @@
 import io.github.lemcoder.interop.jvmInterops
-import io.github.lemcoder.jniHome
-import io.github.lemcoder.jvm.GenerateJvmInteropTask
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -26,14 +24,6 @@ val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
 val nativeDir = layout.projectDirectory.dir("native")
 val hostStubDir = nativeDir.dir("build/$hostPreset")
 
-// The Gradle daemon does not inherit a login shell's PATH, so a Homebrew cmake is invisible to it.
-// Override with -PkoiCmake=/path/to/cmake or $CMAKE.
-val cmakeExecutable: String = findProperty("koiCmake")?.toString()
-    ?: System.getenv("CMAKE")
-    ?: sequenceOf("/opt/homebrew/bin/cmake", "/usr/local/bin/cmake", "/usr/bin/cmake")
-        .firstOrNull { File(it).canExecute() }
-    ?: "cmake"
-
 kotlin {
     jvm {
         compilations["main"].jvmInterops {
@@ -42,6 +32,18 @@ kotlin {
             create("koinference") {
                 packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
                 includeDirs.from(file("native/facade"))
+
+                // CMake compiles and links the stub: it owns llama.cpp, so it is the only build that
+                // knows the archive's transitive needs (libc++, Accelerate, Metal). The plugin passes
+                // KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME; native/CMakeLists.txt reads them.
+                externalNativeBuild {
+                    cmake {
+                        path.set(file("native/CMakeLists.txt"))
+                        preset.set(hostPreset)
+                        targets.add("koinference-jni")
+                        arguments.add("-DKOI_BUILD_JNI=ON")
+                    }
+                }
             }
         }
     }
@@ -84,48 +86,11 @@ kotlin {
     }
 }
 
-// Where the plugin writes the generated stub. The task reports it rather than this build assuming a
-// path: the layout is the plugin's to change, and a stale stub left at a previous location would be
-// globbed and compiled without complaint.
-val generateJni = tasks.named<GenerateJvmInteropTask>("generateJvmInteropKoinference")
-val generatedStubDir: String = generateJni.get().stubSourceDirectory.get().asFile.absolutePath
-
-// The generated bindings System.loadLibrary this exact name, so CMake has to emit it.
-val stubLibraryName: String = generateJni.get().stubLibraryBaseName.get()
-
-val cmakeConfigureJni by tasks.registering(Exec::class) {
-    group = "interop"
-    description = "Configure the CMake build with the generated JNI stub enabled."
-    dependsOn(generateJni)
-    workingDir = nativeDir.asFile
-    // CMake's FindJNI wants a full JDK; the stub only needs jni.h, and the plugin already knows
-    // which installed JDK has it.
-    environment("JAVA_HOME", jniHome())
-    commandLine(
-        cmakeExecutable, "--preset", hostPreset,
-        "-DKOI_BUILD_JNI=ON",
-        "-DKOI_JNI_STUB_DIR=$generatedStubDir",
-        "-DKOI_JNI_LIB_NAME=$stubLibraryName",
-    )
-}
-
-val buildJniStub by tasks.registering(Exec::class) {
-    group = "interop"
-    description = "Compile and link the generated JNI stub against the facade."
-    dependsOn(cmakeConfigureJni)
-    workingDir = nativeDir.asFile
-    commandLine(
-        cmakeExecutable, "--build", "build/$hostPreset",
-        "--target", "koinference-jni",
-        "-j", Runtime.getRuntime().availableProcessors().toString(),
-    )
-}
-
-// The bridges resolve the stub library from java.library.path. Locally it is built on demand; CI
-// builds it once in the natives job and passes the directory with -PkoiStubDir=.
+// The bridges resolve the stub library from java.library.path. Locally the interop's external build
+// produces it; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
 
 tasks.named<Test>("jvmTest") {
-    if (prebuiltStubDir == null) dependsOn(buildJniStub)
+    if (prebuiltStubDir == null) dependsOn("cmakeBuildKoinference")
     systemProperty("java.library.path", prebuiltStubDir ?: hostStubDir.asFile.absolutePath)
 }

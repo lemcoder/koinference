@@ -53,25 +53,25 @@ target_link_libraries(koinference-facade
 # Metal/BLAS backends need arrive transitively from koinference-facade.
 option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 
-# Where the plugin wrote the stub — Gradle passes this, since the layout is the plugin's to choose.
-# The fallback only serves a CMake run driven by hand.
-set(KOI_JNI_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/generated/jvmInterop/koinference/c"
-    CACHE PATH "Directory holding the generated JNI .c sources")
-# Gradle passes this: the plugin derives it from the binding package and bakes it into the generated
-# System.loadLibrary call. The literal is only a fallback for a hand-driven cmake run.
-set(KOI_JNI_LIB_NAME "iogithublemcoderkoinferencellamacppinternaljnistubs"
-    CACHE STRING "Output name of the JNI stub library")
+# Set by the Konan plugin's externalNativeBuild block — its contract with an external build, the way
+# an AGP project reads ANDROID_ABI. Driving this target by hand means supplying them by hand.
+set(KONAN_JNI_STUB_DIR "" CACHE PATH "Directory holding the generated JNI .c sources")
+set(KONAN_JNI_LIB_NAME "" CACHE STRING "Output name of the JNI stub library")
 
 if(KOI_BUILD_JNI)
-    file(GLOB KOI_JNI_SOURCES "${KOI_JNI_STUB_DIR}/*.c")
-    if(NOT KOI_JNI_SOURCES)
+    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_JNI_LIB_NAME)
         message(FATAL_ERROR
-            "No generated JNI sources under ${KOI_JNI_STUB_DIR}. "
-            "Run :backends:llamacpp:generateJvmInteropKoinference first.")
+            "KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME are set by the Konan plugin. "
+            "Build through :backends:llamacpp:cmakeBuildKoinference, or pass both by hand.")
+    endif()
+
+    file(GLOB KOI_JNI_SOURCES "${KONAN_JNI_STUB_DIR}/*.c")
+    if(NOT KOI_JNI_SOURCES)
+        message(FATAL_ERROR "No generated JNI sources under ${KONAN_JNI_STUB_DIR}.")
     endif()
 
     add_library(koinference-jni SHARED ${KOI_JNI_SOURCES})
-    set_target_properties(koinference-jni PROPERTIES OUTPUT_NAME "${KOI_JNI_LIB_NAME}")
+    set_target_properties(koinference-jni PROPERTIES OUTPUT_NAME "${KONAN_JNI_LIB_NAME}")
     target_link_libraries(koinference-jni PRIVATE koinference-facade)
 
     # The NDK sysroot ships jni.h; every other target needs a JDK to supply it. FindJNI insists on a
