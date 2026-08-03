@@ -87,10 +87,10 @@ kotlin {
     }
 }
 
-// Where the plugin writes the generated stub. Taken from the task rather than assumed, so a change
-// to the plugin's output layout cannot silently leave CMake compiling nothing.
+// Where the plugin writes the generated stub. The task reports it — the layout is the plugin's to
+// choose, and assuming it here already broke once, silently.
 val generateJni = tasks.named<GenerateJvmInteropTask>("generateJvmInteropKoinference")
-val generatedStubDir: String = generateJni.get().outputDirectory.dir("c").get().asFile.absolutePath
+val generatedStubDir: String = generateJni.get().stubSourceDirectory.get().asFile.absolutePath
 
 val cmakeConfigureJni by tasks.registering(Exec::class) {
     group = "interop"
