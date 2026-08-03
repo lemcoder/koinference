@@ -1,15 +1,15 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge0
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge1
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge2
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge3
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge4
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge6
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge7
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge8
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniBridge9
-import io.github.lemcoder.koinference.llamacpp.internal.jni.kniCString
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge1
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge2
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge6
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge9
+import io.github.lemcoder.koinference.llamacpp.jni.kniCString
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 

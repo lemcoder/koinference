@@ -6,34 +6,32 @@ plugins {
     alias(libs.plugins.konan)
 }
 
-// Header location — used for cinterop.
-val koiFacadeHeader: String = "${projectDir}/native/facade"
-
-// konanConfig would compile C/C++ to a .a, which is CMake's job here — llama.cpp is far past what a
-// flat source list can express — so the block stays empty and only the interop leg is used.
-
-// CMake preset for the machine running the build — the only one the JVM target can load.
-val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
-    val arm = System.getProperty("os.arch").lowercase()
-        .let { it.contains("aarch64") || it.contains("arm64") }
-    when {
-        os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
-        else -> "linuxX64"
-    }
-}
 kotlin {
     jvm {
         compilations["main"].jvmInterops {
             // defFile defaults to src/nativeInterop/cinterop/koinference.def — the same file the
             // native targets bind below.
             create("koinference") {
-                packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
+                // Own package: the bridges are generated, and :core publishes io.github.lemcoder.koinference.
+                packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
                 includeDirs.from(file("native/facade"))
 
                 // CMake compiles and links the stub: it owns llama.cpp, so it is the only build that
                 // knows the archive's transitive needs (libc++, Accelerate, Metal). The plugin passes
                 // KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME; native/CMakeLists.txt reads them.
                 externalNativeBuild {
+                    // konanConfig would compile C/C++ to a .a, which is CMake's job here — llama.cpp is far past what a
+                    // flat source list can express — so the block stays empty and only the interop leg is used.
+                    // CMake preset for the machine running the build — the only one the JVM target can load.
+                    val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
+                        val arm = System.getProperty("os.arch").lowercase()
+                            .let { it.contains("aarch64") || it.contains("arm64") }
+                        when {
+                            os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
+                            else -> "linuxX64"
+                        }
+                    }
+
                     cmake {
                         path.set(file("native/CMakeLists.txt"))
                         preset.set(hostPreset)
@@ -56,6 +54,7 @@ kotlin {
         val main = target.compilations["main"]
 
         main.cinterops.create("koinference") {
+            val koiFacadeHeader = "${projectDir}/native/facade" // Header location
             compilerOpts("-I$koiFacadeHeader")
         }
 
