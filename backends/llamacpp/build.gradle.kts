@@ -21,9 +21,6 @@ val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
         else -> "linuxX64"
     }
 }
-val nativeDir = layout.projectDirectory.dir("native")
-val hostStubDir = nativeDir.dir("build/$hostPreset")
-
 kotlin {
     jvm {
         compilations["main"].jvmInterops {
@@ -86,11 +83,16 @@ kotlin {
     }
 }
 
-// The bridges resolve the stub library from java.library.path. Locally the interop's external build
-// produces it; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
+// The bridges resolve the stub library from java.library.path. The interop reports where its build
+// put the library; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
+val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInterops
+    .getByName("koinference").resolvedLibraryDirectory
 
 tasks.named<Test>("jvmTest") {
     if (prebuiltStubDir == null) dependsOn("cmakeBuildKoinference")
-    systemProperty("java.library.path", prebuiltStubDir ?: hostStubDir.asFile.absolutePath)
+    systemProperty(
+        "java.library.path",
+        prebuiltStubDir ?: interopLibraryDir.get().asFile.absolutePath,
+    )
 }

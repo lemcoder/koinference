@@ -54,14 +54,17 @@ The plugin only *generates* — CMake compiles and links the stub (`KOI_BUILD_JN
 Accelerate/Metal frameworks arrive transitively from `koinference-facade`, instead of being restated
 as linker flags in Gradle.
 
-`./gradlew :backends:llamacpp:jvmTest` runs the whole chain — generate, CMake configure, CMake build,
-test — and loads the stub from the preset's build dir. Useful properties:
+The interop declares that CMake owns the link (`externalNativeBuild { cmake { … } }`), so the plugin
+drives it: `cmakeBuildKoinference` generates the bridges, configures CMake with
+`KONAN_JNI_STUB_DIR` / `KONAN_JNI_LIB_NAME`, and builds the `koinference-jni` target.
+`./gradlew :backends:llamacpp:jvmTest` runs that chain and loads the result.
 
 | property | purpose |
 |---|---|
 | `-PkoiStubDir=<dir>` | use an already-built stub and skip CMake entirely (this is what CI does) |
-| `-PkoiCmake=<path>` | cmake binary, if the Gradle daemon's PATH cannot see it |
-| `-PkoiJniHome=<jdk>` | a JDK shipping `include/jni.h` — IDE-bundled JBRs strip the headers |
+
+`cmake` and a JDK with `include/jni.h` are located by the plugin; set `$CMAKE` if your `cmake` lives
+somewhere unusual, since the Gradle daemon does not inherit a login shell's PATH.
 
 ## Targets (current)
 

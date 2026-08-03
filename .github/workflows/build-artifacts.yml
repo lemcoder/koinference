@@ -28,22 +28,20 @@ jobs:
           path: backends/llamacpp/native/.cpm
           key: cpm-macos-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
-      # The JNI stub is generated from the facade header, then compiled by CMake below, so the JVM
-      # job downloads it instead of running CMake itself.
+      # The host JNI stub comes from the interop's own build — generate, configure and link in one
+      # task — so the JVM job downloads it instead of running CMake itself.
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Generate JNI bridges
+      - name: Build the host JNI stub
         working-directory: .
-        run: ./gradlew :backends:llamacpp:generateJvmInteropKoinference
+        run: ./gradlew :backends:llamacpp:cmakeBuildKoinference
 
-      - name: Build macosArm64
+      - name: Collect macosArm64
         run: |
-          cmake --preset macosArm64 -DKOI_BUILD_JNI=ON
-          cmake --build build/macosArm64 -j$(sysctl -n hw.ncpu)
           mkdir -p ../build/prebuilt/macos_arm64 ../build/prebuilt/jni/macos_arm64
           find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
           cp build/macosArm64/*.dylib ../build/prebuilt/jni/macos_arm64/
@@ -75,22 +73,20 @@ jobs:
           path: backends/llamacpp/native/.cpm
           key: cpm-linux-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
-      # The JNI stub is generated from the facade header, then compiled by CMake below, so the JVM
-      # job downloads it instead of running CMake itself.
+      # The host JNI stub comes from the interop's own build — generate, configure and link in one
+      # task — so the JVM job downloads it instead of running CMake itself.
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Generate JNI bridges
+      - name: Build the host JNI stub
         working-directory: .
-        run: ./gradlew :backends:llamacpp:generateJvmInteropKoinference
+        run: ./gradlew :backends:llamacpp:cmakeBuildKoinference
 
-      - name: Build linuxX64
+      - name: Collect linuxX64
         run: |
-          cmake --preset linuxX64 -DKOI_BUILD_JNI=ON
-          cmake --build build/linuxX64 -j$(nproc)
           mkdir -p ../build/prebuilt/linux_x64 ../build/prebuilt/jni/linux_x64
           {
             echo "CREATE ../build/prebuilt/linux_x64/libkoinference-facade.a"
