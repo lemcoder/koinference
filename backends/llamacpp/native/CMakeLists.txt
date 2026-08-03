@@ -54,7 +54,7 @@ target_link_libraries(koinference-facade
 option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 
 # Where generateJvmInterop writes the stub, and the name its Kotlin System.loadLibrary() expects.
-set(KOI_JNI_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/generated/jvmInterop/c"
+set(KOI_JNI_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/generated/jvmInterop/koinference/c"
     CACHE PATH "Directory holding the generated JNI .c sources")
 set(KOI_JNI_LIB_NAME "iogithublemcoderkoinferencellamacppinternaljnistubs"
     CACHE STRING "Output name of the JNI stub library")
@@ -64,7 +64,7 @@ if(KOI_BUILD_JNI)
     if(NOT KOI_JNI_SOURCES)
         message(FATAL_ERROR
             "No generated JNI sources under ${KOI_JNI_STUB_DIR}. "
-            "Run :backends:llamacpp:generateJvmInterop first.")
+            "Run :backends:llamacpp:generateJvmInteropKoinference first.")
     endif()
 
     add_library(koinference-jni SHARED ${KOI_JNI_SOURCES})

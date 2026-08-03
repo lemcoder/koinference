@@ -1,4 +1,5 @@
 import io.github.lemcoder.KonanTarget
+import io.github.lemcoder.interop.jvmInterops
 import java.io.File
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
@@ -10,22 +11,8 @@ plugins {
 // Header location — used for cinterop.
 val koiFacadeHeader: String = "${projectDir}/native/facade"
 
-// The Konan plugin is used for generation only: it turns the facade header into the JVM bridges and
-// the JNI .c stub, and CMake compiles/links that stub (see native/CMakeLists.txt, KOI_BUILD_JNI).
-// Linking there rather than here keeps one toolchain end to end — konan's linker joining CMake/NDK
-// artifacts is what produced the libc++, compiler-rt and framework mismatches this replaced.
-konanConfig {
-    headerDir.set("native/facade")
-    libName.set("koinference-facade")
-    // CMake and CI drop the per-target archives here; they are build output, not sources.
-    outputDir.set("build/prebuilt")
-
-    jvmInterop {
-        packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
-        // No targets: registers generateJvmInterop only, no link tasks.
-        targets.set(emptyList())
-    }
-}
+// konanConfig would compile C/C++ to a .a, which is CMake's job here — llama.cpp is far past what a
+// flat source list can express — so the block stays empty and only the interop leg is used.
 
 // CMake preset for the machine running the build — the only one the JVM target can load.
 val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
@@ -66,7 +53,7 @@ val jniHome: String = findProperty("koiJniHome")?.toString() ?: run {
 val cmakeConfigureJni by tasks.registering(Exec::class) {
     group = "interop"
     description = "Configure the CMake build with the generated JNI stub enabled."
-    dependsOn("generateJvmInterop")
+    dependsOn("generateJvmInteropKoinference")
     workingDir = nativeDir.asFile
     // CMake's FindJNI wants a full JDK; the stub only needs jni.h, which this one supplies.
     environment("JAVA_HOME", jniHome)
@@ -87,6 +74,7 @@ val buildJniStub by tasks.registering(Exec::class) {
 
 kotlin {
     jvm()
+
     androidNativeArm64()
     androidNativeX64()
     iosArm64()
@@ -96,8 +84,7 @@ kotlin {
 
     targets.withType<KotlinNativeTarget>().configureEach {
         // koiLibDir overrides the prebuilt dir — useful when pointing at a local CMake output.
-        // Directories are named after the Kotlin/Native target (macos_arm64, …), which is also the
-        // layout konanConfig.jvmInterop expects for the static library it links the JNI stub against.
+        // Directories are named after the Kotlin/Native target (macos_arm64, …).
         val libDir = findProperty("koiLibDir")?.toString()
             ?: layout.buildDirectory.dir("prebuilt/${konanTarget.name}").get().asFile.path
         compilations["main"].apply {
@@ -116,13 +103,20 @@ kotlin {
         }
     }
 
+    // The same def the native targets bind with cinterop, bound again for the JVM. It names no
+    // staticLibraries, so the plugin stops after the bindings and the .c stub — CMake compiles and
+    // links that stub (native/CMakeLists.txt, KOI_BUILD_JNI), keeping one toolchain end to end.
+    jvm().compilations["main"].jvmInterops {
+        create("koinference") {
+            defFile(project.file("src/nativeInterop/koinference.def"))
+            packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
+            includeDirs.from(file("native/facade"))
+        }
+    }
+
     sourceSets {
         commonMain.dependencies {
             implementation(project(":core"))
-        }
-        // Generated JNI bridges — the JVM counterpart of the native targets' cinterop bindings.
-        jvmMain.configure {
-            kotlin.srcDir(layout.buildDirectory.dir("generated/jvmInterop/kotlin"))
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

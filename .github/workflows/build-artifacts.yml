@@ -38,7 +38,7 @@ jobs:
 
       - name: Generate JNI bridges
         working-directory: .
-        run: ./gradlew :backends:llamacpp:generateJvmInterop
+        run: ./gradlew :backends:llamacpp:generateJvmInteropKoinference
 
       - name: Build macosArm64
         run: |
@@ -85,7 +85,7 @@ jobs:
 
       - name: Generate JNI bridges
         working-directory: .
-        run: ./gradlew :backends:llamacpp:generateJvmInterop
+        run: ./gradlew :backends:llamacpp:generateJvmInteropKoinference
 
       - name: Build linuxX64
         run: |

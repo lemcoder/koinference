@@ -47,7 +47,7 @@ Presets: `macosArm64`, `macosX64`, `linuxX64`, `iosArm64`, `iosSimulatorArm64`, 
 
 `facade/koinference_facade.h` is the single source of truth for both legs. Native targets bind it
 through cinterop; the JVM target goes through JNI bridges that the Konan plugin generates from it
-(`generateJvmInterop` → Kotlin bridges + a `.c` stub).
+(`generateJvmInteropKoinference` → Kotlin bridges + a `.c` stub).
 
 The plugin only *generates* — CMake compiles and links the stub (`KOI_BUILD_JNI=ON`, target
 `koinference-jni`). Keeping the link in CMake keeps one toolchain end to end: the C++ runtime and the
