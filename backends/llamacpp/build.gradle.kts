@@ -1,7 +1,6 @@
 import io.github.lemcoder.interop.jvmInterops
 import io.github.lemcoder.jniHome
 import io.github.lemcoder.jvm.GenerateJvmInteropTask
-import java.io.File
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
@@ -17,7 +16,8 @@ val koiFacadeHeader: String = "${projectDir}/native/facade"
 
 // CMake preset for the machine running the build — the only one the JVM target can load.
 val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
-    val arm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }
+    val arm = System.getProperty("os.arch").lowercase()
+        .let { it.contains("aarch64") || it.contains("arm64") }
     when {
         os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
         else -> "linuxX64"
@@ -35,44 +35,41 @@ val cmakeExecutable: String = findProperty("koiCmake")?.toString()
     ?: "cmake"
 
 kotlin {
-    jvm()
-
-    androidNativeArm64()
-    androidNativeX64()
-    iosArm64()
-    iosSimulatorArm64()
-    macosArm64()
-    macosX64()
-
-    targets.withType<KotlinNativeTarget>().configureEach {
-        // koiLibDir overrides the prebuilt dir — useful when pointing at a local CMake output.
-        // Directories are named after the Kotlin/Native target (macos_arm64, …).
-        val libDir = findProperty("koiLibDir")?.toString()
-            ?: layout.buildDirectory.dir("prebuilt/${konanTarget.name}").get().asFile.path
-        compilations["main"].apply {
-            cinterops {
-                create("koinference") {
-                    defFile(project.file("src/nativeInterop/koinference.def"))
-                    compilerOpts("-I$koiFacadeHeader")
-                }
-            }
-
-            compileTaskProvider.configure {
-                compilerOptions {
-                    freeCompilerArgs.addAll("-linker-options", "-L$libDir -lkoinference-facade")
-                }
+    jvm {
+        compilations["main"].jvmInterops {
+            // defFile defaults to src/nativeInterop/cinterop/koinference.def — the same file the
+            // native targets bind below.
+            create("koinference") {
+                packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
+                includeDirs.from(file("native/facade"))
             }
         }
     }
 
-    // The same def the native targets bind with cinterop, bound again for the JVM. It names no
-    // staticLibraries, so the plugin stops after the bindings and the .c stub — CMake compiles and
-    // links that stub (native/CMakeLists.txt, KOI_BUILD_JNI), keeping one toolchain end to end.
-    jvm().compilations["main"].jvmInterops {
-        create("koinference") {
-            defFile(project.file("src/nativeInterop/koinference.def"))
-            packageName.set("io.github.lemcoder.koinference.llamacpp.internal.jni")
-            includeDirs.from(file("native/facade"))
+    listOf<KotlinNativeTarget>(
+        androidNativeArm64(),
+        androidNativeX64(),
+        iosArm64(),
+        iosSimulatorArm64(),
+        macosArm64(),
+        macosX64(),
+    ).forEach { target ->
+        val main = target.compilations["main"]
+
+        main.cinterops.create("koinference") {
+            compilerOpts("-I$koiFacadeHeader")
+        }
+
+        // koiLibDir overrides the prebuilt dir — useful when pointing at a local CMake output.
+        // Keyed by the Kotlin/Native target name (macos_arm64), not the Kotlin one (macosArm64),
+        // because that is how CMake and CI lay the archives out.
+        val libDir = findProperty("koiLibDir")?.toString()
+            ?: layout.buildDirectory.dir("prebuilt/${target.konanTarget.name}").get().asFile.path
+
+        main.compileTaskProvider.configure {
+            compilerOptions {
+                freeCompilerArgs.addAll("-linker-options", "-L$libDir -lkoinference-facade")
+            }
         }
     }
 
@@ -87,8 +84,9 @@ kotlin {
     }
 }
 
-// Where the plugin writes the generated stub. The task reports it — the layout is the plugin's to
-// choose, and assuming it here already broke once, silently.
+// Where the plugin writes the generated stub. The task reports it rather than this build assuming a
+// path: the layout is the plugin's to change, and a stale stub left at a previous location would be
+// globbed and compiled without complaint.
 val generateJni = tasks.named<GenerateJvmInteropTask>("generateJvmInteropKoinference")
 val generatedStubDir: String = generateJni.get().stubSourceDirectory.get().asFile.absolutePath
 
