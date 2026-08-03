@@ -57,6 +57,8 @@ option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 # The fallback only serves a CMake run driven by hand.
 set(KOI_JNI_STUB_DIR "${CMAKE_CURRENT_LIST_DIR}/../build/generated/jvmInterop/koinference/c"
     CACHE PATH "Directory holding the generated JNI .c sources")
+# Gradle passes this: the plugin derives it from the binding package and bakes it into the generated
+# System.loadLibrary call. The literal is only a fallback for a hand-driven cmake run.
 set(KOI_JNI_LIB_NAME "iogithublemcoderkoinferencellamacppinternaljnistubs"
     CACHE STRING "Output name of the JNI stub library")
 

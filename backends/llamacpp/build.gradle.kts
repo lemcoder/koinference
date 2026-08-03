@@ -92,6 +92,9 @@ kotlin {
 val generateJni = tasks.named<GenerateJvmInteropTask>("generateJvmInteropKoinference")
 val generatedStubDir: String = generateJni.get().stubSourceDirectory.get().asFile.absolutePath
 
+// The generated bindings System.loadLibrary this exact name, so CMake has to emit it.
+val stubLibraryName: String = generateJni.get().stubLibraryBaseName.get()
+
 val cmakeConfigureJni by tasks.registering(Exec::class) {
     group = "interop"
     description = "Configure the CMake build with the generated JNI stub enabled."
@@ -104,6 +107,7 @@ val cmakeConfigureJni by tasks.registering(Exec::class) {
         cmakeExecutable, "--preset", hostPreset,
         "-DKOI_BUILD_JNI=ON",
         "-DKOI_JNI_STUB_DIR=$generatedStubDir",
+        "-DKOI_JNI_LIB_NAME=$stubLibraryName",
     )
 }
 
