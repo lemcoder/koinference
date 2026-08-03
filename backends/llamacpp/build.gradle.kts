@@ -1,4 +1,3 @@
-import io.github.lemcoder.KonanTarget
 import io.github.lemcoder.interop.jvmInterops
 import java.io.File
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
