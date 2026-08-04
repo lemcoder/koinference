@@ -1,7 +1,7 @@
 [versions]
 kotlin = "2.3.10"
 kotlinxCoroutines = "1.10.2"
-konanPlugin = "1.2.0-alpha02"
+konanPlugin = "1.2.0-alpha03"
 agp = "9.2.1"
 androidCompileSdk = "37"
 androidMinSdk = "24"
