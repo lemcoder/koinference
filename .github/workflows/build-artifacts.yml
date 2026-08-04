@@ -1,9 +1,8 @@
 name: Build Native Artifacts
 
+# Reusable only: the build and publish workflows call it, and they run on the same pull requests, so
+# a trigger of its own would build every native artifact twice.
 on:
-  pull_request:
-    branches: [main]
-  # Called by the build and publish workflows, which need the natives before Gradle runs.
   workflow_call:
 
 permissions:
