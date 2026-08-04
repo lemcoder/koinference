@@ -26,6 +26,8 @@ jobs:
   build:
     needs: natives
     strategy:
+      # One target failing should not hide the others' results.
+      fail-fast: false
       matrix:
         include:
           - target: :core:iosSimulatorArm64Test :backends:llamacpp:iosSimulatorArm64Test
@@ -35,7 +37,8 @@ jobs:
           - target: :core:jvmTest :backends:llamacpp:jvmTest :core:linuxX64Test :backends:llamacpp:linuxX64Test
             os: ubuntu-latest
             # The stub is built by the natives job; do not rebuild it through CMake here.
-            extraArgs: -PkoiStubDir=${{ github.workspace }}/backends/llamacpp/build/prebuilt/jni/linux_x64
+            # Relative to the module: github.workspace is unavailable in a matrix and expands to "".
+            extraArgs: -PkoiStubDir=build/prebuilt/jni/linux_x64
     runs-on: ${{ matrix.os }}
 
     steps:

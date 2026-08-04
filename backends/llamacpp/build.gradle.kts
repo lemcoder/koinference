@@ -142,7 +142,9 @@ val collectHostJniStub by tasks.registering(Copy::class) {
 tasks.named<Test>("jvmTest") {
     if (prebuiltStubDir == null) dependsOn("cmakeBuildKoinference")
     systemProperty(
+        // Resolved against the project so a caller can pass a relative path; CI does, because
+        // ${'$'}{{ github.workspace }} is not available where the matrix is declared and expands to "".
         "java.library.path",
-        prebuiltStubDir ?: interopLibraryDir.get().asFile.absolutePath,
+        prebuiltStubDir?.let { file(it).absolutePath } ?: interopLibraryDir.get().asFile.absolutePath,
     )
 }
