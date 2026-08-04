@@ -3,7 +3,7 @@ kotlin = "2.3.10"
 kotlinxCoroutines = "1.10.2"
 konanPlugin = "1.2.0-alpha"
 agp = "9.2.1"
-androidCompileSdk = "36"
+androidCompileSdk = "37"
 androidMinSdk = "24"
 
 [libraries]
