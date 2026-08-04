@@ -36,6 +36,13 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      # The stub generator runs the cinterop tool from a Kotlin/Native distribution, and the Kotlin
+      # plugin only downloads one when it first compiles a native target — which nothing else in this
+      # job does.
+      - name: Prime the Kotlin/Native distribution
+        working-directory: .
+        run: ./gradlew :core:compileKotlinMacosArm64
+
       - name: Build the host JNI stub
         working-directory: .
         run: ./gradlew :backends:llamacpp:cmakeBuildKoinference
@@ -80,6 +87,13 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+
+      # The stub generator runs the cinterop tool from a Kotlin/Native distribution, and the Kotlin
+      # plugin only downloads one when it first compiles a native target — which nothing else in this
+      # job does.
+      - name: Prime the Kotlin/Native distribution
+        working-directory: .
+        run: ./gradlew :core:compileKotlinLinuxX64
 
       - name: Build the host JNI stub
         working-directory: .

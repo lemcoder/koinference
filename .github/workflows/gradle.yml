@@ -32,7 +32,7 @@ jobs:
             os: macos-latest
           - target: :core:macosX64Test :backends:llamacpp:macosX64Test
             os: macos-latest
-          - target: :core:jvmTest :backends:llamacpp:jvmTest
+          - target: :core:jvmTest :backends:llamacpp:jvmTest :core:linuxX64Test :backends:llamacpp:linuxX64Test
             os: ubuntu-latest
             # The stub is built by the natives job; do not rebuild it through CMake here.
             extraArgs: -PkoiStubDir=${{ github.workspace }}/backends/llamacpp/build/prebuilt/jni/linux_x64

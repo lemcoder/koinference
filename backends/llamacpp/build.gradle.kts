@@ -77,6 +77,7 @@ kotlin {
     listOf<KotlinNativeTarget>(
         iosArm64(),
         iosSimulatorArm64(),
+        linuxX64(),
         macosArm64(),
         macosX64(),
     ).forEach { target ->
