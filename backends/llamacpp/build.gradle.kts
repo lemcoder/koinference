@@ -62,6 +62,10 @@ kotlin {
                         targets.add("koinference-jni")
                         arguments.add("-DKOI_BUILD_JNI=ON")
 
+                        // The NDK toolchain compiles with -g whatever the build type, and ELF
+                        // carries DWARF in the .so — 44 MB of the 48 MB before stripping.
+                        arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
+
                         abi("arm64-v8a") { preset.set("androidNativeArm64") }
                         abi("x86_64") { preset.set("androidNativeX64") }
                     }
