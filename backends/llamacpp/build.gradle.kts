@@ -1,6 +1,8 @@
 @file:OptIn(ExperimentalKotlinGradlePluginApi::class)
 
+import io.github.lemcoder.hostKonanTarget
 import io.github.lemcoder.interop.jvmInterops
+import io.github.lemcoder.hostKonanTarget
 import io.github.lemcoder.interop.jvmInteropsContainer
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -118,6 +120,16 @@ kotlin {
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
 val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInteropsContainer()
     .getByName("koinference").resolvedLibraryDirectory
+
+// CI collects host artifacts from build/prebuilt; the interop reports where its build left the
+// library, so nothing outside the plugin has to know that layout.
+val collectHostJniStub by tasks.registering(Copy::class) {
+    group = "interop"
+    description = "Copy the host JNI library into build/prebuilt/jni/<target>/."
+    dependsOn("cmakeBuildKoinference")
+    from(interopLibraryDir) { include("*.dylib", "*.so", "*.dll") }
+    into(layout.buildDirectory.dir("prebuilt/jni/${hostKonanTarget().name}"))
+}
 
 tasks.named<Test>("jvmTest") {
     if (prebuiltStubDir == null) dependsOn("cmakeBuildKoinference")

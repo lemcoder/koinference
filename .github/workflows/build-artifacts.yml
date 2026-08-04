@@ -45,13 +45,12 @@ jobs:
 
       - name: Build the host JNI stub
         working-directory: .
-        run: ./gradlew :backends:llamacpp:cmakeBuildKoinference
+        run: ./gradlew :backends:llamacpp:collectHostJniStub
 
       - name: Collect macosArm64
         run: |
-          mkdir -p ../build/prebuilt/macos_arm64 ../build/prebuilt/jni/macos_arm64
+          mkdir -p ../build/prebuilt/macos_arm64
           find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
-          cp build/macosArm64/*.dylib ../build/prebuilt/jni/macos_arm64/
 
       - name: Build macosX64
         run: |
@@ -97,18 +96,17 @@ jobs:
 
       - name: Build the host JNI stub
         working-directory: .
-        run: ./gradlew :backends:llamacpp:cmakeBuildKoinference
+        run: ./gradlew :backends:llamacpp:collectHostJniStub
 
       - name: Collect linuxX64
         run: |
-          mkdir -p ../build/prebuilt/linux_x64 ../build/prebuilt/jni/linux_x64
+          mkdir -p ../build/prebuilt/linux_x64
           {
             echo "CREATE ../build/prebuilt/linux_x64/libkoinference-facade.a"
             find build/linuxX64 -name "*.a" | sed 's/^/ADDLIB /'
             echo "SAVE"
             echo "END"
           } | ar -M
-          cp build/linuxX64/*.so ../build/prebuilt/jni/linux_x64/
 
       - uses: actions/upload-artifact@v4
         with:
