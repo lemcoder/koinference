@@ -53,6 +53,19 @@ kotlin {
                 defFile(project.file("src/nativeInterop/cinterop/koinference.def"))
                 packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
                 includeDirs.from(file("native/facade"))
+
+                // One CMake build per ABI, each landing in jniLibs/<abi>/ for AGP to package. The
+                // NDK builds the stub and the facade together, so no toolchains are mixed.
+                externalNativeBuild {
+                    cmake {
+                        path.set(file("native/CMakeLists.txt"))
+                        targets.add("koinference-jni")
+                        arguments.add("-DKOI_BUILD_JNI=ON")
+
+                        abi("arm64-v8a") { preset.set("androidNativeArm64") }
+                        abi("x86_64") { preset.set("androidNativeX64") }
+                    }
+                }
             }
         }
     }
