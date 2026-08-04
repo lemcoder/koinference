@@ -1,6 +1,7 @@
 @file:OptIn(ExperimentalKotlinGradlePluginApi::class)
 
 import io.github.lemcoder.interop.jvmInterops
+import io.github.lemcoder.interop.jvmInteropsContainer
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
@@ -22,7 +23,23 @@ val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
 
 
 kotlin {
-    jvm()
+    jvm {
+        compilations["main"].jvmInterops {
+            create("koinference") {
+                packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
+                includeDirs.from(file("native/facade"))
+
+                externalNativeBuild {
+                    cmake {
+                        path.set(file("native/CMakeLists.txt"))
+                        preset.set(hostPreset)
+                        targets.add("koinference-jni")
+                        arguments.add("-DKOI_BUILD_JNI=ON")
+                    }
+                }
+            }
+        }
+    }
 
     // Android runs on ART, so it takes the JNI leg like the JVM does — not androidNative*, which is
     // Kotlin/Native and would need konan to link the CMake/NDK archive itself.
@@ -30,6 +47,14 @@ kotlin {
         namespace = "io.github.lemcoder.koinference.llamacpp"
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
         minSdk = libs.versions.androidMinSdk.get().toInt()
+
+        compilations["main"].jvmInterops {
+            create("koinferenceAndroid") {
+                defFile(project.file("src/nativeInterop/cinterop/koinference.def"))
+                packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
+                includeDirs.from(file("native/facade"))
+            }
+        }
     }
 
     listOf<KotlinNativeTarget>(
@@ -58,31 +83,6 @@ kotlin {
         }
     }
 
-    jvm().compilations["main"].jvmInterops {
-        create("koinference") {
-            packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
-            includeDirs.from(file("native/facade"))
-
-            externalNativeBuild {
-                cmake {
-                    path.set(file("native/CMakeLists.txt"))
-                    preset.set(hostPreset)
-                    targets.add("koinference-jni")
-                    arguments.add("-DKOI_BUILD_JNI=ON")
-                }
-            }
-        }
-    }
-
-    // Same bindings for Android, generated into androidMain. The library itself is built per ABI,
-    // which the external build cannot express yet.
-    targets.getByName("android").compilations.getByName("main").jvmInterops {
-        create("koinferenceAndroid") {
-            defFile(project.file("src/nativeInterop/cinterop/koinference.def"))
-            packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
-            includeDirs.from(file("native/facade"))
-        }
-    }
 
     sourceSets {
         commonMain.dependencies {
@@ -98,7 +98,7 @@ kotlin {
 // The bridges resolve the stub library from java.library.path. The interop reports where its build
 // put the library; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
-val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInterops
+val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInteropsContainer()
     .getByName("koinference").resolvedLibraryDirectory
 
 tasks.named<Test>("jvmTest") {
