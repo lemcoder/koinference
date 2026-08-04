@@ -121,12 +121,12 @@ val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
 val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInteropsContainer()
     .getByName("koinference").resolvedLibraryDirectory
 
-// The bindings generator runs cinterop out of a Kotlin/Native distribution, and the Kotlin plugin
-// only downloads one when it first compiles a native target. Ordering that compile ahead of
-// generation makes any invocation work on a machine that has never built this project — otherwise
-// `jvmTest` alone fails, since nothing in its graph touches a native target.
+// The bindings generator runs cinterop out of a Kotlin/Native distribution, which the Kotlin plugin
+// fetches in its own task. Depending on that directly is cheaper than compiling a native target just
+// to trigger the download, and it makes `jvmTest` work on a machine that has never built this
+// project — nothing else in that task graph touches a native target.
 tasks.matching { it.name.startsWith("generateJvmInterop") }.configureEach {
-    dependsOn("compileKotlin${hostPreset.replaceFirstChar { it.uppercase() }}")
+    dependsOn(tasks.matching { it.name == "downloadKotlinNativeDistribution" })
 }
 
 // CI collects host artifacts from build/prebuilt; the interop reports where its build left the
