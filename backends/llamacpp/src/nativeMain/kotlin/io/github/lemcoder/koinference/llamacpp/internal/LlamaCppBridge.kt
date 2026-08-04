@@ -4,9 +4,9 @@ package io.github.lemcoder.koinference.llamacpp.internal
 
 import cnames.structs.KoiModel
 import cnames.structs.KoiSession
+import koinference.KoiSessionParams
 import koinference.koi_backend_free
 import koinference.koi_backend_init
-import koinference.koi_default_session_params
 import koinference.koi_embed
 import koinference.koi_generate
 import koinference.koi_model_free
@@ -16,6 +16,8 @@ import koinference.koi_session_free
 import koinference.koi_system_info
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.allocArray
+import kotlinx.cinterop.cValue
+import kotlinx.cinterop.get
 import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.rawValue
 import kotlinx.cinterop.toCPointer
@@ -42,13 +44,16 @@ internal actual fun llamaSessionCreate(
     minP: Float,
 ): Long {
     if (modelHandle == 0L) return 0L
-    val params = koi_default_session_params().apply {
-        this.n_ctx     = nCtx
-        this.n_threads = nThreads
-        this.n_predict = nPredict
-        this.temp      = temp
-        this.top_k     = topK
-        this.min_p     = minP
+    // koi_default_session_params() hands back a CValue — an immutable off-heap snapshot — so the
+    // fields cannot be assigned through it. Every field of the struct is set here anyway, the same
+    // way the JVM actual packs them, so build the value directly.
+    val params = cValue<KoiSessionParams> {
+        n_ctx = nCtx
+        n_threads = nThreads
+        n_predict = nPredict
+        this.temp = temp // qualified: unqualified `temp` is this function's parameter, not the field
+        top_k = topK
+        min_p = minP
     }
     return koi_session_create(modelHandle.toCPointer<KoiModel>(), params)
         ?.rawValue?.toLong() ?: 0L
