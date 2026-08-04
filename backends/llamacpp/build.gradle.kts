@@ -4,48 +4,43 @@ import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.konan)
+    alias(libs.plugins.androidKmpLibrary)
 }
 
+// CMake preset for the machine running the build — the only one the JVM target can load.
+val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
+    val arm = System.getProperty("os.arch").lowercase()
+        .let { it.contains("aarch64") || it.contains("arm64") }
+    when {
+        os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
+        else -> "linuxX64"
+    }
+}
+
+
 kotlin {
-    jvm {
-        compilations["main"].jvmInterops {
-            // defFile defaults to src/nativeInterop/cinterop/koinference.def — the same file the
-            // native targets bind below.
-            create("koinference") {
-                // Own package: the bridges are generated, and :core publishes io.github.lemcoder.koinference.
-                packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
-                includeDirs.from(file("native/facade"))
-
-                // CMake compiles and links the stub: it owns llama.cpp, so it is the only build that
-                // knows the archive's transitive needs (libc++, Accelerate, Metal). The plugin passes
-                // KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME; native/CMakeLists.txt reads them.
-                externalNativeBuild {
-                    // konanConfig would compile C/C++ to a .a, which is CMake's job here — llama.cpp is far past what a
-                    // flat source list can express — so the block stays empty and only the interop leg is used.
-                    // CMake preset for the machine running the build — the only one the JVM target can load.
-                    val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
-                        val arm = System.getProperty("os.arch").lowercase()
-                            .let { it.contains("aarch64") || it.contains("arm64") }
-                        when {
-                            os.contains("mac") -> if (arm) "macosArm64" else "macosX64"
-                            else -> "linuxX64"
-                        }
-                    }
-
-                    cmake {
-                        path.set(file("native/CMakeLists.txt"))
-                        preset.set(hostPreset)
-                        targets.add("koinference-jni")
-                        arguments.add("-DKOI_BUILD_JNI=ON")
-                    }
-                }
+    // A manual dependsOn edge would switch the default hierarchy off and orphan nativeMain, so the
+    // jvm+android group is added to the template instead.
+    applyDefaultHierarchyTemplate {
+        common {
+            group("jvmShared") {
+                withJvm()
+                withCompilations { it.target.name == "android" }
             }
         }
     }
 
+    jvm()
+
+    // Android runs on ART, so it takes the JNI leg like the JVM does — not androidNative*, which is
+    // Kotlin/Native and would need konan to link the CMake/NDK archive itself.
+    androidLibrary {
+        namespace = "io.github.lemcoder.koinference.llamacpp"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+    }
+
     listOf<KotlinNativeTarget>(
-        androidNativeArm64(),
-        androidNativeX64(),
         iosArm64(),
         iosSimulatorArm64(),
         macosArm64(),
@@ -72,6 +67,25 @@ kotlin {
     }
 
     sourceSets {
+        // JVM and Android share the JNI actuals and the generated bridges: same bytecode, same JNI.
+        // Declared on the shared source set, so one copy of the bindings serves both targets.
+        val jvmSharedMain by getting
+        jvmSharedMain.jvmInterops {
+            create("koinference") {
+                packageName.set("io.github.lemcoder.koinference.llamacpp.jni")
+                includeDirs.from(file("native/facade"))
+
+                externalNativeBuild {
+                    cmake {
+                        path.set(file("native/CMakeLists.txt"))
+                        preset.set(hostPreset)
+                        targets.add("koinference-jni")
+                        arguments.add("-DKOI_BUILD_JNI=ON")
+                    }
+                }
+            }
+        }
+
         commonMain.dependencies {
             implementation(project(":core"))
         }
@@ -85,7 +99,7 @@ kotlin {
 // The bridges resolve the stub library from java.library.path. The interop reports where its build
 // put the library; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
-val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInterops
+val interopLibraryDir = kotlin.sourceSets["jvmSharedMain"].jvmInterops
     .getByName("koinference").resolvedLibraryDirectory
 
 tasks.named<Test>("jvmTest") {

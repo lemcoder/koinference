@@ -1,11 +1,16 @@
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.androidKmpLibrary)
 }
 
 kotlin {
     jvm()
-    androidNativeArm64()
-    androidNativeX64()
+
+    androidLibrary {
+        namespace = "io.github.lemcoder.koinference"
+        compileSdk = libs.versions.androidCompileSdk.get().toInt()
+        minSdk = libs.versions.androidMinSdk.get().toInt()
+    }
     iosArm64()
     iosSimulatorArm64()
     macosArm64()
