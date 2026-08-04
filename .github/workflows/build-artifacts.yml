@@ -140,59 +140,8 @@ jobs:
           name: ios-prebuilt
           path: backends/llamacpp/build/prebuilt/
 
-  build-android:
-    name: Build Android targets
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backends/llamacpp/native
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache CPM packages
-        uses: actions/cache@v4
-        with:
-          path: backends/llamacpp/native/.cpm
-          key: cpm-android-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
-
-      - name: Setup Android NDK
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r27c
-
-      - name: Build androidNativeArm64
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          cmake --preset androidNativeArm64
-          cmake --build --preset androidNativeArm64 -j$(nproc)
-          mkdir -p ../build/prebuilt/android_arm64
-          {
-            echo "CREATE ../build/prebuilt/android_arm64/libkoinference-facade.a"
-            find build/androidNativeArm64 -name "*.a" | sed 's/^/ADDLIB /'
-            echo "SAVE"
-            echo "END"
-          } | ar -M
-
-      - name: Build androidNativeX64
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          cmake --preset androidNativeX64
-          cmake --build --preset androidNativeX64 -j$(nproc)
-          mkdir -p ../build/prebuilt/android_x64
-          {
-            echo "CREATE ../build/prebuilt/android_x64/libkoinference-facade.a"
-            find build/androidNativeX64 -name "*.a" | sed 's/^/ADDLIB /'
-            echo "SAVE"
-            echo "END"
-          } | ar -M
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android-prebuilt
-          path: backends/llamacpp/build/prebuilt/
+# No Android job: those targets take the JNI leg now, and the Android AAR job builds their libraries
+# per ABI through the interop's own CMake build.
 
 # The artifacts are not committed back to the branch: consumers of this workflow download them into
 # backends/llamacpp/build/prebuilt/ with `pattern: "*-prebuilt", merge-multiple: true` before invoking Gradle.
