@@ -74,6 +74,10 @@ kotlin {
                         // carries DWARF in the .so — 44 MB of the 48 MB before stripping.
                         arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
 
+                        // Android ships no libomp.so and ggml links OpenMP by default, so the
+                        // library fails to dlopen on device: UnsatisfiedLinkError, every call.
+                        arguments.add("-DGGML_OPENMP=OFF")
+
                         abi("arm64-v8a") { preset.set("androidNativeArm64") }
                         abi("x86_64") { preset.set("androidNativeX64") }
                     }
