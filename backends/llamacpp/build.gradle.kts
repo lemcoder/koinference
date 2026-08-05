@@ -50,6 +50,12 @@ kotlin {
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
         minSdk = libs.versions.androidMinSdk.get().toInt()
 
+        // Instrumented tests are the only place ART actually loads the packaged .so; everything else
+        // about Android is verified by inspecting the AAR.
+        withDeviceTest {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+
         compilations["main"].jvmInterops {
             create("koinferenceAndroid") {
                 defFile(project.file("src/nativeInterop/cinterop/koinference.def"))
@@ -112,6 +118,13 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+        // No generated accessor for this one: withDeviceTest creates it while this block is being
+        // configured.
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.junit)
+        }
     }
 }
 
@@ -148,3 +161,4 @@ tasks.named<Test>("jvmTest") {
         prebuiltStubDir?.let { file(it).absolutePath } ?: interopLibraryDir.get().asFile.absolutePath,
     )
 }
+
