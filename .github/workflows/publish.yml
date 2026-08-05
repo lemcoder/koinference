@@ -3,12 +3,25 @@ on:
   release:
     types: [released, prereleased]
 jobs:
+  natives:
+    name: Native artifacts
+    uses: ./.github/workflows/build-artifacts.yml
+
   publish:
     name: Release build and publish
+    needs: natives
     runs-on: macOS-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+
+      # Prebuilt .a files are not in git; they come from the natives job.
+      - name: Download prebuilt natives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-prebuilt"
+          merge-multiple: true
+          path: backends/llamacpp/build/prebuilt/
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:

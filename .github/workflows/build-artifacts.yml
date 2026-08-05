@@ -1,0 +1,144 @@
+name: Build Native Artifacts
+
+# Reusable only: the build and publish workflows call it, and they run on the same pull requests, so
+# a trigger of its own would build every native artifact twice.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/backends/llamacpp/native/.cpm
+
+jobs:
+  build-macos:
+    name: Build macOS targets
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: backends/llamacpp/native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: backends/llamacpp/native/.cpm
+          key: cpm-macos-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
+
+      # The host JNI stub comes from the interop's own build — generate, configure and link in one
+      # task — so the JVM job downloads it instead of running CMake itself.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build the host JNI stub
+        working-directory: .
+        run: ./gradlew :backends:llamacpp:collectHostJniStub
+
+      - name: Collect macosArm64
+        run: |
+          mkdir -p ../build/prebuilt/macos_arm64
+          find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
+
+      - name: Build macosX64
+        run: |
+          cmake --preset macosX64
+          cmake --build --preset macosX64 -j$(sysctl -n hw.ncpu)
+          mkdir -p ../build/prebuilt/macos_x64
+          find build/macosX64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_x64/libkoinference-facade.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-prebuilt
+          path: backends/llamacpp/build/prebuilt/
+
+  build-linux:
+    name: Build Linux target
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backends/llamacpp/native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: backends/llamacpp/native/.cpm
+          key: cpm-linux-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
+
+      # The host JNI stub comes from the interop's own build — generate, configure and link in one
+      # task — so the JVM job downloads it instead of running CMake itself.
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build the host JNI stub
+        working-directory: .
+        run: ./gradlew :backends:llamacpp:collectHostJniStub
+
+      - name: Collect linuxX64
+        run: |
+          mkdir -p ../build/prebuilt/linux_x64
+          {
+            echo "CREATE ../build/prebuilt/linux_x64/libkoinference-facade.a"
+            find build/linuxX64 -name "*.a" | sed 's/^/ADDLIB /'
+            echo "SAVE"
+            echo "END"
+          } | ar -M
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-prebuilt
+          path: backends/llamacpp/build/prebuilt/
+
+  build-ios:
+    name: Build iOS targets
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: backends/llamacpp/native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Cache CPM packages
+        uses: actions/cache@v4
+        with:
+          path: backends/llamacpp/native/.cpm
+          key: cpm-ios-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
+
+      - name: Build iosArm64
+        run: |
+          cmake --preset iosArm64 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+          cmake --build --preset iosArm64 -j$(sysctl -n hw.ncpu)
+          mkdir -p ../build/prebuilt/ios_arm64
+          find build/iosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_arm64/libkoinference-facade.a
+
+      - name: Build iosSimulatorArm64
+        run: |
+          cmake --preset iosSimulatorArm64 \
+            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          cmake --build --preset iosSimulatorArm64 -j$(sysctl -n hw.ncpu)
+          mkdir -p ../build/prebuilt/ios_simulator_arm64
+          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_simulator_arm64/libkoinference-facade.a
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-prebuilt
+          path: backends/llamacpp/build/prebuilt/
+
+# No Android job: those targets take the JNI leg now, and the Android AAR job builds their libraries
+# per ABI through the interop's own CMake build.
+
+# The artifacts are not committed back to the branch: consumers of this workflow download them into
+# backends/llamacpp/build/prebuilt/ with `pattern: "*-prebuilt", merge-multiple: true` before invoking Gradle.

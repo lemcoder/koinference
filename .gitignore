@@ -11,3 +11,9 @@ xcuserdata
 .kotlin
 #So we don't accidentally commit our private keys
 *.gpg
+# Tooling / local caches
+.codegraph/
+.cpm/
+
+# Prebuilt native artifacts — produced by CMake / CI, never committed
+*.a

@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        mavenLocal()
         google()
         mavenCentral()
         gradlePluginPortal()
@@ -14,5 +15,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "koinference"
-include(":library")
-include(":llamacpp")
+include(":core")
+include(":backends:llamacpp")
