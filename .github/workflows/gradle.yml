@@ -105,6 +105,16 @@ jobs:
           https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
         ls -l stories260K.gguf
 
+    # Two ABIs of llama.cpp, the NDK, the SDK and a system image do not fit alongside the runner's
+    # preinstalled toolchains: the emulator refuses to start with "does not have enough disk space".
+    - name: Free disk space
+      run: |
+        df -h / | tail -1
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/node_modules
+        sudo rm -rf "${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}/CodeQL"
+        sudo docker image prune --all --force > /dev/null 2>&1 || true
+        df -h / | tail -1
+
     - name: Enable KVM
       run: |
         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
