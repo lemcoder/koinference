@@ -4,8 +4,13 @@ internal expect fun llamaBackendInit()
 internal expect fun llamaBackendFree()
 internal expect fun llamaSystemInfo(): String
 
-/** Returns an opaque model handle (C pointer stored as Long), or 0 on failure. */
-internal expect fun llamaModelLoad(path: String): Long
+/**
+ * Returns an opaque model handle (C pointer stored as Long), or 0 on failure.
+ *
+ * @param nGpuLayers layers to offload; 0 = CPU only. Offload is decided at load time in
+ *        llama.cpp, so it is here rather than on the session.
+ */
+internal expect fun llamaModelLoad(path: String, nGpuLayers: Int): Long
 internal expect fun llamaModelFree(handle: Long)
 
 /**
@@ -37,3 +42,10 @@ internal expect fun llamaGenerate(
 
 /** Compute text embeddings. Returns an empty array on failure. */
 internal expect fun llamaEmbed(sessionHandle: Long, text: String): FloatArray
+
+/**
+ * Convert a JSON schema to the GBNF grammar [llamaGenerate] takes.
+ *
+ * @return the grammar, or an empty string if the schema does not parse or convert.
+ */
+internal expect fun llamaJsonSchemaToGrammar(schema: String): String

@@ -106,17 +106,45 @@ kotlin {
         val libDir = findProperty("koiLibDir")?.toString()
             ?: layout.buildDirectory.dir("prebuilt/${target.konanTarget.name}").get().asFile.path
 
+        val isApple = target.konanTarget.family.isAppleFamily
+
+        // A .a records nothing about what it needs. ggml's Metal and BLAS backends are compiled
+        // into the archive on Apple targets, and the frameworks behind them have to be named
+        // here or the link fails on _MTLCreateSystemDefaultDevice and _cblas_sgemm.
+        val linkerOptions = listOf("-L$libDir", "-lkoinference-facade") +
+            if (isApple) {
+                listOf(
+                    "-framework", "Metal",
+                    "-framework", "MetalKit",
+                    "-framework", "Foundation",
+                    "-framework", "Accelerate",
+                )
+            } else {
+                emptyList()
+            }
+
         main.compileTaskProvider.configure {
             compilerOptions {
-                freeCompilerArgs.addAll("-linker-options", "-L$libDir -lkoinference-facade")
+                freeCompilerArgs.addAll("-linker-options", linkerOptions.joinToString(" "))
             }
+        }
+
+        // The klib carries the options above for whoever links it, but a binary this project
+        // links — the test executable — gets them separately; the same seam :backends:litertlm
+        // hits. Every target, not just the ones with native tests: commonMain calls the bridge
+        // now, so any test binary references koi_* whether or not its own source set does.
+        target.binaries.all {
+            linkerOpts(linkerOptions)
         }
     }
 
 
     sourceSets {
         commonMain.dependencies {
-            implementation(project(":core"))
+            // api, not implementation: TextRuntime is now a supertype of LlamaCppTextRuntime,
+            // so consumers need :core to call anything on a loaded runtime.
+            api(project(":core"))
+            implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

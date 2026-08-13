@@ -8,8 +8,10 @@ import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSystemInfo
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
@@ -39,9 +41,28 @@ class LlamaCppDeviceTest {
     fun missingModelReturnsNullHandle() {
         llamaBackendInit()
         try {
-            assertTrue(llamaModelLoad("/data/local/tmp/does-not-exist.gguf") == 0L)
+            assertTrue(llamaModelLoad("/data/local/tmp/does-not-exist.gguf", nGpuLayers = 0) == 0L)
         } finally {
             llamaBackendFree()
+        }
+    }
+
+    @Test
+    fun generatesThroughTheLoader() {
+        if (!File(modelPath).isFile) return
+
+        // The bridge test below proves the .so runs; this proves the public API reaches it —
+        // the loader owns backend init and session creation, which the bridge test does by hand.
+        runBlocking {
+            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 16)
+            val runtime = loader.load(modelPath)
+            try {
+                assertIs<LlamaCppTextRuntime>(runtime)
+                val reply = runtime.generateResponse("Once upon a time")
+                assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
+            } finally {
+                loader.unload(modelPath)
+            }
         }
     }
 
@@ -51,7 +72,7 @@ class LlamaCppDeviceTest {
 
         llamaBackendInit()
         try {
-            val model = llamaModelLoad(modelPath)
+            val model = llamaModelLoad(modelPath, nGpuLayers = 0)
             assertNotEquals(0L, model, "failed to load $modelPath")
             try {
                 val session = llamaSessionCreate(

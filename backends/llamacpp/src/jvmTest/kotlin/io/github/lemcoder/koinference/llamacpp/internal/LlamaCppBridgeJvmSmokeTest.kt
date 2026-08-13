@@ -23,6 +23,6 @@ class LlamaCppBridgeJvmSmokeTest {
 
     @Test
     fun `loading a missing model returns a null handle`() {
-        assertTrue(llamaModelLoad("/nonexistent/model.gguf") == 0L)
+        assertTrue(llamaModelLoad("/nonexistent/model.gguf", nGpuLayers = 0) == 0L)
     }
 }

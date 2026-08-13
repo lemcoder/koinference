@@ -1,6 +1,9 @@
 #include <gtest/gtest.h>
 #include "koinference_facade.h"
 
+#include <cstring>
+#include <string>
+
 // These tests exercise the facade API without a real model file.
 // They verify: error handling, null-safety, and default parameters.
 // Integration tests (requiring an actual GGUF file) live under tests/integration/.
@@ -30,12 +33,12 @@ TEST_F(FacadeTest, SystemInfoReturnsNonNullString) {
 // ── model ──────────────────────────────────────────────────────────────────
 
 TEST_F(FacadeTest, ModelLoadReturnsNullForMissingFile) {
-    KoiModel* model = koi_model_load("/nonexistent/path/model.gguf");
+    KoiModel* model = koi_model_load("/nonexistent/path/model.gguf", 0);
     EXPECT_EQ(model, nullptr);
 }
 
 TEST_F(FacadeTest, ModelLoadReturnsNullForNullPath) {
-    KoiModel* model = koi_model_load(nullptr);
+    KoiModel* model = koi_model_load(nullptr, 0);
     EXPECT_EQ(model, nullptr);
 }
 
@@ -103,4 +106,38 @@ TEST_F(FacadeTest, EmbedReturnsErrorForNullText) {
 
 TEST_F(FacadeTest, EmbedReturnsErrorForNullBuffer) {
     EXPECT_EQ(koi_embed(reinterpret_cast<KoiSession*>(1), "hello", nullptr, 4), -1);
+}
+
+// ── json schema → grammar ──────────────────────────────────────────────────
+
+TEST_F(FacadeTest, SchemaToGrammarProducesARootRule) {
+    char buf[4096] = {};
+    const int len = koi_json_schema_to_grammar(
+        R"({"type":"object","properties":{"city":{"type":"string"}},"required":["city"]})",
+        buf, sizeof(buf));
+
+    ASSERT_GT(len, 0);
+    EXPECT_EQ(len, static_cast<int>(std::strlen(buf)));
+    // common_sampler_init looks up "root"; a grammar without it is rejected at sampler build.
+    EXPECT_NE(std::string(buf).find("root"), std::string::npos);
+    EXPECT_NE(std::string(buf).find("city"), std::string::npos);
+}
+
+TEST_F(FacadeTest, SchemaToGrammarReturnsErrorForMalformedJson) {
+    // The converter throws on this; the -1 proves the exception does not escape extern "C".
+    char buf[256] = {};
+    EXPECT_EQ(koi_json_schema_to_grammar("{not json", buf, sizeof(buf)), -1);
+}
+
+TEST_F(FacadeTest, SchemaToGrammarReturnsErrorWhenBufferIsTooSmall) {
+    // Truncation would yield a grammar that parses but constrains something else.
+    char buf[8] = {};
+    EXPECT_EQ(koi_json_schema_to_grammar(R"({"type":"object"})", buf, sizeof(buf)), -1);
+}
+
+TEST_F(FacadeTest, SchemaToGrammarReturnsErrorForNullArguments) {
+    char buf[64] = {};
+    EXPECT_EQ(koi_json_schema_to_grammar(nullptr, buf, sizeof(buf)), -1);
+    EXPECT_EQ(koi_json_schema_to_grammar(R"({"type":"object"})", nullptr, 64), -1);
+    EXPECT_EQ(koi_json_schema_to_grammar(R"({"type":"object"})", buf, 0), -1);
 }

@@ -35,9 +35,14 @@ const char* koi_system_info(void);
 
 /**
  * Load a GGUF model file.
+ *
+ * @param path          Path to the .gguf file.
+ * @param n_gpu_layers  Layers to offload to the GPU; 0 = CPU only. Offloading is a model-load
+ *                      decision in llama.cpp, not a session one, which is why it is here and
+ *                      not in KoiSessionParams. Ignored by builds with no GPU backend.
  * @return handle, or NULL on failure. Caller owns; free with koi_model_free().
  */
-KoiModel* koi_model_load(const char* path);
+KoiModel* koi_model_load(const char* path, int n_gpu_layers);
 
 /** Free a loaded model. Safe to call with NULL. */
 void koi_model_free(KoiModel* model);
@@ -90,6 +95,26 @@ int koi_generate(
  * @return          Embedding dimensions, or -1 on error.
  */
 int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_size);
+
+/* ── grammars ─────────────────────────────────────────────────────────────── */
+
+/**
+ * Convert a JSON schema to the GBNF grammar koi_generate() takes.
+ *
+ * The conversion lives here rather than in Kotlin because llama.cpp already ships it
+ * (common/json-schema-to-grammar.cpp, ~1000 lines with a regex-to-grammar compiler in it) and
+ * a second implementation would drift from the sampler that consumes its output.
+ *
+ * Appended at the end of this header on purpose: the JNI bridge numbering follows declaration
+ * order, so inserting anywhere else renumbers every bridge after it.
+ *
+ * @param schema    JSON schema text.
+ * @param out_buf   Destination buffer for the null-terminated grammar.
+ * @param buf_size  Size of out_buf in bytes (including space for the null terminator).
+ * @return          Bytes written (excluding null terminator), or -1 if the schema does not
+ *                  parse, cannot be converted, or does not fit.
+ */
+int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size);
 
 #ifdef __cplusplus
 }

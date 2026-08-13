@@ -4,9 +4,11 @@
 #include "common.h"
 #include "chat.h"
 #include "sampling.h"
+#include "json-schema-to-grammar.h"
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <thread>
 #include <vector>
@@ -46,9 +48,10 @@ const char* koi_system_info(void) {
 
 /* ── model ────────────────────────────────────────────────────────────────── */
 
-KoiModel* koi_model_load(const char* path) {
+KoiModel* koi_model_load(const char* path, int n_gpu_layers) {
     if (!path) return nullptr;
     llama_model_params params = llama_model_default_params();
+    params.n_gpu_layers = (n_gpu_layers < 0) ? 0 : n_gpu_layers;
     llama_model* m = llama_model_load_from_file(path, params);
     if (!m) return nullptr;
     auto* handle = new KoiModel;
@@ -226,4 +229,27 @@ int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_siz
 
     std::memcpy(out_buf, embd, static_cast<size_t>(n_embd) * sizeof(float));
     return n_embd;
+}
+
+/* ── grammars ─────────────────────────────────────────────────────────────── */
+
+int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size) {
+    if (!schema || !out_buf || buf_size <= 0) return -1;
+
+    // Both the parse and the conversion throw on malformed input — an invalid schema is a
+    // caller error, and letting it cross the extern "C" boundary is undefined behaviour.
+    std::string grammar;
+    try {
+        grammar = json_schema_to_grammar(nlohmann::ordered_json::parse(schema));
+    } catch (const std::exception&) {
+        return -1;
+    }
+
+    // Truncating a grammar produces one that parses but constrains something else, so a
+    // short buffer is an error rather than a partial write.
+    if (static_cast<int>(grammar.size()) >= buf_size) return -1;
+
+    std::memcpy(out_buf, grammar.c_str(), grammar.size());
+    out_buf[grammar.size()] = '\0';
+    return static_cast<int>(grammar.size());
 }
