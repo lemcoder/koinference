@@ -17,3 +17,6 @@ xcuserdata
 
 # Prebuilt native artifacts — produced by CMake / CI, never committed
 *.a
+
+# Downloaded LiteRT-LM release archives (xcframeworks, ~44 MB each)
+.prebuilt/
