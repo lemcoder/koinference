@@ -8,6 +8,12 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
   - `ModelLoader` (`load` / `unload`)
   - `ModelRuntime` (response generation, generation params, runtime settings, schema constraints)
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
+- `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
+  Android.
+
+Published to Maven Central as `io.github.lemcoder:koinference-core`, `…:koinference-llamacpp` and
+`…:koinference-litertlm`. Each backend depends on `:core` with `api`, so adding a backend is
+enough.
 
 ## Layout
 
@@ -25,6 +31,21 @@ backends/llamacpp/
 │   └── tests/                 GoogleTest suite for the facade
 └── build/prebuilt/<target>/   libkoinference-facade.a, built by CMake (never committed)
 ```
+
+## Running the tests
+
+Every generation test is gated on an environment variable pointing at a model, and skips without
+one — the two backends take different containers, so they take different variables:
+
+```bash
+# llama.cpp: llama.cpp's own 1.2 MB test model, which CI downloads and uses too.
+curl -fsSLO https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+KOI_TEST_GGUF=$PWD/stories260K.gguf ./gradlew :backends:llamacpp:jvmTest :backends:llamacpp:macosArm64Test
+```
+
+`:backends:llamacpp:allTests` links a test executable for *every* native target, and each one
+needs that target's `libkoinference-facade.a` under `build/prebuilt/`. Locally, run the per-target
+task for the archive you actually built.
 
 ## Building the natives
 
@@ -66,9 +87,93 @@ drives it: `cmakeBuildKoinference` generates the bridges, configures CMake with
 `cmake` and a JDK with `include/jni.h` are located by the plugin; set `$CMAKE` if your `cmake` lives
 somewhere unusual, since the Gradle daemon does not inherit a login shell's PATH.
 
+### Constrained output
+
+`GenerationConstraint.JsonSchema` is converted to a GBNF grammar by the facade
+(`koi_json_schema_to_grammar`, over llama.cpp's own `json_schema_to_grammar`) and handed to the
+sampler, which then constrains decoding token by token. The conversion is not reimplemented in
+Kotlin on purpose: it is a thousand lines with a regex compiler in it, and a second copy would
+drift from the sampler consuming its output. A schema that does not convert raises
+`IllegalArgumentException` rather than generating unconstrained.
+
+## Publishing
+
+`com.vanniktech.maven.publish`, configured once for every module in the root build file; the
+coordinates, POM and license come from `gradle.properties` and each module's `POM_ARTIFACT_ID`.
+`.github/workflows/publish.yml` runs on a GitHub release and passes the tag as `-PVERSION_NAME`,
+so the checked-in version stays a `-SNAPSHOT` that cannot reach Central by accident.
+
+## The LiteRT-LM backend
+
+The runtime under it arrives as a binary rather than as source, and the two legs reach it
+differently:
+
+```
+backends/litertlm/
+├── src/
+│   ├── commonMain/            LiteRtLmModelLoader, LiteRtLmRuntime, the expect bridge
+│   ├── nativeMain/            actuals over cinterop + the reply-JSON reader
+│   ├── androidMain/           actuals over Google's Kotlin API
+│   └── androidDeviceTest/     on-device generation
+├── native/                    Apple only
+│   ├── CMakeLists.txt         downloads the CLiteRTLM xcframework, builds the facade
+│   ├── CMakePresets.json      macosArm64, macosX64, iosArm64, iosSimulatorArm64
+│   ├── facade/                koinference_litertlm_facade.{h,cpp}
+│   └── tests/                 facade smoke test
+└── native/build/<preset>/     libkoinference-litertlm-facade.a + the staged runtime dylib
+```
+
+Apple targets bind a C facade the way `:backends:llamacpp` does. **Android does not, and cannot**:
+the AAR's `liblitertlm_jni.so` is version-scripted down to its 24 `Java_…_LiteRtLmJni_*` entry
+points and exports no `litert_lm_*` C symbols, so there is nothing for a facade to link against.
+That leg goes through `com.google.ai.edge.litertlm`'s Kotlin API instead. The shared seam is
+therefore `internal expect`ed at the level of engine/conversation handles rather than at the C
+API's shape, so neither side has to pretend to be the other.
+
+The AAR this module produces carries no `.so` of its own — the runtime comes transitively from
+`com.google.ai.edge.litertlm:litertlm-android` and is merged by the consuming app. The Maven
+version and the xcframework version pinned in `native/CMakeLists.txt` are the same runtime and
+must be bumped together.
+
+LiteRT-LM cannot be built from source here: its data processors include
+`support/preprocessor/*.h` "from @litert", which is not published in the open-source LiteRT
+tree, so the CMake build fails on every platform. Google ships the C API prebuilt, and the
+`engine.h` in the xcframework is byte-identical to the one at the tag it was cut from, so the
+header and the binary agree. `native/CMakeLists.txt` downloads and hash-checks that archive.
+
+Gradle drives CMake itself (`buildFacade`) rather than through the Konan plugin, because this
+module has no JNI leg yet. `./gradlew :backends:litertlm:macosArm64Test` builds the facade,
+runs cinterop and links against both the facade archive and the runtime dylib.
+
+Generation tests need a real model and are skipped without one. The smallest published
+`.litertlm` is SmolLM2-135M-Instruct at 136 MB, too large for CI:
+
+```bash
+# macOS
+KOI_TEST_LITERTLM=/path/to/SmolLM2_135M_Instruct.litertlm \
+    ./gradlew :backends:litertlm:macosArm64Test
+
+# Android — the device test reads a fixed path rather than an env var
+adb shell mkdir -p /data/local/tmp/koinference
+adb push SmolLM2_135M_Instruct.litertlm /data/local/tmp/koinference/
+./gradlew :backends:litertlm:connectedAndroidDeviceTest
+```
+
+Structured output works on both legs — verified generating against a real model, not assumed.
+`GenerationConstraint.JsonSchema` reaches llguidance, which is linked into the prebuilt runtime
+and constrains decoding token by token; on Android it goes via `ResponseFormat.json(schema)`.
+
 ## Targets (current)
 
-- Android
-- iOS (`iosArm64`, `iosSimulatorArm64`)
-- macOS (`macosArm64`, `macosX64`)
-- JVM
+| target | `:core` | `:backends:llamacpp` | `:backends:litertlm` |
+|---|---|---|---|
+| Android | ✅ | ✅ | ✅ |
+| JVM | ✅ | ✅ | — |
+| `macosArm64` | ✅ | ✅ | ✅ |
+| `macosX64` | ✅ | ✅ | — |
+| `iosArm64`, `iosSimulatorArm64` | ✅ | ✅ | — |
+| `linuxX64` | ✅ | ✅ | — |
+
+LiteRT-LM's remaining Apple targets have CMake presets ready but no Kotlin target: the facade has
+to build for one before it can be added, or the link fails with undefined `koilm_*`. Linux would
+additionally need a third runtime source (`libLiteRt.so`).
