@@ -1,7 +1,12 @@
 [versions]
 kotlin = "2.3.10"
 kotlinxCoroutines = "1.10.2"
+kotlinxSerialization = "1.9.0"
+# Must track the CLiteRTLM release pinned in backends/litertlm/native/CMakeLists.txt: the two
+# legs are the same runtime, and a version skew between them is a behaviour skew between targets.
+litertlm = "0.15.0"
 konanPlugin = "1.2.0-alpha05"
+mavenPublish = "0.37.0"
 agp = "9.2.1"
 androidCompileSdk = "37"
 androidMinSdk = "24"
@@ -12,11 +17,15 @@ androidxJunit = "1.3.0"
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+litertlm-android = { module = "com.google.ai.edge.litertlm:litertlm-android", version.ref = "litertlm" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTest" }
 androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidxJunit" }
 
 [plugins]
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 konan = { id = "io.github.lemcoder.konanplugin", version.ref = "konanPlugin" }
+mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 # AGP 9 dropped com.android.library + KMP; this is the KMP-specific Android plugin.
 androidKmpLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }

@@ -9,6 +9,7 @@ import io.github.lemcoder.koinference.llamacpp.jni.kniBridge6
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge9
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
 import io.github.lemcoder.koinference.llamacpp.jni.kniCString
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,6 +20,7 @@ import java.nio.ByteOrder
 
 private const val GEN_BUF_SIZE = 1 shl 20 // 1 MiB generation output buffer
 private const val MAX_EMBED_DIMS = 8192
+private const val GRAMMAR_BUF_SIZE = 1 shl 20 // 1 MiB: a nested schema outgrows anything smaller
 
 /** Layout of `KoiSessionParams`: six 4-byte fields, no padding. */
 private const val SESSION_PARAMS_SIZE = 24
@@ -27,7 +29,7 @@ internal actual fun llamaBackendInit() = kniBridge0()
 internal actual fun llamaBackendFree() = kniBridge1()
 internal actual fun llamaSystemInfo(): String = kniCString(kniBridge2()).orEmpty()
 
-internal actual fun llamaModelLoad(path: String): Long = kniBridge3(path)
+internal actual fun llamaModelLoad(path: String, nGpuLayers: Int): Long = kniBridge3(path, nGpuLayers)
 internal actual fun llamaModelFree(handle: Long) = kniBridge4(handle)
 
 internal actual fun llamaSessionCreate(
@@ -66,4 +68,10 @@ internal actual fun llamaEmbed(sessionHandle: Long, text: String): FloatArray {
     val out = FloatArray(MAX_EMBED_DIMS)
     val dims = kniBridge9(sessionHandle, text, out, out.size)
     return if (dims <= 0) FloatArray(0) else out.copyOf(dims)
+}
+
+internal actual fun llamaJsonSchemaToGrammar(schema: String): String {
+    val out = ByteArray(GRAMMAR_BUF_SIZE)
+    val written = kniBridge10(schema, out, out.size)
+    return if (written <= 0) "" else String(out, 0, written, Charsets.UTF_8)
 }

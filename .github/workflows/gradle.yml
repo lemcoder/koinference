@@ -43,6 +43,16 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    # llama.cpp's own test model, 1.2 MB. The generation tests skip without it, which would mean
+    # CI proving that the bridges link and nothing about whether they produce tokens.
+    # Not set for the iOS row: the simulator gets its own filesystem view and a host path there
+    # is a different kind of test than this one.
+    - name: Fetch a tiny GGUF model
+      if: matrix.os != 'macos-latest' || contains(matrix.target, 'macosX64')
+      run: |
+        curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" \
+          https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+        echo "KOI_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
     - name: Download prebuilt natives
       uses: actions/download-artifact@v4
       with:
@@ -66,6 +76,37 @@ jobs:
       with:
         arguments: ${{ matrix.target }} ${{ matrix.extraArgs }}
 
+  # Its own job rather than a row in the matrix above: this module does not consume the prebuilt
+  # llama.cpp archives, it drives its own CMake (which downloads and hash-checks Google's
+  # xcframework), and macOS arm64 is the only host target it has.
+  litertlm:
+    name: LiteRT-LM macOS arm64
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Validate Gradle Wrapper
+      uses: gradle/actions/wrapper-validation@v4
+    # 44 MB per release, pinned by SHA256 in native/CMakeLists.txt — the key tracks that file so a
+    # version bump re-downloads instead of linking against the previous release.
+    - uses: actions/cache@v4
+      with:
+        path: backends/litertlm/native/.prebuilt
+        key: litertlm-prebuilt-${{ hashFiles('backends/litertlm/native/CMakeLists.txt') }}
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.konan
+        key: ${{ runner.os }}-${{ hashFiles('**/.lock') }}
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    # Generation needs a 136 MB model and is skipped here; what this proves is that the facade
+    # builds, cinterop binds it and the test binary links against the runtime dylib.
+    - name: Build the facade and run the tests
+      run: ./gradlew :backends:litertlm:macosArm64Test
+
   android:
     name: Android AAR
     needs: natives
@@ -86,10 +127,12 @@ jobs:
       with:
         ndk-version: r27c
 
-    - name: Assemble the AAR
+    - name: Assemble the AARs
       env:
         ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-      run: ./gradlew :backends:llamacpp:bundleAndroidMainAar :core:bundleAndroidMainAar
+      run: |
+        ./gradlew :backends:llamacpp:bundleAndroidMainAar :core:bundleAndroidMainAar \
+                  :backends:litertlm:bundleAndroidMainAar
 
     - name: Check the AAR ships a library per ABI
       run: |
@@ -97,6 +140,20 @@ jobs:
         unzip -l "$aar" | grep -q 'jni/arm64-v8a/.*\.so' || { echo "missing arm64-v8a"; exit 1; }
         unzip -l "$aar" | grep -q 'jni/x86_64/.*\.so' || { echo "missing x86_64"; exit 1; }
         unzip -l "$aar" | grep -E 'jni/|classes.jar'
+
+    # The opposite expectation, and the reason litertlm declares its runtime as `api`: the .so is
+    # Google's, merged into the app by the transitive dependency. An .so appearing in ours would
+    # mean something started building native code for a module that has no native code.
+    - name: Check the LiteRT-LM AAR ships no library of its own
+      run: |
+        aar=backends/litertlm/build/outputs/aar/litertlm.aar
+        # `if`, not `grep … && exit 1`: the steps run under `bash -e`, where a grep that matches
+        # nothing fails the list and would turn the good case into a red job.
+        if unzip -l "$aar" | grep -q '\.so'; then
+          echo "unexpected .so in $aar"
+          exit 1
+        fi
+        unzip -l "$aar" | grep -E 'classes.jar|AndroidManifest'
 
     # llama.cpp's own test model: 1.2 MB, small enough to download and generate from on an emulator.
     - name: Fetch a tiny GGUF model
@@ -122,8 +179,9 @@ jobs:
         sudo udevadm control --reload-rules
         sudo udevadm trigger --name-match=kvm
 
-    # The AAR check is structural; this is the only step where ART loads the .so and llama.cpp runs
-    # on the target ABI.
+    # The AAR checks are structural; this is the only step where ART loads the .so and the runtimes
+    # execute on the target ABI. LiteRT-LM's generation cases skip — its smallest model is 136 MB —
+    # but loading still proves its liblitertlm_jni.so resolves and is called.
     - name: Instrumented tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
@@ -134,4 +192,5 @@ jobs:
         script: |
           adb shell mkdir -p /data/local/tmp/koinference
           adb push stories260K.gguf /data/local/tmp/koinference/stories260K.gguf
-          ./gradlew :backends:llamacpp:connectedAndroidDeviceTest
+          ./gradlew :backends:llamacpp:connectedAndroidDeviceTest \
+                    :backends:litertlm:connectedAndroidDeviceTest

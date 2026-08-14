@@ -27,9 +27,12 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: 21
+      # The version comes from the tag the release was cut from, so gradle.properties keeps a
+      # -SNAPSHOT that can never be published to Central by accident.
       - name: Publish to MavenCentral
-        run: ./gradlew publishToMavenCentral --no-configuration-cache
+        run: ./gradlew publishToMavenCentral --no-configuration-cache -PVERSION_NAME="${TAG_NAME#v}"
         env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
           ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
           ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
           ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}

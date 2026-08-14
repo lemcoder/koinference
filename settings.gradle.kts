@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = "koinference"
 include(":core")
 include(":backends:llamacpp")
+include(":backends:litertlm")
