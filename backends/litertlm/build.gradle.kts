@@ -13,6 +13,14 @@ val cmakeExecutable: String = findProperty("koiCmake")?.toString()
     ?: System.getenv("CMAKE")
     ?: "cmake"
 
+// Same reason as :backends:llamacpp: cinterop does not treat the headers behind its compiler
+// options as inputs, so a facade edit would otherwise be invisible to the up-to-date check.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.CInteropProcess>().configureEach {
+    inputs.files(fileTree("native/facade"))
+        .withPropertyName("facadeHeaders")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 val buildFacade by tasks.registering(Exec::class) {
     group = "interop"
     description = "Configure and build the LiteRT-LM facade for macOS arm64."

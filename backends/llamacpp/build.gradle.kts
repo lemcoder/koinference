@@ -160,6 +160,15 @@ kotlin {
     }
 }
 
+// cinterop tracks the .def file and its compiler options, not the headers those options point
+// at, so editing the facade leaves the task UP-TO-DATE and the klib describing the previous API.
+// It surfaces as "Unresolved reference koi_*" for a function that is plainly in the header.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.CInteropProcess>().configureEach {
+    inputs.files(fileTree("native/facade"))
+        .withPropertyName("facadeHeaders")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 // The bridges resolve the stub library from java.library.path. The interop reports where its build
 // put the library; CI builds it once in the natives job and passes the directory with -PkoiStubDir=.
 val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
