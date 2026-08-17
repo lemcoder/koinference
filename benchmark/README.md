@@ -25,24 +25,31 @@ it from where it happens, and every sample records which:
 
 | | llama.cpp | LiteRT-LM (Android) | LiteRT-LM (Apple/host) |
 |---|---|---|---|
-| source | `ENGINE` | `STREAM_FIRST_CHUNK` | none |
-| TTFT | stamped in the decode loop | first streamed chunk timestamped | ✗ |
-| prefill ms | ✓ | ✗ (not separable from the first chunk) | ✗ |
-| prompt / generated tokens | ✓ | ✗ | ✗ |
-| decode tokens/sec | ✓ | ✗ (no token count to divide by) | ✗ |
+| source | `ENGINE` | `ENGINE`, else `STREAM_FIRST_CHUNK` | none |
+| TTFT | stamped in the decode loop | engine's, else first streamed chunk | ✗ |
+| prefill ms | ✓ | ✗ (rates are reported, durations are not) | ✗ |
+| prompt / generated tokens | ✓ | ✓ when the engine's counters are populated | ✗ |
+| decode tokens/sec | ✓ | ✓ when the engine's counters are populated | ✗ |
 
-Two consequences worth stating plainly:
+Three things worth stating plainly:
 
-* **Decode tokens/sec is not available for LiteRT-LM on Android.** Its SDK computes exactly
-  these metrics — `Conversation.getBenchmarkInfo()` is in the AAR — but the method is `internal`
-  in the Kotlin metadata, so no consumer can call it, and the runtime ships with benchmarking
-  off because nothing in the public `EngineConfig` turns it on. Counting streamed chunks or
-  splitting the reply on whitespace would produce a token count the binding cannot actually
-  produce, so the field is null and the record carries a note. Wall-clock latency and TTFT are
-  comparable; throughput per token is not, until Google exposes the accessor.
+* **LiteRT-LM on Android asks the engine first.** `Conversation.getBenchmarkInfo()` is an
+  `@ExperimentalApi` **function**, not a property — `conversation.benchmarkInfo` does not
+  compile, which is easy to mistake for the accessor being unavailable. It is available, and it
+  carries TTFT, prefill/decode token counts, both throughputs and an init time.
+* **Whether it holds anything can only be settled on a device.** Nothing in the public
+  `EngineConfig` turns benchmarking on, so a runtime built without it returns zeros. Zero
+  time-to-first-token is not a measurement: the harness rejects it and falls back to timing the
+  first streamed chunk, labelled `STREAM_FIRST_CHUNK`. `LiteRtLmDeviceTest` logs which source
+  the device produced, so the first real run answers this instead of leaving it assumed.
 * **`ENGINE` and `STREAM_FIRST_CHUNK` values are never averaged together.** The second includes
   the binding that delivered the chunk. The analysis tool reports the source in every table and
   flags a comparison that mixes them.
+
+On the Apple leg there is nothing to ask: `litert_lm_session_get_benchmark_info` takes a
+`Session`, the facade drives a `Conversation`, and the C API exposes no way to reach one from
+the other. Measuring it there would mean driving the session API instead — a different code path
+from the one the library actually uses, which is not what a benchmark should measure.
 
 Memory, thermal and battery come from Android APIs (`Debug.getMemoryInfo`, `PowerManager`'s
 thermal status, `BatteryManager`, `/proc/self/status`, `cpufreq`) and are **null off Android** —

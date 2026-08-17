@@ -5,6 +5,7 @@ import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.ResponseFormat
 import com.google.ai.edge.litertlm.SamplerConfig
@@ -114,34 +115,56 @@ private class SdkConversationHandle(
     }
 
     /**
-     * Times the first streamed chunk, because the engine's own numbers are out of reach.
+     * Prefers what the engine measured over what this binding can see.
      *
-     * The SDK does compute them — `Conversation.getBenchmarkInfo()` exists in the AAR and
-     * carries exactly this metric set — but it is `internal` in the Kotlin metadata, so no
-     * consumer can call it. The AAR's runtime is also built with benchmarking off, since
-     * nothing in the public `EngineConfig` turns it on. Measuring at this boundary is one
-     * layer further out than llama.cpp's in-loop stamps, which is what
-     * [TelemetrySource.STREAM_FIRST_CHUNK] records; results from the two sources are reported
-     * separately rather than averaged.
+     * `getBenchmarkInfo()` is `@ExperimentalApi` and is a function, not a property — reading it
+     * as `conversation.benchmarkInfo` does not compile, which is easy to mistake for the
+     * accessor being unavailable. It is available.
+     *
+     * What is not guaranteed is that it holds anything: nothing in the public `EngineConfig`
+     * turns benchmarking on, so on a runtime built without it every field reads zero. Zero
+     * time-to-first-token is not a measurement, so it is rejected and the streamed first chunk
+     * — a real first-token observation one layer further out — is reported instead, labelled
+     * [TelemetrySource.STREAM_FIRST_CHUNK] so the two are never averaged.
      */
-    private fun telemetry(startNanos: Long, firstChunkNanos: Long?, endNanos: Long) =
-        GenerationTelemetry(
+    @OptIn(ExperimentalApi::class)
+    private fun telemetry(startNanos: Long, firstChunkNanos: Long?, endNanos: Long): GenerationTelemetry {
+        val engine = runCatching { conversation.getBenchmarkInfo() }.getOrNull()
+        val engineTtftMs = engine?.timeToFirstTokenInSecond?.takeIf { it > 0.0 }?.let { it * 1000.0 }
+
+        if (engine != null && engineTtftMs != null) {
+            return GenerationTelemetry(
+                source = TelemetrySource.ENGINE,
+                timeToFirstTokenMs = engineTtftMs,
+                // Prefill and decode durations are not reported directly; the rates and counts
+                // are, and deriving a duration from a rate would invent precision.
+                prefillMs = null,
+                decodeMs = null,
+                promptTokens = engine.lastPrefillTokenCount.takeIf { it > 0 },
+                decodeTokens = engine.lastDecodeTokenCount.takeIf { it > 0 },
+                prefillTokensPerSecond = engine.lastPrefillTokensPerSecond.takeIf { it > 0.0 },
+                decodeTokensPerSecond = engine.lastDecodeTokensPerSecond.takeIf { it > 0.0 },
+                engineInitMs = engine.initTimeInSecond.takeIf { it > 0.0 }?.let { it * 1000.0 },
+            )
+        }
+
+        return GenerationTelemetry(
             source = TelemetrySource.STREAM_FIRST_CHUNK,
             timeToFirstTokenMs = firstChunkNanos?.let { (it - startNanos) / 1_000_000.0 },
             // Prefill is not separable here: the first chunk is the only observable event and
             // it already includes prefill.
             prefillMs = null,
             decodeMs = firstChunkNanos?.let { (endNanos - it) / 1_000_000.0 },
-            // Chunks are not tokens, and neither is a whitespace split of the reply. This
-            // binding exposes no tokenizer, so a token count here would be invented — which
-            // also means decode tokens/sec is unavailable on this leg until a device run
-            // shows whether Conversation.tokenCount updates mid-turn.
+            // Chunks are not tokens, and neither is a whitespace split of the reply. With the
+            // engine's counters empty this binding has no tokenizer to ask, so a count here
+            // would be invented.
             promptTokens = null,
             decodeTokens = null,
             prefillTokensPerSecond = null,
             decodeTokensPerSecond = null,
             engineInitMs = null,
         )
+    }
 
     override fun close() {
         conversation.close()

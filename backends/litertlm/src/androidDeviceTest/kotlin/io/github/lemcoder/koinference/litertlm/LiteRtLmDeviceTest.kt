@@ -1,10 +1,13 @@
 package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.GenerationConstraint
+import android.util.Log
+import io.github.lemcoder.koinference.InstrumentedRuntime
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
@@ -51,6 +54,51 @@ class LiteRtLmDeviceTest {
                 failure !is UnsatisfiedLinkError,
                 "liblitertlm_jni.so did not load: $failure",
             )
+        }
+    }
+
+    /**
+     * Records which telemetry source this device actually produced.
+     *
+     * The SDK computes TTFT and token counts itself, but nothing in the public EngineConfig
+     * turns benchmarking on, so whether getBenchmarkInfo() holds real numbers or zeros can only
+     * be settled on a device. The benchmark harness handles both — engine numbers when they are
+     * there, the streamed first chunk when they are not — and this test writes the answer into
+     * the log so the first run on new hardware states it rather than leaving it assumed.
+     *
+     * It asserts only what must hold either way: some first-token measurement exists.
+     */
+    @Test
+    fun reportsWhichTelemetrySourceThisDeviceProduces() {
+        if (!modelPresent()) return
+
+        runBlocking {
+            val loader = LiteRtLmModelLoader(maxOutputTokens = 32)
+            val runtime = loader.load(modelPath)
+            try {
+                runtime.generateResponse("Say hello.")
+                val telemetry = (runtime as InstrumentedRuntime).lastGeneration
+                assertNotNull(telemetry, "the Android binding always reports something")
+
+                Log.i(
+                    "koinference-benchmark",
+                    "LiteRT-LM telemetry: source=${telemetry.source} " +
+                        "ttftMs=${telemetry.timeToFirstTokenMs} " +
+                        "promptTokens=${telemetry.promptTokens} " +
+                        "decodeTokens=${telemetry.decodeTokens} " +
+                        "decodeTps=${telemetry.decodeTokensPerSecond} " +
+                        "engineInitMs=${telemetry.engineInitMs}",
+                )
+
+                // Either source is acceptable; a missing first-token time is not.
+                assertNotNull(
+                    telemetry.timeToFirstTokenMs,
+                    "no time to first token from either source",
+                )
+                assertTrue(telemetry.timeToFirstTokenMs!! > 0.0)
+            } finally {
+                loader.unload(modelPath)
+            }
         }
     }
 

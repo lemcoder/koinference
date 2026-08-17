@@ -252,11 +252,16 @@ so generation tests are env-gated rather than run in CI.
   `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
-- **LiteRT-LM's `Conversation.getBenchmarkInfo()` is unreachable.** It exists in the AAR with
-  exactly the metric set a benchmark wants, but it is `internal` in the Kotlin metadata, so the
-  Android leg times the first streamed chunk instead and records
-  `TelemetrySource.STREAM_FIRST_CHUNK`. On Apple there is nothing at all: the C API's benchmark
-  info hangs off a `Session` and the facade drives a `Conversation`, which never exposes one.
+- **LiteRT-LM's `getBenchmarkInfo()` is a function, not a property.** `conversation.benchmarkInfo`
+  fails with "Unresolved reference", which reads like the accessor being internal or missing —
+  it is neither. Check the Kotlin metadata before concluding a member is inaccessible: the
+  property name simply is not in it, only `getBenchmarkInfo`. It also needs
+  `@OptIn(ExperimentalApi::class)`, and `BenchmarkInfo`'s own members *are* properties.
+  Whether it returns real numbers or zeros depends on the runtime being built with benchmarking
+  on, which nothing in the public `EngineConfig` controls — so the harness treats zero as
+  unmeasured and falls back to timing the first streamed chunk.
+- **On Apple there is nothing to ask.** `litert_lm_session_get_benchmark_info` takes a `Session`,
+  the facade drives a `Conversation`, and no C function bridges the two.
 
 ## Cinterop idioms that bite
 
