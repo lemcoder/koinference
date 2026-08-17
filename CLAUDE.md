@@ -221,6 +221,28 @@ Gradle.
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
 
+## The benchmark harness
+
+- **cinterop does not track the headers behind its compiler options.** Editing a facade leaves
+  the task UP-TO-DATE and the klib describing the previous API — "Unresolved reference koi_*"
+  for a function plainly in the header. Both backends now declare `native/facade` as an input on
+  `CInteropProcess`.
+- **A klib does not carry the producing project's linker options.** Any module that links a
+  binary against a backend names its libraries again; `:benchmark:core` repeats the `-L`, `-l`,
+  `-rpath` and `-framework` flags for both backends. Same lesson as the `.a`, one level out.
+- **AGP 9 cannot apply `com.android.application` in this build at all.** It sees the Kotlin
+  plugin on the classpath and tries to create a `KotlinAndroidTarget`, which reaches for the
+  removed variant API (`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`). The
+  only Kotlin-capable Android plugin in AGP 9 is the multiplatform library one. Hence
+  `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
+- **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
+  device and passed with `-e promptFile` instead of being packaged.
+- **LiteRT-LM's `Conversation.getBenchmarkInfo()` is unreachable.** It exists in the AAR with
+  exactly the metric set a benchmark wants, but it is `internal` in the Kotlin metadata, so the
+  Android leg times the first streamed chunk instead and records
+  `TelemetrySource.STREAM_FIRST_CHUNK`. On Apple there is nothing at all: the C API's benchmark
+  info hangs off a `Session` and the facade drives a `Conversation`, which never exposes one.
+
 ## Cinterop idioms that bite
 
 - `koi_default_session_params()` returns `CValue<T>`, an immutable snapshot — `.apply { field = … }`
