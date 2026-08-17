@@ -2,9 +2,8 @@ package io.github.lemcoder.koinference.benchmark
 
 import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.InferenceBackend
-import io.github.lemcoder.koinference.InstrumentedRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.TextRuntime
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.litertlm.LiteRtLmModelLoader
 import io.github.lemcoder.koinference.llamacpp.LlamaCppModelLoader
 
@@ -31,7 +30,9 @@ fun engineById(id: String): BenchmarkInferenceEngine? = availableEngines().first
  */
 private abstract class TextRuntimeEngine : BenchmarkInferenceEngine {
 
-    protected abstract suspend fun loadRuntime(config: BenchmarkModelConfig): Pair<TextRuntime, suspend () -> Unit>
+    protected abstract suspend fun loadRuntime(
+        config: BenchmarkModelConfig,
+    ): Pair<StreamingTextRuntime, suspend () -> Unit>
 
     protected fun parameters(config: BenchmarkModelConfig, sampling: SamplingConfig) =
         GenerationParameters(
@@ -47,23 +48,14 @@ private abstract class TextRuntimeEngine : BenchmarkInferenceEngine {
     }
 
     private class RuntimeSession(
-        private val runtime: TextRuntime,
+        private val runtime: StreamingTextRuntime,
         private val release: suspend () -> Unit,
     ) : BenchmarkInferenceEngine.EngineSession {
 
-        private val probe = platformProbe()
-
-        override suspend fun generate(request: GenerationRequest): GenerationResult {
-            val start = probe.monotonicNanos()
-            val text = runtime.generateResponse(request.prompt)
-            val wallClockMs = (probe.monotonicNanos() - start) / 1_000_000.0
-
-            return GenerationResult(
-                text = text,
-                wallClockMs = wallClockMs,
-                telemetry = (runtime as? InstrumentedRuntime)?.lastGeneration,
-            )
-        }
+        // Hands back the backend's flow untouched. Anything done to it here — buffering,
+        // mapping, a dispatcher hop — would land in the first-chunk measurement for this engine
+        // and not for the other.
+        override fun stream(request: GenerationRequest) = runtime.streamResponse(request.prompt)
 
         override suspend fun close() = release()
     }
@@ -97,7 +89,9 @@ private class LlamaCppBenchmarkEngine : TextRuntimeEngine() {
         put("topPApplied", "false")
     }
 
-    override suspend fun loadRuntime(config: BenchmarkModelConfig): Pair<TextRuntime, suspend () -> Unit> {
+    override suspend fun loadRuntime(
+        config: BenchmarkModelConfig,
+    ): Pair<StreamingTextRuntime, suspend () -> Unit> {
         val loader = LlamaCppModelLoader(
             settings = RuntimeSettings(
                 backend = if (config.useGpu) InferenceBackend.GPU else InferenceBackend.CPU,
@@ -106,10 +100,9 @@ private class LlamaCppBenchmarkEngine : TextRuntimeEngine() {
             nThreads = config.threads,
             nPredict = maxNewTokens,
         )
-        val runtime = loader.load(config.modelPath) as TextRuntime
-        (runtime as? io.github.lemcoder.koinference.llamacpp.LlamaCppTextRuntime)
-            ?.updateGenerationParameters(parameters(config, sampling))
-        return runtime to { loader.unload(config.modelPath) }
+        val runtime = loader.load(config.modelPath) as io.github.lemcoder.koinference.llamacpp.LlamaCppTextRuntime
+        runtime.updateGenerationParameters(parameters(config, sampling))
+        return runtime to suspend { loader.unload(config.modelPath) }
     }
 }
 
@@ -133,7 +126,9 @@ private class LiteRtLmBenchmarkEngine : TextRuntimeEngine() {
         put("minPApplied", "false")
     }
 
-    override suspend fun loadRuntime(config: BenchmarkModelConfig): Pair<TextRuntime, suspend () -> Unit> {
+    override suspend fun loadRuntime(
+        config: BenchmarkModelConfig,
+    ): Pair<StreamingTextRuntime, suspend () -> Unit> {
         val loader = LiteRtLmModelLoader(
             settings = RuntimeSettings(
                 backend = if (config.useGpu) InferenceBackend.GPU else InferenceBackend.CPU,
@@ -146,7 +141,7 @@ private class LiteRtLmBenchmarkEngine : TextRuntimeEngine() {
             maxOutputTokens = maxNewTokens,
         )
         val runtime = loader.load(config.modelPath)
-        return runtime to { loader.unload(config.modelPath) }
+        return runtime to suspend { loader.unload(config.modelPath) }
     }
 }
 

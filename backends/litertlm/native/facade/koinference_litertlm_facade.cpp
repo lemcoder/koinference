@@ -1,7 +1,11 @@
 #include "koinference_litertlm_facade.h"
 
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
+#include <deque>
+#include <mutex>
+#include <map>
 #include <string>
 
 #include "engine.h"  // from the CLiteRTLM prebuilt
@@ -16,6 +20,54 @@ thread_local std::string g_last_error;
 // The most recent reply, kept so that a caller whose buffer was too small can collect it
 // without generating again. Thread-local for the same reason as the error.
 thread_local std::string g_last_response;
+
+/**
+ * A streaming generation in flight.
+ *
+ * The runtime calls back from its own thread; the caller pulls from another. Everything shared
+ * between them lives here behind one mutex. Keyed per conversation rather than thread-local
+ * like the buffers above, because the producing thread is the runtime's, not the caller's.
+ */
+struct StreamState {
+    std::mutex              mutex;
+    std::condition_variable ready;
+    std::deque<std::string> chunks;
+    std::string             error;
+    bool                    finished = false;
+};
+
+// One stream per conversation at a time, which matches the API: a conversation is a
+// single-threaded conversation, and the Kotlin side holds a lock across a generation anyway.
+std::mutex g_streams_mutex;
+std::map<KoiLmConversation*, StreamState*> g_streams;
+
+StreamState* find_stream(KoiLmConversation* conversation) {
+    std::lock_guard<std::mutex> guard(g_streams_mutex);
+    auto it = g_streams.find(conversation);
+    return it == g_streams.end() ? nullptr : it->second;
+}
+
+// Runs on the runtime's thread. Does the minimum: copy the text, wake the puller.
+void on_stream_chunk(void* user_data, const LiteRtLmStreamChunk* chunk) {
+    auto* state = static_cast<StreamState*>(user_data);
+    if (state == nullptr) return;
+
+    const char* error = chunk ? litert_lm_stream_chunk_get_error(chunk) : nullptr;
+    const char* text = chunk ? litert_lm_stream_chunk_get_text(chunk) : nullptr;
+    const bool final_chunk = chunk == nullptr || litert_lm_stream_chunk_is_final(chunk);
+
+    {
+        std::lock_guard<std::mutex> guard(state->mutex);
+        if (error != nullptr && error[0] != '\0') {
+            state->error = error;
+            state->finished = true;
+        } else {
+            if (text != nullptr && text[0] != '\0') state->chunks.emplace_back(text);
+            if (final_chunk) state->finished = true;
+        }
+    }
+    state->ready.notify_one();
+}
 
 void set_error(std::string message) { g_last_error = std::move(message); }
 void clear_error() { g_last_error.clear(); }
@@ -283,3 +335,115 @@ int koilm_last_response(char* out_buf, int buf_size) {
 }
 
 }  // extern "C"
+
+/* ── streaming generation ─────────────────────────────────────────────────── */
+
+int koilm_stream_begin(
+    KoiLmConversation* conversation,
+    const char*        user_prompt,
+    const char*        json_schema
+) {
+    clear_error();
+
+    if (conversation == nullptr || user_prompt == nullptr) {
+        set_error("invalid arguments to koilm_stream_begin");
+        return -1;
+    }
+
+    // Any stream left open is discarded first: callers abandon loops, and a stale state would
+    // otherwise receive callbacks belonging to the next generation.
+    koilm_stream_end(conversation);
+
+    LiteRtLmConversationOptionalArgs* args = nullptr;
+    if (json_schema != nullptr && json_schema[0] != '\0') {
+        args = litert_lm_conversation_optional_args_create();
+        if (args == nullptr) {
+            set_error("could not create optional args for the schema constraint");
+            return -1;
+        }
+        litert_lm_conversation_optional_args_set_constraint(
+            args, kLiteRtLmConstraintTypeJsonSchema, json_schema);
+    }
+
+    auto* state = new StreamState();
+    {
+        std::lock_guard<std::mutex> guard(g_streams_mutex);
+        g_streams[conversation] = state;
+    }
+
+    const std::string message = message_json("user", user_prompt);
+    const int rc = litert_lm_conversation_send_message_stream(
+        reinterpret_cast<LiteRtLmConversation*>(conversation), message.c_str(),
+        /*extra_context=*/nullptr, args, &on_stream_chunk, state);
+
+    if (args != nullptr) litert_lm_conversation_optional_args_delete(args);
+
+    if (rc != 0) {
+        koilm_stream_end(conversation);
+        set_error("send_message_stream failed to start");
+        return -1;
+    }
+    return 0;
+}
+
+int koilm_stream_next(KoiLmConversation* conversation, char* out_buf, int buf_size) {
+    if (conversation == nullptr || out_buf == nullptr || buf_size <= 0) {
+        set_error("invalid arguments to koilm_stream_next");
+        return -1;
+    }
+
+    StreamState* state = find_stream(conversation);
+    if (state == nullptr) return 0;  // nothing in flight; treated as end of stream
+
+    std::string chunk;
+    {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        // Waits rather than spins: the runtime decides when the next token exists, and a busy
+        // loop here would compete with the thread producing it.
+        state->ready.wait(lock, [state] {
+            return !state->chunks.empty() || state->finished;
+        });
+
+        if (!state->error.empty()) {
+            set_error(state->error);
+            return -1;
+        }
+        if (state->chunks.empty()) return 0;  // finished, and drained
+
+        chunk = std::move(state->chunks.front());
+        state->chunks.pop_front();
+    }
+
+    // A chunk that does not fit is an error rather than a truncation: half a UTF-8 sequence
+    // would corrupt the reply silently.
+    if (static_cast<int>(chunk.size()) >= buf_size) {
+        set_error("chunk larger than the caller's buffer");
+        return -1;
+    }
+    std::memcpy(out_buf, chunk.data(), chunk.size());
+    out_buf[chunk.size()] = '\0';
+    return static_cast<int>(chunk.size());
+}
+
+void koilm_stream_end(KoiLmConversation* conversation) {
+    if (conversation == nullptr) return;
+
+    StreamState* state = nullptr;
+    {
+        std::lock_guard<std::mutex> guard(g_streams_mutex);
+        auto it = g_streams.find(conversation);
+        if (it == g_streams.end()) return;
+        state = it->second;
+        g_streams.erase(it);
+    }
+
+    // The runtime may still be mid-callback. Marking finished under the lock and waiting for
+    // the final chunk keeps the callback from writing into freed memory; the conversation's own
+    // cancel is what actually stops the generation.
+    litert_lm_conversation_cancel_process(reinterpret_cast<LiteRtLmConversation*>(conversation));
+    {
+        std::unique_lock<std::mutex> lock(state->mutex);
+        state->ready.wait(lock, [state] { return state->finished; });
+    }
+    delete state;
+}

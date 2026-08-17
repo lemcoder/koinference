@@ -1,15 +1,19 @@
 package io.github.lemcoder.koinference.benchmark
 
-import io.github.lemcoder.koinference.GenerationTelemetry
+import kotlinx.coroutines.flow.Flow
 
 /**
  * An engine the harness can benchmark.
  *
- * The harness knows nothing about llama.cpp or LiteRT-LM past this interface — adding a third
- * engine means writing one adapter, not touching the protocol, the schema or the runner.
+ * An adapter's only job is to turn a model path into something that streams chunks. It reports
+ * no timings, no token counts and no throughput — everything measured comes from
+ * [measureGeneration], which is one function, run identically for every engine.
  *
- * Adapters live in this module rather than in the backends: benchmarking is not a backend's
- * job, and a backend that grew a benchmark API would have to keep it stable for everyone.
+ * That is the whole point. An engine that timed itself would be measuring at a layer no other
+ * engine measures at: llama.cpp could stamp its decode loop, LiteRT-LM's Android SDK computes
+ * its own numbers, and the Apple binding computes none — three definitions of "time to first
+ * token" in one results file, none comparable with another. A benchmark's value is in its
+ * methodology being the same everywhere, so the measurement lives here, above all of them.
  */
 interface BenchmarkInferenceEngine {
 
@@ -17,32 +21,33 @@ interface BenchmarkInferenceEngine {
     val id: String
 
     /**
-     * Everything about this engine's configuration that a reader would need to reproduce the
-     * run, as flat key/value pairs — thread count, backend, context size, delegate.
+     * Everything about this engine's configuration a reader would need to reproduce the run,
+     * as flat key/value pairs — thread count, backend, context size.
      *
      * Kept out of the common schema on purpose: these differ per engine and would otherwise
-     * turn into a union of every engine's settings, most of them null. A setting the adapter
+     * become a union of every engine's settings, most of them null. A setting the adapter
      * cannot determine is omitted rather than guessed.
      */
     fun metadata(config: BenchmarkModelConfig): Map<String, String>
 
     /**
-     * Load the model and prepare for generation.
+     * Load the model and prepare to generate.
      *
-     * Timing this is the caller's job — [BenchmarkRunner] measures it as model-load time — so
-     * an adapter must not do lazy work here that will land in the first generation instead.
+     * Timing this is the caller's job, so an adapter must not defer loading work into the first
+     * generation, where it would be counted as inference.
      */
     suspend fun initialize(config: BenchmarkModelConfig): EngineSession
 
     interface EngineSession {
 
         /**
-         * Run one generation.
+         * Stream one reply.
          *
-         * Must not retry, warm up, or cache across calls beyond what the engine does by
-         * itself: the runner decides what is a warmup and what is a measurement.
+         * Cold: nothing happens until collection. The adapter emits chunks as the engine
+         * produces them and does nothing else — no buffering that would delay the first chunk,
+         * because when that chunk arrives is the measurement.
          */
-        suspend fun generate(request: GenerationRequest): GenerationResult
+        fun stream(request: GenerationRequest): Flow<String>
 
         suspend fun close()
     }
@@ -51,29 +56,11 @@ interface BenchmarkInferenceEngine {
 /**
  * One generation to perform.
  *
- * Identical for every engine, which is what makes results comparable at all. An engine that
- * cannot honour a field must say so in [GenerationResult.notes] rather than substituting its
- * own value.
+ * Identical for every engine, which is what makes results comparable. An engine that cannot
+ * honour a field says so in its metadata rather than substituting its own value.
  */
 data class GenerationRequest(
     val promptId: String,
     val prompt: String,
     val maxNewTokens: Int,
-)
-
-/**
- * The outcome of one generation.
- *
- * @property text what the model produced. Kept so a reader can tell a degenerate run (empty,
- *           or a single repeated token) from a fast one.
- * @property wallClockMs measured by the harness around the whole call, always available.
- *           Not a substitute for [telemetry]: it includes the adapter and the binding.
- * @property telemetry what the engine measured about itself, or null when it cannot.
- * @property notes anything the adapter had to compromise on, recorded rather than hidden.
- */
-data class GenerationResult(
-    val text: String,
-    val wallClockMs: Double,
-    val telemetry: GenerationTelemetry?,
-    val notes: List<String> = emptyList(),
 )

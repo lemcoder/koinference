@@ -10,7 +10,6 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <chrono>
 #include <cstring>
 #include <exception>
 #include <string>
@@ -29,18 +28,18 @@ struct KoiModel {
 };
 
 /**
- * Timings of the last koi_generate() on a session.
+ * State of a streaming generation, between koi_generate_begin() and koi_generate_end().
  *
- * Recorded where the truth is — inside the decode loop — because the alternative is the caller
- * dividing a total by a token count, which is not what time-to-first-token means.
+ * The sampler is per-generation because the grammar can change per call, and the position has
+ * to survive across koi_generate_next() calls — that is the whole difference between a pull
+ * loop and the blocking call.
  */
-struct KoiGenerationStats {
-    bool      valid         = false;
-    int       prompt_tokens = 0;
-    int       decode_tokens = 0;
-    long long prefill_us    = 0;  // tokenize + prompt decode
-    long long ttft_us       = 0;  // call entry → first sampled token
-    long long decode_us     = 0;  // first sampled token → last
+struct KoiGeneration {
+    common_sampler* sampler   = nullptr;
+    llama_pos       pos       = 0;
+    int             produced  = 0;
+    int             n_predict = 0;
+    bool            finished  = true;
 };
 
 struct KoiSession {
@@ -49,14 +48,8 @@ struct KoiSession {
     llama_batch               batch;
     common_chat_templates_ptr chat_templates;
     KoiSessionParams          params;
-    KoiGenerationStats        stats;
+    KoiGeneration             generation;
 };
-
-using koi_clock = std::chrono::steady_clock;
-
-static long long koi_us_since(const koi_clock::time_point& start) {
-    return std::chrono::duration_cast<std::chrono::microseconds>(koi_clock::now() - start).count();
-}
 
 /* ── backend ──────────────────────────────────────────────────────────────── */
 
@@ -129,6 +122,7 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
 
 void koi_session_free(KoiSession* session) {
     if (!session) return;
+    koi_generate_end(session);
     session->chat_templates.reset();
     llama_batch_free(session->batch);
     llama_free(session->ctx);
@@ -158,30 +152,16 @@ static int decode_in_batches(
 
 /* ── generation ───────────────────────────────────────────────────────────── */
 
-int koi_generate(
-        KoiSession*  session,
-        const char*  system_prompt,
-        const char*  user_prompt,
-        const char*  grammar,
-        char*        out_buf,
-        int          buf_size
+// Formats the prompt the way this model's chat template asks for, or plainly when it has none.
+static std::string koi_build_prompt(
+        KoiSession* session,
+        const char* system_prompt,
+        const char* user_prompt,
+        bool        has_template
 ) {
-    if (!session || !user_prompt || !out_buf || buf_size <= 0) return -1;
-
-    // Invalidated up front: a call that fails half way must not leave the previous call's
-    // numbers readable as if they described this one.
-    session->stats = KoiGenerationStats{};
-    const auto t_start = koi_clock::now();
-
-    // llama_kv_cache_clear was removed after b5001; the memory abstraction replaced it.
-    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
-
-    // Build prompt string
-    const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
     std::string prompt;
-    std::vector<common_chat_msg> msgs;
-
     if (has_template) {
+        std::vector<common_chat_msg> msgs;
         if (system_prompt && system_prompt[0] != '\0') {
             common_chat_msg sys{ "system", system_prompt };
             prompt = common_chat_format_single(session->chat_templates.get(), msgs, sys, false, false);
@@ -189,20 +169,36 @@ int koi_generate(
         }
         common_chat_msg usr{ "user", user_prompt };
         prompt += common_chat_format_single(session->chat_templates.get(), msgs, usr, true, false);
-        msgs.push_back(std::move(usr));
     } else {
         if (system_prompt && system_prompt[0] != '\0') {
             prompt = std::string(system_prompt) + "\n";
         }
         prompt += user_prompt;
     }
+    return prompt;
+}
 
-    // Tokenize and prefill
+int koi_generate_begin(
+        KoiSession*  session,
+        const char*  system_prompt,
+        const char*  user_prompt,
+        const char*  grammar
+) {
+    if (!session || !user_prompt) return -1;
+
+    // Any generation left open is discarded rather than leaked: callers get this wrong, and a
+    // stranded sampler would otherwise outlive the session.
+    koi_generate_end(session);
+
+    // llama_kv_cache_clear was removed after b5001; the memory abstraction replaced it.
+    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
+
+    const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
+    const std::string prompt = koi_build_prompt(session, system_prompt, user_prompt, has_template);
+
     const auto tokens = common_tokenize(session->ctx, prompt, has_template, has_template);
     if (decode_in_batches(session->ctx, session->batch, tokens, 0, true) != 0) return -1;
-    const long long prefill_us = koi_us_since(t_start);
 
-    // Build sampler (per-call so grammar can vary)
     common_params_sampling sparams;
     sparams.temp  = session->params.temp;
     sparams.top_k = session->params.top_k;
@@ -214,55 +210,93 @@ int koi_generate(
         sparams.grammar = common_grammar(COMMON_GRAMMAR_TYPE_USER, grammar);
     }
 
-    auto* sampler = common_sampler_init(session->model, sparams);
+    common_sampler* sampler = common_sampler_init(session->model, sparams);
     if (!sampler) return -1;
 
-    // Decode
-    std::string result;
-    llama_pos pos = static_cast<llama_pos>(tokens.size());
-    const int n_predict = (session->params.n_predict <= 0) ? DEFAULT_N_PREDICT : session->params.n_predict;
-    const llama_vocab* vocab = llama_model_get_vocab(session->model);
+    session->generation.sampler   = sampler;
+    session->generation.pos       = static_cast<llama_pos>(tokens.size());
+    session->generation.produced  = 0;
+    session->generation.n_predict = (session->params.n_predict <= 0)
+        ? DEFAULT_N_PREDICT
+        : session->params.n_predict;
+    session->generation.finished  = false;
 
-    long long ttft_us       = 0;
-    int       decode_tokens = 0;
-    auto      t_first_token = koi_clock::now();
+    return static_cast<int>(tokens.size());
+}
 
-    for (int i = 0; i < n_predict; i++) {
-        const llama_token id = common_sampler_sample(sampler, session->ctx, -1);
-        common_sampler_accept(sampler, id, true);
+int koi_generate_next(KoiSession* session, char* out_buf, int buf_size) {
+    if (!session || !out_buf || buf_size <= 0) return -1;
 
-        if (i == 0) {
-            // Stamped before the end-of-generation check: the first token exists by now, and a
-            // model that immediately emits EOG still took this long to decide that.
-            t_first_token = koi_clock::now();
-            ttft_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                t_first_token - t_start).count();
-        }
-
-        if (llama_vocab_is_eog(vocab, id)) break;
-
-        result += common_token_to_piece(session->ctx, id);
-        decode_tokens++;
-
-        common_batch_clear(session->batch);
-        common_batch_add(session->batch, id, pos++, {0}, true);
-        if (llama_decode(session->ctx, session->batch) != 0) {
-            common_sampler_free(sampler);
-            return -1;
-        }
+    KoiGeneration& gen = session->generation;
+    if (gen.finished || !gen.sampler) return 0;
+    if (gen.produced >= gen.n_predict) {
+        gen.finished = true;
+        return 0;
     }
 
-    common_sampler_free(sampler);
+    const llama_token id = common_sampler_sample(gen.sampler, session->ctx, -1);
+    common_sampler_accept(gen.sampler, id, true);
 
-    session->stats.valid         = true;
-    session->stats.prompt_tokens = static_cast<int>(tokens.size());
-    session->stats.decode_tokens = decode_tokens;
-    session->stats.prefill_us    = prefill_us;
-    session->stats.ttft_us       = ttft_us;
-    // From the first token, not from call entry: prefill is reported separately and adding it
-    // here would make decode tokens/sec a function of prompt length.
-    session->stats.decode_us     = std::chrono::duration_cast<std::chrono::microseconds>(
-        koi_clock::now() - t_first_token).count();
+    const llama_vocab* vocab = llama_model_get_vocab(session->model);
+    if (llama_vocab_is_eog(vocab, id)) {
+        gen.finished = true;
+        return 0;
+    }
+
+    const std::string piece = common_token_to_piece(session->ctx, id);
+    // A piece that does not fit is an error rather than a truncation: half a UTF-8 sequence
+    // handed to the caller would corrupt the reply silently.
+    if (static_cast<int>(piece.size()) >= buf_size) return -1;
+    std::memcpy(out_buf, piece.c_str(), piece.size());
+    out_buf[piece.size()] = '\0';
+    gen.produced++;
+
+    // Decoding the token just emitted is what prepares the next one, so it happens here rather
+    // than at the top: the caller gets its chunk as early as possible.
+    common_batch_clear(session->batch);
+    common_batch_add(session->batch, id, gen.pos++, {0}, true);
+    if (llama_decode(session->ctx, session->batch) != 0) {
+        gen.finished = true;
+        return -1;
+    }
+
+    return static_cast<int>(piece.size());
+}
+
+void koi_generate_end(KoiSession* session) {
+    if (!session) return;
+    if (session->generation.sampler) {
+        common_sampler_free(session->generation.sampler);
+    }
+    session->generation = KoiGeneration{};
+}
+
+int koi_generate(
+        KoiSession*  session,
+        const char*  system_prompt,
+        const char*  user_prompt,
+        const char*  grammar,
+        char*        out_buf,
+        int          buf_size
+) {
+    if (!session || !user_prompt || !out_buf || buf_size <= 0) return -1;
+
+    // The blocking call is the streaming one, drained. One decode implementation, so the two
+    // cannot drift into producing different text.
+    if (koi_generate_begin(session, system_prompt, user_prompt, grammar) < 0) return -1;
+
+    std::string result;
+    char piece[512];
+    while (true) {
+        const int written = koi_generate_next(session, piece, sizeof(piece));
+        if (written < 0) {
+            koi_generate_end(session);
+            return -1;
+        }
+        if (written == 0) break;
+        result.append(piece, static_cast<size_t>(written));
+    }
+    koi_generate_end(session);
 
     const int len = std::min(static_cast<int>(result.size()), buf_size - 1);
     std::memcpy(out_buf, result.c_str(), len);
@@ -313,25 +347,3 @@ int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size) 
     return static_cast<int>(grammar.size());
 }
 
-/* ── generation telemetry ─────────────────────────────────────────────────── */
-
-// -1 rather than 0 for "no measurement": a caller must be able to tell an unmeasured session
-// from one that genuinely produced no tokens.
-static int koi_stat(KoiSession* session, long long KoiGenerationStats::* field) {
-    if (!session || !session->stats.valid) return -1;
-    return static_cast<int>(session->stats.*field);
-}
-
-int koi_last_prompt_tokens(KoiSession* session) {
-    if (!session || !session->stats.valid) return -1;
-    return session->stats.prompt_tokens;
-}
-
-int koi_last_decode_tokens(KoiSession* session) {
-    if (!session || !session->stats.valid) return -1;
-    return session->stats.decode_tokens;
-}
-
-int koi_last_prefill_us(KoiSession* session) { return koi_stat(session, &KoiGenerationStats::prefill_us); }
-int koi_last_ttft_us(KoiSession* session)    { return koi_stat(session, &KoiGenerationStats::ttft_us); }
-int koi_last_decode_us(KoiSession* session)  { return koi_stat(session, &KoiGenerationStats::decode_us); }

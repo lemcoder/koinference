@@ -68,45 +68,48 @@ data class WorkloadInfo(
     /** Characters, not tokens: the harness has no tokenizer of its own and will not guess. */
     val promptChars: Int,
     val maxNewTokens: Int,
-    /** As reported by the engine, when it reports one. */
-    val inputTokens: Int? = null,
 )
 
 @Serializable
 data class InitializationMetrics(
     /** Process start to the harness taking its first measurement. Null off Android. */
     val processStartMs: Double? = null,
-    val engineInitMs: Double? = null,
     val modelLoadMs: Double? = null,
-    /** Only when the engine initialises its tokenizer separately and says so. */
+    /**
+     * Neither engine separates tokenizer setup from model loading, and neither is asked to
+     * report it: it stays null rather than being carved out of modelLoadMs by guesswork.
+     */
     val tokenizerInitMs: Double? = null,
 )
 
 /**
  * One iteration.
  *
- * [wallClockMs] is always present; everything under [telemetrySource] is only as good as the
- * source says it is. Records taken through different sources are never averaged together —
- * see [io.github.lemcoder.koinference.TelemetrySource].
+ * Everything here was measured by the harness, above the engine, with one clock — see
+ * [measureGeneration]. No field comes from an engine describing itself.
  */
 @Serializable
 data class GenerationSample(
     val iteration: Int,
+    /** Ask to last chunk, measured by the harness. */
     val wallClockMs: Double,
-    val telemetrySource: String? = null,
-    val ttftMs: Double? = null,
-    val prefillMs: Double? = null,
-    val decodeMs: Double? = null,
-    val promptTokens: Int? = null,
-    val generatedTokens: Int? = null,
-    val prefillTokensPerSecond: Double? = null,
-    val decodeTokensPerSecond: Double? = null,
     /**
-     * Generated tokens over the whole call, prefill included. Null when the engine reports no
-     * token count — it is never derived from the character count of the reply.
+     * Ask to *first* chunk. Null only when the engine produced nothing at all.
+     *
+     * Measured above the engine, identically for every engine, so this number means the same
+     * thing in every row. It includes the binding the chunk travelled through, which is what a
+     * caller actually waits for.
      */
-    val endToEndTokensPerSecond: Double? = null,
-    /** Characters produced, which is not a token count and is not used as one. */
+    val ttftMs: Double? = null,
+    /** First chunk to last, so throughput does not vary with prompt length. */
+    val streamingMs: Double? = null,
+    /**
+     * Emissions, not tokens — one token per chunk for llama.cpp, whatever LiteRT-LM sends for
+     * LiteRT-LM. Named for what it is so nobody divides it into a token throughput.
+     */
+    val chunks: Int = 0,
+    val chunksPerSecond: Double? = null,
+    /** Characters produced. Not a token count, and never used as one. */
     val outputChars: Int,
     val peakPssKb: Long? = null,
 )
@@ -175,8 +178,8 @@ data class SustainedMetrics(
     val requestedSeconds: Int,
     val actualSeconds: Double,
     val iterations: Int,
-    /** Throughput of each iteration in order, so a decline over time is visible. */
-    val decodeTokensPerSecondSeries: List<Double> = emptyList(),
+    /** Chunks/sec of each iteration in order, so a decline under load is visible. */
+    val chunksPerSecondSeries: List<Double> = emptyList(),
     val wallClockMsSeries: List<Double> = emptyList(),
     val thermalSamples: List<ThermalSample> = emptyList(),
 )

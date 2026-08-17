@@ -1,8 +1,8 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.GenerationTelemetry
 import io.github.lemcoder.koinference.InferenceBackend
+import kotlinx.coroutines.flow.Flow
 
 /**
  * The seam between the common runtime and whichever LiteRT-LM binding a target has.
@@ -41,24 +41,19 @@ internal interface LiteRtLmConversation {
      *
      * @param jsonSchema JSON schema for constrained decoding, or null for unconstrained.
      */
-    fun generate(prompt: String, jsonSchema: String?): GeneratedReply
+    fun generate(prompt: String, jsonSchema: String?): String
+
+    /**
+     * Stream the reply, one chunk per emission.
+     *
+     * The Apple leg pulls from the facade, which buffers what the runtime pushes from its own
+     * thread; Android collects the SDK's own flow. Both hand back chunks and nothing else —
+     * whoever is timing decides when each one arrived.
+     */
+    fun stream(prompt: String, jsonSchema: String?): Flow<String>
 
     fun close()
 }
-
-/**
- * A reply and whatever the binding could measure about producing it.
- *
- * @property text the assistant's text, already unwrapped from whatever envelope the platform's
- *           binding returns.
- * @property telemetry null on a binding that cannot measure. The C API hangs its benchmark
- *           info off a Session and the facade drives a Conversation, which never exposes one,
- *           so the Apple leg reports nothing rather than a zero that reads like a measurement.
- */
-internal class GeneratedReply(
-    val text: String,
-    val telemetry: GenerationTelemetry?,
-)
 
 /** The binding this target was compiled with. */
 internal expect fun platformBridge(): LiteRtLmBridge

@@ -1,7 +1,8 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
-import io.github.lemcoder.koinference.GenerationTelemetry
 import io.github.lemcoder.koinference.InferenceBackend
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * A LiteRT-LM binding that records instead of inferring.
@@ -51,14 +52,20 @@ internal class FakeConversation(val options: ConversationOptions) : LiteRtLmConv
     /** Runs inside [generate], for tests that need to hold a generation open. */
     var whileGenerating: (() -> Unit)? = null
 
-    override fun generate(prompt: String, jsonSchema: String?): GeneratedReply {
+    override fun generate(prompt: String, jsonSchema: String?): String {
         turns += Turn(prompt, jsonSchema)
         whileGenerating?.invoke()
-        return GeneratedReply("reply to $prompt", telemetry)
+        return "reply to $prompt"
     }
 
-    /** What [generate] reports. Null by default, matching a binding that cannot measure. */
-    var telemetry: GenerationTelemetry? = null
+    /** Chunks [stream] emits; the default splits the canned reply so collectors see several. */
+    var chunks: List<String>? = null
+
+    override fun stream(prompt: String, jsonSchema: String?): Flow<String> = flow {
+        turns += Turn(prompt, jsonSchema)
+        whileGenerating?.invoke()
+        (chunks ?: "reply to $prompt".split(" ").map { "$it " }).forEach { emit(it) }
+    }
 
     override fun close() {
         closed = true

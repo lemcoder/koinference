@@ -2,10 +2,12 @@ package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import android.util.Log
-import io.github.lemcoder.koinference.InstrumentedRuntime
+import io.github.lemcoder.koinference.GenerationParameters
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -58,44 +60,39 @@ class LiteRtLmDeviceTest {
     }
 
     /**
-     * Records which telemetry source this device actually produced.
+     * Checks that the streamed chunks concatenate to the blocking reply.
      *
-     * The SDK computes TTFT and token counts itself, but nothing in the public EngineConfig
-     * turns benchmarking on, so whether getBenchmarkInfo() holds real numbers or zeros can only
-     * be settled on a device. The benchmark harness handles both — engine numbers when they are
-     * there, the streamed first chunk when they are not — and this test writes the answer into
-     * the log so the first run on new hardware states it rather than leaving it assumed.
-     *
-     * It asserts only what must hold either way: some first-token measurement exists.
+     * The Android binding is Google's SDK, and whether its flow emits deltas or the reply so
+     * far is its business, not something documented. The Apple leg was observed to emit deltas
+     * inside a JSON envelope; if this leg were cumulative instead, concatenation would produce
+     * the reply repeated at every prefix length, and every benchmark record on Android would
+     * carry a plausible-looking output length that is nonsense. Cheap to check on device,
+     * impossible to check anywhere else.
      */
     @Test
-    fun reportsWhichTelemetrySourceThisDeviceProduces() {
+    fun streamedChunksConcatenateToTheBlockingReply() {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(maxOutputTokens = 32)
+            val loader = LiteRtLmModelLoader(
+                maxOutputTokens = 24,
+                // Greedy, so the two calls are answering identically rather than by luck.
+                parameters = GenerationParameters(temperature = 0.0, seed = 42),
+            )
             val runtime = loader.load(modelPath)
             try {
-                runtime.generateResponse("Say hello.")
-                val telemetry = (runtime as InstrumentedRuntime).lastGeneration
-                assertNotNull(telemetry, "the Android binding always reports something")
+                val streamed = runtime.streamResponse("Say hello.").toList()
+                runtime.resetConversation()
+                val blocking = runtime.generateResponse("Say hello.")
 
                 Log.i(
                     "koinference-benchmark",
-                    "LiteRT-LM telemetry: source=${telemetry.source} " +
-                        "ttftMs=${telemetry.timeToFirstTokenMs} " +
-                        "promptTokens=${telemetry.promptTokens} " +
-                        "decodeTokens=${telemetry.decodeTokens} " +
-                        "decodeTps=${telemetry.decodeTokensPerSecond} " +
-                        "engineInitMs=${telemetry.engineInitMs}",
+                    "LiteRT-LM streaming: chunks=${streamed.size} " +
+                        "streamedChars=${streamed.sumOf { it.length }} blockingChars=${blocking.length}",
                 )
 
-                // Either source is acceptable; a missing first-token time is not.
-                assertNotNull(
-                    telemetry.timeToFirstTokenMs,
-                    "no time to first token from either source",
-                )
-                assertTrue(telemetry.timeToFirstTokenMs!! > 0.0)
+                assertTrue(streamed.isNotEmpty(), "no chunks were emitted")
+                assertEquals(blocking, streamed.joinToString(""))
             } finally {
                 loader.unload(modelPath)
             }

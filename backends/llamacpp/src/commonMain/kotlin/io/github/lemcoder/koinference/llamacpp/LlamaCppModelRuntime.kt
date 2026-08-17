@@ -3,11 +3,12 @@ package io.github.lemcoder.koinference.llamacpp
 import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.ModelRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.TextRuntime
 
 sealed interface LlamaCppModelRuntime : ModelRuntime
 
-interface LlamaCppTextRuntime : LlamaCppModelRuntime, TextRuntime {
+interface LlamaCppTextRuntime : LlamaCppModelRuntime, TextRuntime, StreamingTextRuntime {
     /** What the next session will be created with. */
     val generationParameters: GenerationParameters
 

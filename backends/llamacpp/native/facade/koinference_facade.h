@@ -116,29 +116,39 @@ int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_siz
  */
 int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size);
 
-/* ── generation telemetry ─────────────────────────────────────────────────── */
+/* ── streaming generation ─────────────────────────────────────────────────── */
 
 /**
- * Timings and token counts of the last koi_generate() on this session.
+ * Streaming, as a pull loop rather than a callback.
  *
- * Recorded inside the decode loop, which is the only place time-to-first-token exists: dividing
- * a total duration by a token count answers a different question. Every getter returns -1 when
- * the session is NULL or no generation has completed on it, so "unmeasured" stays distinct from
- * "measured as zero".
+ * Three calls instead of a function pointer because the JVM leg reaches this header through
+ * generated JNI bridges, which marshal scalars and buffers and have no way to hand a C
+ * callback back into the JVM. A pull loop needs neither: the caller drives it, and the same
+ * three functions work identically through cinterop and through JNI.
  *
- * Scalar getters rather than an out-struct because the JNI bridge generator marshals an `int`
- * return with no ambiguity. They are appended here for the same reason as the function above:
- * bridge numbering follows declaration order.
+ * Deliberately no timing here. The caller decides when a token arrived, which is what lets one
+ * clock in one place measure every engine the same way — a facade that timed itself would be
+ * measuring something no other engine measures.
  *
- * Durations are microseconds. koi_last_prefill_us covers tokenizing and decoding the prompt;
- * koi_last_ttft_us is call entry to first sampled token; koi_last_decode_us runs from the first
- * sampled token to the last, so decode throughput does not depend on prompt length.
+ * Usage:
+ *
+ *     if (koi_generate_begin(s, sys, user, grammar) < 0) { ... }
+ *     while ((n = koi_generate_next(s, buf, sizeof buf)) > 0) { ... }
+ *     koi_generate_end(s);          // also required if the loop is abandoned early
+ *
+ * @return koi_generate_begin: prompt tokens on success, -1 on failure.
+ *         koi_generate_next: bytes written (>0), 0 at end of generation, -1 on error.
  */
-int koi_last_prompt_tokens(KoiSession* session);
-int koi_last_decode_tokens(KoiSession* session);
-int koi_last_prefill_us(KoiSession* session);
-int koi_last_ttft_us(KoiSession* session);
-int koi_last_decode_us(KoiSession* session);
+int koi_generate_begin(
+    KoiSession*  session,
+    const char*  system_prompt,
+    const char*  user_prompt,
+    const char*  grammar
+);
+
+int koi_generate_next(KoiSession* session, char* out_buf, int buf_size);
+
+void koi_generate_end(KoiSession* session);
 
 #ifdef __cplusplus
 }

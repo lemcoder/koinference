@@ -13,8 +13,6 @@ import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
 import io.github.lemcoder.koinference.llamacpp.jni.kniCString
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -81,19 +79,24 @@ internal actual fun llamaJsonSchemaToGrammar(schema: String): String {
     return if (written <= 0) "" else String(out, 0, written, Charsets.UTF_8)
 }
 
-// Bridges 11-15 are the koi_last_* getters, in header order. Each returns -1 when the session
-// has no measurement, which callers pass through rather than turning into 0.
-internal actual fun llamaLastPromptTokens(sessionHandle: Long): Int =
-    if (sessionHandle == 0L) -1 else kniBridge11(sessionHandle)
+// Bridges 11-13 are the streaming trio, in header order.
+private const val CHUNK_BUF_SIZE = 512
 
-internal actual fun llamaLastDecodeTokens(sessionHandle: Long): Int =
-    if (sessionHandle == 0L) -1 else kniBridge12(sessionHandle)
+internal actual fun llamaGenerateBegin(
+    sessionHandle: Long,
+    systemPrompt: String?,
+    userPrompt: String,
+    grammar: String?,
+): Int = if (sessionHandle == 0L) -1 else kniBridge11(sessionHandle, systemPrompt, userPrompt, grammar)
 
-internal actual fun llamaLastPrefillMicros(sessionHandle: Long): Int =
-    if (sessionHandle == 0L) -1 else kniBridge13(sessionHandle)
+internal actual fun llamaGenerateNext(sessionHandle: Long): String? {
+    if (sessionHandle == 0L) return null
+    val out = ByteArray(CHUNK_BUF_SIZE)
+    val written = kniBridge12(sessionHandle, out, out.size)
+    check(written >= 0) { "llama.cpp streaming failed" }
+    return if (written == 0) null else String(out, 0, written, Charsets.UTF_8)
+}
 
-internal actual fun llamaLastTtftMicros(sessionHandle: Long): Int =
-    if (sessionHandle == 0L) -1 else kniBridge14(sessionHandle)
-
-internal actual fun llamaLastDecodeMicros(sessionHandle: Long): Int =
-    if (sessionHandle == 0L) -1 else kniBridge15(sessionHandle)
+internal actual fun llamaGenerateEnd(sessionHandle: Long) {
+    if (sessionHandle != 0L) kniBridge13(sessionHandle)
+}

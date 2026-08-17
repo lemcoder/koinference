@@ -76,7 +76,7 @@ class HostBenchmarkTest {
     }
 
     @Test
-    fun `llama_cpp runs the protocol and reports engine-measured telemetry`() = runTest {
+    fun `llama_cpp runs the protocol and the harness measures it`() = runTest {
         val path = ggufPath ?: return@runTest
 
         val file = BenchmarkRunner(
@@ -90,13 +90,11 @@ class HostBenchmarkTest {
         assertEquals(1, record.warmupSamples.size, "warmup is kept apart from measurements")
 
         record.samples.forEach { sample ->
-            assertEquals("ENGINE", sample.telemetrySource)
-            val ttft = assertNotNull(sample.ttftMs, "ttft")
-            val generated = assertNotNull(sample.generatedTokens, "generated tokens")
-            assertTrue(generated in 1..MAX_NEW_TOKENS, "generated $generated")
+            val ttft = assertNotNull(sample.ttftMs, "time to first chunk")
+            // llama.cpp emits one token per chunk, so the cap is observable from outside.
+            assertTrue(sample.chunks in 1..MAX_NEW_TOKENS, "chunks ${sample.chunks}")
             assertTrue(ttft <= sample.wallClockMs, "ttft $ttft > wall clock ${sample.wallClockMs}")
-            assertNotNull(sample.decodeTokensPerSecond, "decode tok/s")
-            assertNotNull(sample.promptTokens, "prompt tokens")
+            assertNotNull(sample.chunksPerSecond, "chunks/sec")
         }
 
         assertNotNull(record.initialization?.modelLoadMs)
@@ -110,7 +108,7 @@ class HostBenchmarkTest {
     }
 
     @Test
-    fun `litert_lm runs the protocol and reports no telemetry on this leg`() = runTest {
+    fun `litert_lm is measured by exactly the same code`() = runTest {
         val path = liteRtLmPath ?: return@runTest
 
         val file = BenchmarkRunner(
@@ -123,14 +121,15 @@ class HostBenchmarkTest {
         record.samples.forEach { sample ->
             assertTrue(sample.wallClockMs > 0.0)
             assertTrue(sample.outputChars > 0, "the model produced nothing")
-            // The Apple binding cannot measure: the C API's benchmark info hangs off a Session
-            // and the facade drives a Conversation. Null, not zero, and the note says why.
-            assertNull(sample.ttftMs)
-            assertNull(sample.generatedTokens)
+            // The point of the rewrite: this leg reports no telemetry of its own, and time to
+            // first token is available anyway, because the harness measures it.
+            val ttft = assertNotNull(sample.ttftMs, "time to first chunk")
+            assertTrue(ttft <= sample.wallClockMs, "ttft $ttft > wall clock ${sample.wallClockMs}")
+            assertTrue(sample.chunks > 0, "no chunks were emitted")
         }
         assertTrue(
-            record.notes.any { it.contains("token count") },
-            "an engine reporting no tokens must say so: ${record.notes}",
+            record.notes.any { it.contains("Chunks are emissions") },
+            "a record must say what a chunk is: ${record.notes}",
         )
 
         writeIfRequested("host-litertlm.json", file)

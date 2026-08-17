@@ -20,36 +20,37 @@ engine here is **LiteRT-LM**, Google's LLM layer, which is what `:backends:liter
 
 ## Metrics, and where each number comes from
 
-Time to first token is never inferred by dividing a total by a token count. Each engine reports
-it from where it happens, and every sample records which:
+**Every number is measured by the harness, above the engine, with one clock.** No backend
+reports anything about itself. An adapter's only job is to turn a model path into a `Flow` of
+chunks; `measureGeneration` timestamps the first one, counts the rest, and stops the clock.
 
-| | llama.cpp | LiteRT-LM (Android) | LiteRT-LM (Apple/host) |
-|---|---|---|---|
-| source | `ENGINE` | `ENGINE`, else `STREAM_FIRST_CHUNK` | none |
-| TTFT | stamped in the decode loop | engine's, else first streamed chunk | ✗ |
-| prefill ms | ✓ | ✗ (rates are reported, durations are not) | ✗ |
-| prompt / generated tokens | ✓ | ✓ when the engine's counters are populated | ✗ |
-| decode tokens/sec | ✓ | ✓ when the engine's counters are populated | ✗ |
+That is the whole methodology. The alternative — each engine reporting its own timings — was
+tried and thrown away: llama.cpp could stamp its decode loop, LiteRT-LM's Android SDK computes
+its own figures, and its Apple binding computes none, which is three definitions of "time to
+first token" in one results file and no way to compare any two of them. Measuring one layer
+higher costs a little accuracy (the number includes the JNI or cinterop hop the chunk travelled
+through) and buys the only thing that matters: the same number meaning the same thing
+everywhere. It is also the number a caller experiences, since a token they have not received
+has not arrived.
 
-Three things worth stating plainly:
+| metric | how |
+|---|---|
+| time to first chunk | harness clock, stamped when the first chunk reaches it |
+| total latency | harness clock, ask to last chunk |
+| chunks, chunks/sec | counted by the harness, from the first chunk |
+| model load | harness clock around `initialize` |
+| peak PSS, thermal, battery | Android platform APIs, sampled by the harness |
 
-* **LiteRT-LM on Android asks the engine first.** `Conversation.getBenchmarkInfo()` is an
-  `@ExperimentalApi` **function**, not a property — `conversation.benchmarkInfo` does not
-  compile, which is easy to mistake for the accessor being unavailable. It is available, and it
-  carries TTFT, prefill/decode token counts, both throughputs and an init time.
-* **Whether it holds anything can only be settled on a device.** Nothing in the public
-  `EngineConfig` turns benchmarking on, so a runtime built without it returns zeros. Zero
-  time-to-first-token is not a measurement: the harness rejects it and falls back to timing the
-  first streamed chunk, labelled `STREAM_FIRST_CHUNK`. `LiteRtLmDeviceTest` logs which source
-  the device produced, so the first real run answers this instead of leaving it assumed.
-* **`ENGINE` and `STREAM_FIRST_CHUNK` values are never averaged together.** The second includes
-  the binding that delivered the chunk. The analysis tool reports the source in every table and
-  flags a comparison that mixes them.
+**Chunks are emissions, not tokens.** llama.cpp emits one token per chunk, because the facade's
+pull loop returns one sampled token per call. LiteRT-LM emits whatever it emits — on the models
+tested it is also one token per chunk, which is visible in the data rather than assumed, since
+both engines report 32 chunks under a 32-token cap. The schema calls them chunks anyway, and
+every throughput table prints the chunk count beside the rate, because the day an engine batches
+its output is the day a "tokens/sec" column would quietly start comparing different things.
 
-On the Apple leg there is nothing to ask: `litert_lm_session_get_benchmark_info` takes a
-`Session`, the facade drives a `Conversation`, and the C API exposes no way to reach one from
-the other. Measuring it there would mean driving the session API instead — a different code path
-from the one the library actually uses, which is not what a benchmark should measure.
+What no longer exists, deliberately: token counts from inside an engine, prefill/decode splits,
+and `GenerationTelemetry` in `:core`. The library exposes streaming — useful to any caller
+showing text as it arrives — and nothing benchmark-shaped at all.
 
 Memory, thermal and battery come from Android APIs (`Debug.getMemoryInfo`, `PowerManager`'s
 thermal status, `BatteryManager`, `/proc/self/status`, `cpufreq`) and are **null off Android** —

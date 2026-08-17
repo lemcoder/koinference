@@ -1,6 +1,5 @@
 package io.github.lemcoder.koinference.benchmark
 
-import io.github.lemcoder.koinference.GenerationTelemetry
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -111,7 +110,6 @@ class BenchmarkRunner(
         var session: BenchmarkInferenceEngine.EngineSession? = null
         var initialization: InitializationMetrics? = null
         var sustained: SustainedMetrics? = null
-        var engineInitMs: Double? = null
 
         fun observePeak(snapshot: MemorySnapshot?) {
             val pss = snapshot?.pssKb ?: return
@@ -128,9 +126,6 @@ class BenchmarkRunner(
             initialization = InitializationMetrics(
                 processStartMs = probe.processUptimeMs(),
                 modelLoadMs = modelLoadMs,
-                // Filled from the engine's own report after the first generation, when it has
-                // one. Neither engine separates tokenizer setup, so that stays null.
-                engineInitMs = null,
                 tokenizerInitMs = null,
             )
 
@@ -147,17 +142,14 @@ class BenchmarkRunner(
             observePeak(memoryAfterWarmup)
 
             repeat(config.measurementIterations) { iteration ->
-                samples += sample(session, request, iteration, ::observePeak) { telemetry ->
-                    // Only LiteRT-LM reports this, and only when its own benchmarking is on.
-                    telemetry?.engineInitMs?.let { engineInitMs = it }
-                }
+                samples += sample(session, request, iteration, ::observePeak)
             }
 
             if (config.sustainedDurationSeconds > 0) {
                 sustained = sustain(session, request, ::observePeak)
             }
 
-            initialization = initialization.copy(engineInitMs = engineInitMs)
+
         } catch (cancellation: CancellationException) {
             throw cancellation
         } catch (failure: Throwable) {
@@ -185,16 +177,18 @@ class BenchmarkRunner(
         val memoryAfter = probe.readMemory()
         observePeak(memoryAfter)
 
-        if (samples.any { it.generatedTokens == null }) {
-            notes += "This engine reported no token count, so decode tokens/sec is unavailable " +
-                "for it; only wall clock and time to first token can be compared."
-        }
+        // Chunk sizes are an engine's own business, so throughput in chunks/sec is only
+        // comparable between engines whose chunks are comparable. Said once per record rather
+        // than assumed by whoever reads the table.
+        notes += "Chunks are emissions, not tokens: one token per chunk for llama.cpp, " +
+            "whatever LiteRT-LM emits for LiteRT-LM. Time to first chunk and total latency " +
+            "are directly comparable; chunks/sec is comparable only alongside the chunk count."
 
         log("${engine.id} / ${workload.promptId}: ${samples.size} samples")
 
         return BenchmarkRecord(
             engine = engineInfo,
-            workload = workloadInfo.copy(inputTokens = samples.firstNotNullOfOrNull { it.promptTokens }),
+            workload = workloadInfo,
             status = BenchmarkStatus.SUCCESS,
             initialization = initialization,
             samples = samples,
@@ -213,14 +207,13 @@ class BenchmarkRunner(
         request: GenerationRequest,
         iteration: Int,
         observePeak: (MemorySnapshot?) -> Unit,
-        onTelemetry: (GenerationTelemetry?) -> Unit = {},
     ): GenerationSample {
-        val result = session.generate(request)
+        // One measurement function for every engine — see measureGeneration.
+        val result = measureGeneration(probe, session.stream(request))
         // Immediately after generation, which is the closest this can get to the peak without
         // a sampling thread. Named peakPssKb per sample rather than "the" peak for that reason.
         val afterGeneration = probe.readMemory()
         observePeak(afterGeneration)
-        onTelemetry(result.telemetry)
         return result.toSample(iteration, afterGeneration?.pssKb)
     }
 
@@ -237,10 +230,10 @@ class BenchmarkRunner(
         var iterations = 0
 
         while (probe.monotonicNanos() - start < durationNanos) {
-            val result = session.generate(request)
+            val result = measureGeneration(probe, session.stream(request))
             iterations++
-            wallClocks += result.wallClockMs
-            result.telemetry?.decodeTokensPerSecond?.let { decodeRates += it }
+            wallClocks += result.totalMs
+            result.chunksPerSecond?.let { decodeRates += it }
             observePeak(probe.readMemory())
             probe.readThermal()?.let {
                 thermalSamples += it.copy(atMs = (probe.monotonicNanos() - start) / 1_000_000.0)
@@ -251,7 +244,7 @@ class BenchmarkRunner(
             requestedSeconds = config.sustainedDurationSeconds,
             actualSeconds = (probe.monotonicNanos() - start) / 1_000_000_000.0,
             iterations = iterations,
-            decodeTokensPerSecondSeries = decodeRates,
+            chunksPerSecondSeries = decodeRates,
             wallClockMsSeries = wallClocks,
             thermalSamples = thermalSamples,
         )
@@ -330,33 +323,19 @@ class BenchmarkRunner(
 }
 
 /**
- * Maps one generation onto a sample.
+ * Maps one measurement onto a sample.
  *
- * End-to-end throughput needs a token count, so it is null whenever the engine did not report
- * one — deriving it from the reply's character count would be a token estimate wearing a
- * token count's name.
+ * Everything here was measured by [measureGeneration], above every engine, with one clock.
+ * Nothing is derived from anything an engine said about itself, and nothing is derived from the
+ * reply's character count.
  */
-private fun GenerationResult.toSample(iteration: Int, peakPssKb: Long?): GenerationSample {
-    val telemetry: GenerationTelemetry? = telemetry
-    val generated = telemetry?.decodeTokens
-
-    return GenerationSample(
-        iteration = iteration,
-        wallClockMs = wallClockMs,
-        telemetrySource = telemetry?.source?.name,
-        ttftMs = telemetry?.timeToFirstTokenMs,
-        prefillMs = telemetry?.prefillMs,
-        decodeMs = telemetry?.decodeMs,
-        promptTokens = telemetry?.promptTokens,
-        generatedTokens = generated,
-        prefillTokensPerSecond = telemetry?.prefillTokensPerSecond,
-        decodeTokensPerSecond = telemetry?.decodeTokensPerSecond,
-        endToEndTokensPerSecond = if (generated != null && wallClockMs > 0.0) {
-            generated * 1000.0 / wallClockMs
-        } else {
-            null
-        },
-        outputChars = text.length,
-        peakPssKb = peakPssKb,
-    )
-}
+private fun GenerationMeasurement.toSample(iteration: Int, peakPssKb: Long?) = GenerationSample(
+    iteration = iteration,
+    wallClockMs = totalMs,
+    ttftMs = timeToFirstChunkMs,
+    streamingMs = streamingMs,
+    chunks = chunks,
+    chunksPerSecond = chunksPerSecond,
+    outputChars = text.length,
+    peakPssKb = peakPssKb,
+)

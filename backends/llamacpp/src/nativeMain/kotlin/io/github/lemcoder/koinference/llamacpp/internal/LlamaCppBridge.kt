@@ -9,12 +9,10 @@ import koinference.koi_backend_free
 import koinference.koi_backend_init
 import koinference.koi_embed
 import koinference.koi_generate
+import koinference.koi_generate_begin
+import koinference.koi_generate_end
+import koinference.koi_generate_next
 import koinference.koi_json_schema_to_grammar
-import koinference.koi_last_decode_tokens
-import koinference.koi_last_decode_us
-import koinference.koi_last_prefill_us
-import koinference.koi_last_prompt_tokens
-import koinference.koi_last_ttft_us
 import koinference.koi_model_free
 import koinference.koi_model_load
 import koinference.koi_session_create
@@ -100,23 +98,32 @@ internal actual fun llamaJsonSchemaToGrammar(schema: String): String {
     }
 }
 
-private inline fun sessionStat(sessionHandle: Long, read: (CPointer<KoiSession>) -> Int): Int =
-    if (sessionHandle == 0L) -1 else read(sessionHandle.toCPointer<KoiSession>()!!)
+internal actual fun llamaGenerateBegin(
+    sessionHandle: Long,
+    systemPrompt: String?,
+    userPrompt: String,
+    grammar: String?,
+): Int {
+    if (sessionHandle == 0L) return -1
+    return koi_generate_begin(sessionHandle.toCPointer<KoiSession>(), systemPrompt, userPrompt, grammar)
+}
 
-internal actual fun llamaLastPromptTokens(sessionHandle: Long): Int =
-    sessionStat(sessionHandle) { koi_last_prompt_tokens(it) }
+internal actual fun llamaGenerateNext(sessionHandle: Long): String? {
+    if (sessionHandle == 0L) return null
+    // One token per call, and a token is at most a handful of bytes; the facade reports an
+    // error rather than truncating, so a fixed buffer is safe here.
+    val bufSize = 512
+    return memScoped {
+        val buf = allocArray<kotlinx.cinterop.ByteVar>(bufSize)
+        val written = koi_generate_next(sessionHandle.toCPointer<KoiSession>(), buf, bufSize)
+        check(written >= 0) { "llama.cpp streaming failed" }
+        if (written == 0) null else buf.toKString()
+    }
+}
 
-internal actual fun llamaLastDecodeTokens(sessionHandle: Long): Int =
-    sessionStat(sessionHandle) { koi_last_decode_tokens(it) }
-
-internal actual fun llamaLastPrefillMicros(sessionHandle: Long): Int =
-    sessionStat(sessionHandle) { koi_last_prefill_us(it) }
-
-internal actual fun llamaLastTtftMicros(sessionHandle: Long): Int =
-    sessionStat(sessionHandle) { koi_last_ttft_us(it) }
-
-internal actual fun llamaLastDecodeMicros(sessionHandle: Long): Int =
-    sessionStat(sessionHandle) { koi_last_decode_us(it) }
+internal actual fun llamaGenerateEnd(sessionHandle: Long) {
+    if (sessionHandle != 0L) koi_generate_end(sessionHandle.toCPointer<KoiSession>())
+}
 
 internal actual fun llamaEmbed(sessionHandle: Long, text: String): FloatArray {
     if (sessionHandle == 0L) return FloatArray(0)

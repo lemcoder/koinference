@@ -51,17 +51,21 @@ internal expect fun llamaEmbed(sessionHandle: Long, text: String): FloatArray
 internal expect fun llamaJsonSchemaToGrammar(schema: String): String
 
 /**
- * Timings and token counts of the last [llamaGenerate] on a session.
+ * Start a streaming generation. Returns the prompt's token count, or -1 on failure.
  *
- * Each returns -1 when nothing has been measured, which is why they are not folded into the
- * generate call: a benchmark has to tell "no measurement" from "measured zero".
+ * A pull loop rather than a callback: the JVM leg goes through generated JNI bridges, which
+ * cannot hand a C callback back into the JVM. Timing lives in the caller, not here — that is
+ * what lets one clock measure every engine identically.
  */
-internal expect fun llamaLastPromptTokens(sessionHandle: Long): Int
+internal expect fun llamaGenerateBegin(
+    sessionHandle: Long,
+    systemPrompt: String?,
+    userPrompt: String,
+    grammar: String?,
+): Int
 
-internal expect fun llamaLastDecodeTokens(sessionHandle: Long): Int
+/** Next chunk, or null when the generation is finished. Throws on error. */
+internal expect fun llamaGenerateNext(sessionHandle: Long): String?
 
-internal expect fun llamaLastPrefillMicros(sessionHandle: Long): Int
-
-internal expect fun llamaLastTtftMicros(sessionHandle: Long): Int
-
-internal expect fun llamaLastDecodeMicros(sessionHandle: Long): Int
+/** Releases the generation. Safe to call when none is running; required if a loop is abandoned. */
+internal expect fun llamaGenerateEnd(sessionHandle: Long)

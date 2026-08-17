@@ -2,29 +2,27 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.GenerationTelemetry
-import io.github.lemcoder.koinference.InstrumentedRuntime
-import io.github.lemcoder.koinference.TelemetrySource
 import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.textOnly
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaBackend
 import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerate
-import io.github.lemcoder.koinference.llamacpp.internal.llamaLastDecodeMicros
-import io.github.lemcoder.koinference.llamacpp.internal.llamaLastDecodeTokens
-import io.github.lemcoder.koinference.llamacpp.internal.llamaLastPrefillMicros
-import io.github.lemcoder.koinference.llamacpp.internal.llamaLastPromptTokens
-import io.github.lemcoder.koinference.llamacpp.internal.llamaLastTtftMicros
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateBegin
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateEnd
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateNext
 import io.github.lemcoder.koinference.llamacpp.internal.llamaJsonSchemaToGrammar
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -54,7 +52,7 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     settings: RuntimeSettings,
-) : LlamaCppTextRuntime, InstrumentedRuntime {
+) : LlamaCppTextRuntime, StreamingTextRuntime {
 
     override var generationParameters: GenerationParameters = GenerationParameters()
         private set
@@ -68,9 +66,6 @@ class LlamaCppRuntime internal constructor(
     private var sessionHandle: Long = 0L
     private val lock = Mutex()
     private var closed: Boolean = false
-
-    override var lastGeneration: GenerationTelemetry? = null
-        private set
 
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
@@ -88,21 +83,13 @@ class LlamaCppRuntime internal constructor(
             withContext(Dispatchers.Default) {
                 // Conversion happens here rather than in Kotlin: llama.cpp ships the
                 // schema-to-GBNF compiler its own sampler was built against.
-                val grammar = when (constraint) {
-                    is GenerationConstraint.JsonSchema -> llamaJsonSchemaToGrammar(constraint.schema)
-                        .ifEmpty { throw IllegalArgumentException("Not a convertible JSON schema: ${constraint.schema}") }
-
-                    null -> null
-                }
+                val grammar = grammarFor(constraint)
 
                 val session = currentSession()
                 // A -1 from the facade is an empty string here, which is indistinguishable from
                 // a model that produced nothing, so it is raised instead.
                 val reply = llamaGenerate(session, systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for $modelPath") }
-                // Read while the session is still the one that produced the reply: any later
-                // parameter change frees it and the numbers go with it.
-                lastGeneration = readTelemetry(session)
                 reply
             }
         }
@@ -131,6 +118,50 @@ class LlamaCppRuntime internal constructor(
             releaseSession()
             if (backendChanged) releaseModel()
         }
+    }
+
+    /**
+     * Streams the reply a token at a time.
+     *
+     * The whole generation holds the lock: the session carries the KV cache and the sampler,
+     * and a second call decoding into it half way through this one would corrupt both. That
+     * makes an abandoned collection important — the `finally` ends the generation, so a caller
+     * that stops collecting does not leave the session mid-decode for the next one.
+     */
+    override fun streamResponse(
+        prompt: List<PromptPart>,
+        constraint: GenerationConstraint?,
+    ): Flow<String> = flow {
+        val text = prompt.textOnly("llama.cpp")
+
+        lock.withLock {
+            check(!closed) { "This runtime has been unloaded: $modelPath" }
+            val grammar = grammarFor(constraint)
+            val session = currentSession()
+
+            check(llamaGenerateBegin(session, systemPrompt, text, grammar) >= 0) {
+                "llama.cpp could not start generating for $modelPath"
+            }
+            try {
+                while (true) {
+                    // withContext per token rather than around the loop: emitting has to happen
+                    // in the flow's own context, and the decode is what belongs on Default.
+                    val chunk = withContext(Dispatchers.Default) { llamaGenerateNext(session) } ?: break
+                    emit(chunk)
+                }
+            } finally {
+                llamaGenerateEnd(session)
+            }
+        }
+    }
+
+    private fun grammarFor(constraint: GenerationConstraint?): String? = when (constraint) {
+        // Conversion happens here rather than in Kotlin: llama.cpp ships the schema-to-GBNF
+        // compiler its own sampler was built against.
+        is GenerationConstraint.JsonSchema -> llamaJsonSchemaToGrammar(constraint.schema)
+            .ifEmpty { throw IllegalArgumentException("Not a convertible JSON schema: ${constraint.schema}") }
+
+        null -> null
     }
 
     suspend fun readGgufMetadata(): GgufMetadata = GgufParser.parse(readFileBytes(modelPath))
@@ -169,40 +200,6 @@ class LlamaCppRuntime internal constructor(
         }
         return sessionHandle
     }
-
-    /**
-     * Reads the facade's `koi_last_*` getters, mapping their -1 sentinel to null.
-     *
-     * Rates are derived here rather than in C: llama.cpp reports counts and durations, and
-     * computing tokens/sec from them at the call site keeps the formula visible next to the
-     * numbers it uses. Prefill rate is the prompt divided by prefill time; decode rate counts
-     * from the first token, matching what [GenerationTelemetry.decodeMs] measures.
-     */
-    private fun readTelemetry(session: Long): GenerationTelemetry {
-        fun stat(value: Int): Int? = value.takeIf { it >= 0 }
-
-        val promptTokens = stat(llamaLastPromptTokens(session))
-        val decodeTokens = stat(llamaLastDecodeTokens(session))
-        val prefillMs = stat(llamaLastPrefillMicros(session))?.let { it / 1000.0 }
-        val decodeMs = stat(llamaLastDecodeMicros(session))?.let { it / 1000.0 }
-
-        return GenerationTelemetry(
-            // The facade stamps these inside its decode loop, not at this boundary.
-            source = TelemetrySource.ENGINE,
-            timeToFirstTokenMs = stat(llamaLastTtftMicros(session))?.let { it / 1000.0 },
-            prefillMs = prefillMs,
-            decodeMs = decodeMs,
-            promptTokens = promptTokens,
-            decodeTokens = decodeTokens,
-            prefillTokensPerSecond = ratePerSecond(promptTokens, prefillMs),
-            decodeTokensPerSecond = ratePerSecond(decodeTokens, decodeMs),
-            // llama.cpp has no equivalent: loading is koi_model_load, timed by the caller.
-            engineInitMs = null,
-        )
-    }
-
-    private fun ratePerSecond(tokens: Int?, millis: Double?): Double? =
-        if (tokens == null || millis == null || millis <= 0.0) null else tokens * 1000.0 / millis
 
     private fun releaseSession() {
         if (sessionHandle != 0L) llamaSessionFree(sessionHandle)

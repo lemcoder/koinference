@@ -10,6 +10,9 @@ import io.github.lemcoder.koinference.InferenceBackend
 import koinference_litertlm.KOILM_BACKEND_CPU
 import koinference_litertlm.KOILM_BACKEND_GPU
 import koinference_litertlm.KoiLmSessionParams
+import koinference_litertlm.koilm_stream_begin
+import koinference_litertlm.koilm_stream_next
+import koinference_litertlm.koilm_stream_end
 import koinference_litertlm.koilm_generate
 import koinference_litertlm.koilm_last_error
 import koinference_litertlm.koilm_last_response
@@ -22,6 +25,10 @@ import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.cValue
 import kotlinx.cinterop.memScoped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.cinterop.toKString
 
 /**
@@ -82,7 +89,7 @@ private class FacadeConversation(
     private val handle: CPointer<KoiLmConversation>,
 ) : LiteRtLmConversation {
 
-    override fun generate(prompt: String, jsonSchema: String?): GeneratedReply = memScoped {
+    override fun generate(prompt: String, jsonSchema: String?): String = memScoped {
         val buffer = allocArray<ByteVar>(INITIAL_REPLY_BYTES)
         val needed = koilm_generate(handle, prompt, jsonSchema, buffer, INITIAL_REPLY_BYTES)
         check(needed >= 0) { "LiteRT-LM generation failed: ${lastError()}" }
@@ -101,13 +108,47 @@ private class FacadeConversation(
             }
             grown.toKString()
         }
-        // No telemetry on this leg: litert_lm_session_get_benchmark_info() takes a Session and
-        // the facade drives a Conversation, which the C API never lets you reach one from. A
-        // zero here would be indistinguishable from a real measurement, so it stays null.
-        GeneratedReply(extractResponseText(raw), telemetry = null)
+        extractResponseText(raw)
+    }
+
+    /**
+     * Pulls chunks from the facade, which buffers what the runtime pushes from its own thread.
+     *
+     * The same loop shape the llama.cpp binding uses, so the code that times it is identical
+     * for both engines. `koilm_stream_next` blocks until a chunk exists, so this runs on
+     * Dispatchers.Default rather than wherever the collector happens to be.
+     */
+    override fun stream(prompt: String, jsonSchema: String?): Flow<String> = flow {
+        check(koilm_stream_begin(handle, prompt, jsonSchema) == 0) {
+            "LiteRT-LM could not start streaming: ${lastError()}"
+        }
+        try {
+            while (true) {
+                val chunk = withContext(Dispatchers.Default) { nextChunk() } ?: break
+                // Each chunk is the same {role, content} envelope the blocking reply uses,
+                // carrying that step's text — a delta, not the reply so far. Unwrapped with the
+                // same reader, so streamed and blocking text cannot diverge.
+                val text = extractResponseText(chunk)
+                if (text.isNotEmpty()) emit(text)
+            }
+        } finally {
+            // Also on cancellation: the runtime is still decoding, and dropping the state
+            // without cancelling would leave it writing into a freed buffer.
+            koilm_stream_end(handle)
+        }
+    }
+
+    private fun nextChunk(): String? = memScoped {
+        val buffer = allocArray<ByteVar>(CHUNK_BYTES)
+        val written = koilm_stream_next(handle, buffer, CHUNK_BYTES)
+        check(written >= 0) { "LiteRT-LM streaming failed: ${lastError()}" }
+        if (written == 0) null else buffer.toKString()
     }
 
     override fun close() {
         koilm_session_free(handle)
     }
 }
+
+// One chunk is a token or a few; the facade errors rather than truncating past this.
+private const val CHUNK_BYTES = 512

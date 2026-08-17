@@ -2,10 +2,9 @@ package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.GenerationTelemetry
-import io.github.lemcoder.koinference.InstrumentedRuntime
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.textOnly
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
@@ -13,6 +12,9 @@ import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmConversation
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmEngine
 import io.github.lemcoder.koinference.litertlm.internal.toConversationOptions
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -43,7 +45,7 @@ class LiteRtLmRuntime internal constructor(
      * different amounts of work.
      */
     private val maxOutputTokens: Int = 0,
-) : LiteRtLmTextRuntime, InstrumentedRuntime {
+) : LiteRtLmTextRuntime, StreamingTextRuntime {
 
     private var engineOptions: EngineOptions = engineOptions
 
@@ -59,10 +61,6 @@ class LiteRtLmRuntime internal constructor(
     // turns. Reopening it is how a parameter change takes effect, since the sampler is fixed
     // when the conversation is created.
     private var conversation: LiteRtLmConversation? = null
-
-    // Null on the Apple leg throughout: the facade's binding cannot measure. See GeneratedReply.
-    override var lastGeneration: GenerationTelemetry? = null
-        private set
 
     private var closed: Boolean = false
     private val lock = Mutex()
@@ -86,10 +84,28 @@ class LiteRtLmRuntime internal constructor(
         return lock.withLock {
             check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
             withContext(Dispatchers.Default) {
-                val reply = currentConversation().generate(text, schema)
-                lastGeneration = reply.telemetry
-                reply.text
+                currentConversation().generate(text, schema)
             }
+        }
+    }
+
+    /**
+     * Streams the reply chunk by chunk.
+     *
+     * Holds the lock for the whole generation, like [generateResponse] does: the conversation
+     * carries prefilled state, and a second turn starting half way through this one would
+     * interleave into it.
+     */
+    override fun streamResponse(
+        prompt: List<PromptPart>,
+        constraint: GenerationConstraint?,
+    ): Flow<String> = flow {
+        val text = prompt.textOnly("LiteRT-LM")
+        val schema = (constraint as? GenerationConstraint.JsonSchema)?.schema
+
+        lock.withLock {
+            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
+            emitAll(currentConversation().stream(text, schema))
         }
     }
 

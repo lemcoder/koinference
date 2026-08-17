@@ -19,10 +19,11 @@ Rules this tool will not bend:
 * Records that are not SUCCESS never enter a statistic. They are counted and listed instead.
 * A missing metric is missing. Nothing is imputed, and a series with no data produces no bar
   rather than a zero-height one.
-* Samples measured through different telemetry sources are never pooled — see the
-  telemetry_source column. llama.cpp stamps its numbers inside its decode loop, LiteRT-LM's
-  Android binding times the first streamed chunk, and averaging them would compare a
-  measurement with a measurement plus a binding.
+* Chunks are emissions, not tokens. Every throughput figure is reported next to the chunk
+  count that produced it, because a chunk means whatever the engine decided it means — one
+  token for llama.cpp, whatever LiteRT-LM sends for LiteRT-LM. Latency and time to first chunk
+  need no such caveat: the harness measures both above the engine, with one clock and one code
+  path, so those columns are comparable as they stand.
 """
 
 from __future__ import annotations
@@ -41,8 +42,8 @@ SUPPORTED_VERSIONS = {"1"}
 
 # (column, label, "higher is better")
 METRICS = [
-    ("ttft_ms", "Time to first token (ms)", False),
-    ("decode_tokens_per_second", "Decode tokens/sec", True),
+    ("ttft_ms", "Time to first chunk (ms)", False),
+    ("chunks_per_second", "Chunks/sec", True),
     ("wall_clock_ms", "Total latency (ms)", False),
     ("peak_pss_kb", "Peak PSS (KB)", False),
     ("model_load_ms", "Model load (ms)", False),
@@ -142,7 +143,6 @@ def flatten(files: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list
                 "model_sha256": engine.get("modelSha256"),
                 "workload": workload.get("promptId"),
                 "max_new_tokens": workload.get("maxNewTokens"),
-                "input_tokens": workload.get("inputTokens"),
                 "source_file": payload["_path"],
             }
 
@@ -165,22 +165,16 @@ def flatten(files: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list
                     {
                         **base,
                         "iteration": sample.get("iteration"),
-                        "telemetry_source": sample.get("telemetrySource"),
                         "wall_clock_ms": sample.get("wallClockMs"),
                         "ttft_ms": sample.get("ttftMs"),
-                        "prefill_ms": sample.get("prefillMs"),
-                        "decode_ms": sample.get("decodeMs"),
-                        "prompt_tokens": sample.get("promptTokens"),
-                        "generated_tokens": sample.get("generatedTokens"),
-                        "prefill_tokens_per_second": sample.get("prefillTokensPerSecond"),
-                        "decode_tokens_per_second": sample.get("decodeTokensPerSecond"),
-                        "end_to_end_tokens_per_second": sample.get("endToEndTokensPerSecond"),
+                        "streaming_ms": sample.get("streamingMs"),
+                        "chunks": sample.get("chunks"),
+                        "chunks_per_second": sample.get("chunksPerSecond"),
                         "output_chars": sample.get("outputChars"),
                         # Per-record values repeated on each sample row so a single CSV can be
                         # grouped without a join.
                         "peak_pss_kb": sample.get("peakPssKb") or memory.get("peakPssKb"),
                         "model_load_ms": initialization.get("modelLoadMs"),
-                        "engine_init_ms": initialization.get("engineInitMs"),
                         "process_start_ms": initialization.get("processStartMs"),
                         "after_load_pss_kb": memory.get("afterLoadPssKb"),
                         "battery_temp_before_c": thermal.get("batteryTemperatureBeforeC"),
@@ -214,8 +208,10 @@ def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for key, group in sorted(groups.items(), key=lambda item: [str(k) for k in item[0]]):
         entry = dict(zip(GROUP_KEYS, key))
         entry["samples"] = len(group)
-        sources = {row.get("telemetry_source") for row in group if row.get("telemetry_source")}
-        entry["telemetry_sources"] = "|".join(sorted(sources)) if sources else None
+        chunk_counts = {row.get("chunks") for row in group if row.get("chunks")}
+        # Chunks are emissions, not tokens. Carried next to every throughput figure so a
+        # chunks/sec comparison is read together with how much a chunk was worth.
+        entry["chunk_counts"] = "|".join(str(c) for c in sorted(chunk_counts)) if chunk_counts else None
 
         for column, _label, _higher in METRICS:
             values = [row[column] for row in group if isinstance(row.get(column), (int, float))]
@@ -315,7 +311,7 @@ def write_markdown(
                 f"### {label}",
                 f"_{direction}_",
                 "",
-                "| engine | model | quant | workload | n | median | mean | p90 | p95 | stddev | source |",
+                "| engine | model | quant | workload | n | median | mean | p90 | p95 | stddev | chunks |",
                 "|---|---|---|---|---|---|---|---|---|---|---|",
             ]
             for entry in entries:
@@ -327,7 +323,7 @@ def write_markdown(
                     f"{format_number(entry[f'{column}_p90'])} | "
                     f"{format_number(entry[f'{column}_p95'])} | "
                     f"{format_number(entry[f'{column}_stddev'])} | "
-                    f"{entry['telemetry_sources'] or 'n/a'} |"
+                    f"{entry['chunk_counts'] or 'n/a'} |"
                 )
             lines.append("")
 
@@ -340,12 +336,12 @@ def fairness_notes(summary: list[dict[str, Any]]) -> list[str]:
     lines = ["## Comparability", ""]
     quantizations = defaultdict(set)
     models = defaultdict(set)
-    sources = defaultdict(set)
+    chunk_counts = defaultdict(set)
     for entry in summary:
         quantizations[entry["engine"]].add(entry["quantization"])
         models[entry["engine"]].add(entry["model"])
-        if entry["telemetry_sources"]:
-            sources[entry["engine"]].add(entry["telemetry_sources"])
+        if entry["chunk_counts"]:
+            chunk_counts[entry["engine"]].add(entry["chunk_counts"])
 
     if len({frozenset(v) for v in quantizations.values()}) > 1:
         detail = ", ".join(f"{engine}: {sorted(q)}" for engine, q in sorted(quantizations.items()))
@@ -356,15 +352,18 @@ def fairness_notes(summary: list[dict[str, Any]]) -> list[str]:
     if len({frozenset(v) for v in models.values()}) > 1:
         detail = ", ".join(f"{engine}: {sorted(m)}" for engine, m in sorted(models.items()))
         lines.append(f"- **Model differs between engines** ({detail}).")
-    if len({frozenset(v) for v in sources.values()}) > 1:
-        detail = ", ".join(f"{engine}: {sorted(s)}" for engine, s in sorted(sources.items()))
+    if len({frozenset(v) for v in chunk_counts.values()}) > 1:
+        detail = ", ".join(f"{engine}: {sorted(c)}" for engine, c in sorted(chunk_counts.items()))
         lines.append(
-            f"- **Telemetry sources differ** ({detail}). ENGINE values are stamped inside the "
-            "engine; STREAM_FIRST_CHUNK values include the binding that delivered the first "
-            "chunk. Compare them as different measurements, and never average them together."
+            f"- **Chunk counts differ between engines** ({detail}). Latency and time to first "
+            "chunk are still directly comparable — both are measured by the same harness code — "
+            "but chunks/sec is only comparable when a chunk means the same thing on both sides."
         )
     if len(lines) == 2:
-        lines.append("- Model, quantization and telemetry source match across engines.")
+        lines.append(
+            "- Model and quantization match across engines, and every metric was measured by "
+            "the same harness code above both."
+        )
     return lines + [""]
 
 

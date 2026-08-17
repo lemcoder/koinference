@@ -252,16 +252,26 @@ so generation tests are env-gated rather than run in CI.
   `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
-- **LiteRT-LM's `getBenchmarkInfo()` is a function, not a property.** `conversation.benchmarkInfo`
-  fails with "Unresolved reference", which reads like the accessor being internal or missing —
-  it is neither. Check the Kotlin metadata before concluding a member is inaccessible: the
-  property name simply is not in it, only `getBenchmarkInfo`. It also needs
-  `@OptIn(ExperimentalApi::class)`, and `BenchmarkInfo`'s own members *are* properties.
-  Whether it returns real numbers or zeros depends on the runtime being built with benchmarking
-  on, which nothing in the public `EngineConfig` controls — so the harness treats zero as
-  unmeasured and falls back to timing the first streamed chunk.
-- **On Apple there is nothing to ask.** `litert_lm_session_get_benchmark_info` takes a `Session`,
-  the facade drives a `Conversation`, and no C function bridges the two.
+- **Backends stream; the harness measures.** Neither backend reports timings any more. Both
+  implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
+  code that touches a clock — one definition of time to first token for every engine, instead
+  of one per binding. Resist adding a metric to a backend: it would only be comparable with
+  itself.
+- **The llama.cpp facade streams as a pull loop** (`koi_generate_begin`/`_next`/`_end`), not a
+  callback, because the JVM leg reaches it through generated JNI bridges that cannot hand a C
+  callback back into the JVM. `koi_generate` is that loop drained, so there is one decode path.
+- **LiteRT-LM's C streaming is push, from the runtime's own thread**, so the facade buffers into
+  a queue and the Kotlin side pulls — same loop shape as llama.cpp, and no Kotlin running on a
+  thread it does not own.
+- **LiteRT-LM's stream chunks are JSON envelopes carrying deltas**, the same
+  `{role, content}` shape as a blocking reply. Emitting them raw concatenates to about 14× the
+  reply length, which looks like a plausible output size unless you check it; `extractResponseText`
+  unwraps each one. `LiteRtLmDeviceTest` asserts streamed chunks concatenate to the blocking
+  reply, because the Android SDK is a different binding and could have chosen cumulative chunks.
+- **LiteRT-LM's `getBenchmarkInfo()` exists and is reachable** — it is a function, not a
+  property, so `conversation.benchmarkInfo` fails with "Unresolved reference" and looks like an
+  access problem. Unused now, but check the Kotlin metadata before concluding a member is
+  inaccessible.
 
 ## Cinterop idioms that bite
 

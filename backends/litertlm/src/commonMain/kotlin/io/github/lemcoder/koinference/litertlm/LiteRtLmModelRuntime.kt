@@ -3,11 +3,12 @@ package io.github.lemcoder.koinference.litertlm
 import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.ModelRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.TextRuntime
 
 sealed interface LiteRtLmModelRuntime : ModelRuntime
 
-interface LiteRtLmTextRuntime : LiteRtLmModelRuntime, TextRuntime {
+interface LiteRtLmTextRuntime : LiteRtLmModelRuntime, TextRuntime, StreamingTextRuntime {
     /** What the next conversation will be opened with. */
     val generationParameters: GenerationParameters
 
