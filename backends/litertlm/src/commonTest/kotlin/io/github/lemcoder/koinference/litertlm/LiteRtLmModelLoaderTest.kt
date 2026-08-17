@@ -25,6 +25,7 @@ class LiteRtLmModelLoaderTest {
         parameters = GenerationParameters(),
         nThreads = 4,
         maxTokens = 512,
+        maxOutputTokens = 0,
     )
 
     @Test

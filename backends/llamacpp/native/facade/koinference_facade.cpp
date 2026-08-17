@@ -5,6 +5,9 @@
 #include "chat.h"
 #include "sampling.h"
 #include "json-schema-to-grammar.h"
+// json-schema-to-grammar.h only forward-declares the json type since b10472; parsing needs the
+// definition.
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -170,7 +173,8 @@ int koi_generate(
     session->stats = KoiGenerationStats{};
     const auto t_start = koi_clock::now();
 
-    llama_kv_cache_clear(session->ctx);
+    // llama_kv_cache_clear was removed after b5001; the memory abstraction replaced it.
+    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
 
     // Build prompt string
     const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
@@ -204,7 +208,10 @@ int koi_generate(
     sparams.top_k = session->params.top_k;
     sparams.min_p = session->params.min_p;
     if (grammar && grammar[0] != '\0') {
-        sparams.grammar = grammar;
+        // common_params_sampling::grammar became a tagged struct: a bare string no longer
+        // assigns, and the tag is what tells the sampler this is user-provided GBNF rather
+        // than one of the built-in variants.
+        sparams.grammar = common_grammar(COMMON_GRAMMAR_TYPE_USER, grammar);
     }
 
     auto* sampler = common_sampler_init(session->model, sparams);
@@ -268,7 +275,7 @@ int koi_generate(
 int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_size) {
     if (!session || !text || !out_buf || buf_size <= 0) return -1;
 
-    llama_kv_cache_clear(session->ctx);
+    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
 
     const auto tokens = common_tokenize(session->ctx, text, true, true);
     if (decode_in_batches(session->ctx, session->batch, tokens, 0, false) != 0) return -1;

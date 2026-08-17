@@ -24,11 +24,16 @@ set(LLAMA_BUILD_SERVER    OFF CACHE BOOL   "" FORCE)
 set(BUILD_SHARED_LIBS     OFF CACHE BOOL   "" FORCE)
 
 # ── llama.cpp ────────────────────────────────────────────────────────────────
-# Update GIT_TAG to the desired release (e.g. b5001, b5200, …).
+# Update GIT_TAG to the desired release (e.g. b10472, b10500, …). Bumping is not free: the
+# facade uses common_* helpers whose signatures move, and deprecated llama_* calls are removed
+# rather than kept — b5001's llama_kv_cache_clear no longer exists in b10472.
+#
+# b10472 is the floor for LFM2: LLM_ARCH_LFM2 does not exist before it, so an LFM2 GGUF loads as
+# "unknown model architecture" on anything older.
 CPMAddPackage(
     NAME        llama_cpp
     GITHUB_REPOSITORY ggerganov/llama.cpp
-    GIT_TAG     b5001
+    GIT_TAG     b10472
     EXCLUDE_FROM_ALL TRUE
 )
 
@@ -41,10 +46,25 @@ target_include_directories(koinference-facade
     PRIVATE ${llama_cpp_SOURCE_DIR}
             ${llama_cpp_SOURCE_DIR}/common
             ${llama_cpp_SOURCE_DIR}/include
-            ${llama_cpp_SOURCE_DIR}/ggml/include)
+            ${llama_cpp_SOURCE_DIR}/ggml/include
+            # Since b10472 the common headers include <nlohmann/json_fwd.hpp>, which lives in
+            # the vendored tree rather than beside them.
+            ${llama_cpp_SOURCE_DIR}/vendor)
+
+# The common utilities target was renamed `common` → `llama-common` between b5001 and b10472.
+# Detected rather than hardcoded, because getting it wrong does not fail at configure time: CMake
+# treats an unknown name as a raw `-lcommon`, the static archive records it happily, and the
+# error only surfaces when something finally links an executable.
+if (TARGET llama-common)
+    set(KOI_COMMON_TARGET llama-common)
+elseif (TARGET common)
+    set(KOI_COMMON_TARGET common)
+else()
+    message(FATAL_ERROR "llama.cpp built no common utilities target; the facade needs common_*")
+endif()
 
 target_link_libraries(koinference-facade
-    PUBLIC llama common)
+    PUBLIC llama ${KOI_COMMON_TARGET})
 
 # ── JNI stub ─────────────────────────────────────────────────────────────────
 # The Konan plugin generates the bridge sources from facade/koinference_facade.h

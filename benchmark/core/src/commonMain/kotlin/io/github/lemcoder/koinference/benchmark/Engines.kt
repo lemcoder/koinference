@@ -141,6 +141,9 @@ private class LiteRtLmBenchmarkEngine : TextRuntimeEngine() {
             parameters = parameters(config, sampling),
             nThreads = config.threads,
             maxTokens = config.maxContextTokens,
+            // The counterpart of llama.cpp's n_predict. Without it LiteRT-LM generates until it
+            // decides to stop, and the two engines are asked for different amounts of work.
+            maxOutputTokens = maxNewTokens,
         )
         val runtime = loader.load(config.modelPath)
         return runtime to { loader.unload(config.modelPath) }

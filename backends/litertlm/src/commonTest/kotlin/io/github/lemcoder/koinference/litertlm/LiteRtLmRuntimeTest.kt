@@ -38,6 +38,7 @@ class LiteRtLmRuntimeTest {
         parameters = parameters,
         nThreads = 0,
         maxTokens = 0,
+        maxOutputTokens = 0,
     ).load(MODEL)
 
     @Test
@@ -193,6 +194,7 @@ class LiteRtLmRuntimeTest {
             parameters = GenerationParameters(),
             nThreads = 0,
             maxTokens = 0,
+            maxOutputTokens = 0,
         )
         val runtime = loader.load(MODEL)
         loader.unload(MODEL)
@@ -229,6 +231,7 @@ class LiteRtLmRuntimeTest {
             parameters = GenerationParameters(),
             nThreads = 0,
             maxTokens = 0,
+            maxOutputTokens = 0,
         )
         val runtime = loader.load(MODEL)
         // First turn opens the conversation, so the fake below is installed on a real one.

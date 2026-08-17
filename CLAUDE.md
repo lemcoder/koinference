@@ -110,8 +110,23 @@ its first successful run, after every structural check had passed. Keep it.
 ## Upstream llama.cpp
 
 `LLAMA_BUILD_COMMON` defaults to `LLAMA_STANDALONE` — OFF under CPM — and the facade uses `common_*`
-helpers. `native/CMakeLists.txt` forces it on and links `common`; a stale reference to a
-non-existent `llama-common` target once left every one of those symbols out of the archive.
+helpers. `native/CMakeLists.txt` forces it on and links whichever common target exists.
+
+**The pin is b10472, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
+it, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
+cost four breakages, all silent-ish:
+
+- **`common` was renamed `llama-common`.** Getting this wrong does not fail at configure time:
+  CMake treats an unknown name as a raw `-lcommon`, the static archive records it happily, and
+  the error only surfaces when something finally links an executable. `CMakeLists.txt` now
+  detects the target rather than naming it.
+- **`llama_kv_cache_clear` was removed**, not deprecated-and-kept. Its replacement is
+  `llama_memory_clear(llama_get_memory(ctx), true)`.
+- **`common_params_sampling::grammar` became a tagged struct**, so a bare string no longer
+  assigns: `common_grammar(COMMON_GRAMMAR_TYPE_USER, gbnf)`.
+- **The common headers include `<nlohmann/json_fwd.hpp>`**, which lives in `vendor/`, and
+  `json-schema-to-grammar.h` now only forward-declares the type — parsing needs
+  `<nlohmann/json.hpp>` included explicitly.
 
 `common` is also what makes `GenerationConstraint.JsonSchema` work: `json_schema_to_grammar` lives
 there, so the facade converts and the Kotlin side never sees GBNF. Both the parse and the

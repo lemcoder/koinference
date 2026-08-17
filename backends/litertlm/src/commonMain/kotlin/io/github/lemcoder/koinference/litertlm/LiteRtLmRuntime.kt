@@ -34,6 +34,15 @@ class LiteRtLmRuntime internal constructor(
     private val systemPrompt: String?,
     private var engine: LiteRtLmEngine,
     parameters: GenerationParameters = GenerationParameters(),
+    /**
+     * Cap on tokens per reply; 0 leaves it to the engine's own budget.
+     *
+     * Per conversation rather than per call, because LiteRT-LM fixes it when the conversation
+     * is created — the same place the sampler is fixed. llama.cpp's n_predict is the
+     * counterpart, and a benchmark comparing the two has to set both or it is comparing
+     * different amounts of work.
+     */
+    private val maxOutputTokens: Int = 0,
 ) : LiteRtLmTextRuntime, InstrumentedRuntime {
 
     private var engineOptions: EngineOptions = engineOptions
@@ -148,7 +157,7 @@ class LiteRtLmRuntime internal constructor(
 
     private fun currentConversation(): LiteRtLmConversation =
         conversation ?: engine
-            .openConversation(generationParameters.toConversationOptions(systemPrompt))
+            .openConversation(generationParameters.toConversationOptions(systemPrompt, maxOutputTokens))
             .also { conversation = it }
 
     private fun releaseConversation() {

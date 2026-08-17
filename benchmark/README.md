@@ -64,14 +64,13 @@ mkdir -p ../build/prebuilt/macos_arm64
 find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
 cd ../../..
 
-# 2. Fetch the models. Same base weights are not available in both formats at this size —
-#    see "Fairness" below.
-curl -fsSLO https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
-curl -fsSLO https://huggingface.co/litert-community/SmolLM2-135M-Instruct/resolve/main/SmolLM2_135M_Instruct.litertlm
+# 2. Fetch the models — the same weights in both formats. See "Fairness" below.
+curl -fsSLO https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_0.gguf
+curl -fsSLO https://huggingface.co/litert-community/LFM2.5-1.2B-Instruct/resolve/main/LFM2.5-1.2B-Instruct_int4.litertlm
 
 # 3. Run the protocol against both engines and write JSON.
-KOI_TEST_GGUF=$PWD/stories260K.gguf \
-KOI_TEST_LITERTLM=$PWD/SmolLM2_135M_Instruct.litertlm \
+KOI_TEST_GGUF=$PWD/LFM2.5-1.2B-Instruct-Q4_0.gguf \
+KOI_TEST_LITERTLM=$PWD/LFM2.5-1.2B-Instruct_int4.litertlm \
 KOI_BENCH_FIXTURES=$PWD/benchmark/fixtures/prompts.json \
 KOI_BENCH_OUT=$PWD/results/raw \
     ./gradlew :benchmark:core:macosArm64Test
@@ -102,9 +101,10 @@ Then run. `--dry-run` prints the exact `gcloud` invocations without executing an
 ./benchmark/scripts/run-ftl-benchmark.sh \
     --matrix benchmark/scripts/devices.yaml \
     --engine all \
-    --model gs://your-bucket/models/SmolLM2_135M_Instruct.litertlm \
-    --quantization q8 \
-    --model-sha256 "$(shasum -a 256 SmolLM2_135M_Instruct.litertlm | cut -d' ' -f1)" \
+    --model gs://your-bucket/models/LFM2.5-1.2B-Instruct_int4.litertlm \
+    --model-id LFM2.5-1.2B-Instruct \
+    --quantization int4 \
+    --model-sha256 "$(shasum -a 256 LFM2.5-1.2B-Instruct_int4.litertlm | cut -d' ' -f1)" \
     --iterations 5
 ```
 
@@ -149,12 +149,27 @@ says so out loud when they are not:
 * the sampling actually applied, including `seedApplied=false` for llama.cpp
 * the telemetry source
 
-**The two engines cannot currently run the same weights.** llama.cpp needs GGUF, LiteRT-LM needs
-`.litertlm`, and no published model exists in both formats at a size that fits CI. The local
-verification therefore compares stories260K (f32 GGUF) against SmolLM2-135M (q8 `.litertlm`) —
-different models *and* different quantization — and the generated Markdown says exactly that
-under "Comparability". For a real comparison, convert one base model to both formats, record
-both checksums, and pass `--quantization` honestly.
+### The model
+
+**LFM2.5-1.2B-Instruct is published in both formats**, which is what makes a like-for-like
+comparison possible:
+
+| engine | file | source |
+|---|---|---|
+| llama.cpp | `LFM2.5-1.2B-Instruct-Q4_0.gguf` (664 MB) | `LiquidAI/LFM2.5-1.2B-Instruct-GGUF` |
+| LiteRT-LM | `LFM2.5-1.2B-Instruct_int4.litertlm` (702 MB) | `litert-community/LFM2.5-1.2B-Instruct` |
+
+Same base weights, same 1.2B parameters, both 4-bit. **The quantization schemes are still not
+identical** — GGUF `Q4_0` is blockwise 4-bit with per-block scales, LiteRT-LM's `int4` is its own
+scheme with its own choice of which tensors stay at higher precision — so the report states the
+difference rather than claiming equivalence. `Q4_K_M` is also published if you want the
+higher-quality GGUF side of the comparison instead; record whichever you used.
+
+Both engines are given the same output budget. This matters more than it sounds: LiteRT-LM caps
+output per *conversation*, llama.cpp per session (`n_predict`), and until `maxOutputTokens` was
+plumbed through the LiteRT-LM loader the two were being asked for different amounts of work —
+llama.cpp stopped at 32 tokens while LiteRT-LM ran to its own stopping point and looked slower
+for it.
 
 ## Why a stub app
 

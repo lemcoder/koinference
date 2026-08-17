@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
  * @param parameters   Sampling defaults for the runtimes this loader returns.
  * @param nThreads     CPU threads; 0 leaves the engine default.
  * @param maxTokens    Engine-wide token budget; 0 uses the model's own.
+ * @param maxOutputTokens Cap on tokens per reply; 0 uses the engine's budget. Distinct from
+ *                    [maxTokens], which bounds the whole conversation rather than one turn.
  */
 class LiteRtLmModelLoader internal constructor(
     private val bridge: LiteRtLmBridge,
@@ -31,6 +33,7 @@ class LiteRtLmModelLoader internal constructor(
     private val parameters: GenerationParameters,
     private val nThreads: Int,
     private val maxTokens: Int,
+    private val maxOutputTokens: Int,
 ) : ModelLoader {
 
     constructor(
@@ -40,7 +43,11 @@ class LiteRtLmModelLoader internal constructor(
         parameters: GenerationParameters = GenerationParameters(),
         nThreads: Int = 0,
         maxTokens: Int = 0,
-    ) : this(platformBridge(), cacheDir, systemPrompt, settings, parameters, nThreads, maxTokens)
+        maxOutputTokens: Int = 0,
+    ) : this(
+        platformBridge(), cacheDir, systemPrompt, settings, parameters, nThreads, maxTokens,
+        maxOutputTokens,
+    )
 
     private val runtimes = mutableMapOf<String, LiteRtLmRuntime>()
 
@@ -98,6 +105,7 @@ class LiteRtLmModelLoader internal constructor(
             systemPrompt = systemPrompt,
             engine = engine,
             parameters = parameters,
+            maxOutputTokens = maxOutputTokens,
         )
     }
 }
