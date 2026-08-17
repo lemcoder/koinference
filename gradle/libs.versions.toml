@@ -29,3 +29,5 @@ konan = { id = "io.github.lemcoder.konanplugin", version.ref = "konanPlugin" }
 mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 # AGP 9 dropped com.android.library + KMP; this is the KMP-specific Android plugin.
 androidKmpLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+# The benchmark harness is an app plus a test APK, which is what Firebase Test Lab runs.
+androidApplication = { id = "com.android.application", version.ref = "agp" }

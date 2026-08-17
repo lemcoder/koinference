@@ -15,6 +15,13 @@ kotlin {
         namespace = "io.github.lemcoder.koinference.benchmark"
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
         minSdk = libs.versions.androidMinSdk.get().toInt()
+
+        // The benchmark runs here, as a device test, because AGP 9 has no Kotlin-capable
+        // application plugin — see benchmark/stub-app. AGP builds this into a self-instrumenting
+        // test APK, which is what Firebase Test Lab executes.
+        withDeviceTest {
+            instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
     }
 
     macosArm64 {
@@ -56,6 +63,12 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
+        }
+        // No generated accessor: withDeviceTest creates this while the block is configuring.
+        getByName("androidDeviceTest").dependencies {
+            implementation(libs.kotlin.test)
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.junit)
         }
     }
 }
