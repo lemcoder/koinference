@@ -134,6 +134,24 @@ Statistics are computed here rather than on the device so a suspicious mean can 
 to the iterations behind it. Records that are not `SUCCESS` are counted and listed, never
 averaged. A metric with no data produces no bar rather than a zero-height one.
 
+## Reproducibility, per engine
+
+Sampling defaults to temperature 0, which both backends treat as argmax — llama.cpp natively,
+LiteRT-LM through top-k of 1, because its own sampler keeps sampling at temperature 0.
+
+The two engines still differ in what repeats:
+
+* **llama.cpp** repeats within a run: identical iterations produce identical text, which is
+  visible in the sample rows.
+* **LiteRT-LM** repeats across *engines*, not across iterations of one. Its sampler RNG is
+  seeded when the engine is created and keeps advancing, and reopening a conversation does not
+  rewind it. Under argmax the text is stable in practice, but nothing guarantees iteration *n*
+  matches iteration *n+1*.
+
+This affects how variance in the results should be read, not whether the comparison is fair:
+both engines answer the same prompt with the same output budget, and every timing comes from
+the same harness code either way.
+
 ## The protocol
 
 Per (engine, workload): initialize → load model → *n* warmup iterations → *n* measured

@@ -74,6 +74,7 @@ private class FacadeEngine(private val handle: CPointer<KoiLmEngine>) : LiteRtLm
             this.top_p = options.topP // qualified: unqualified top_p is the struct field's setter argument
             this.temp = options.temperature
             seed = options.seed ?: UNSEEDED
+            greedy = if (options.greedy) 1 else 0
         }
         val conversation = koilm_session_create(handle, params, options.systemPrompt)
         checkNotNull(conversation) { "Could not open a LiteRT-LM conversation: ${lastError()}" }

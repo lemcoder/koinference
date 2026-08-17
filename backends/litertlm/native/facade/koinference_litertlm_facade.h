@@ -27,6 +27,14 @@ typedef struct {
     float top_p;       /**< Top-p sampling; 0.0 = disabled. */
     float temp;        /**< Sampling temperature. */
     int   seed;        /**< Sampler seed; < 0 = leave the runtime's own seeding. */
+    /**
+     * Non-zero takes the most likely token every step, ignoring top_k, top_p and temp.
+     *
+     * A field rather than an inference from temp, because temperature 0 does *not* mean greedy
+     * to this runtime: its sampler still samples and answers the same question differently on
+     * consecutive calls.
+     */
+    int   greedy;
 } KoiLmSessionParams;
 
 /* ── diagnostics ──────────────────────────────────────────────────────────── */

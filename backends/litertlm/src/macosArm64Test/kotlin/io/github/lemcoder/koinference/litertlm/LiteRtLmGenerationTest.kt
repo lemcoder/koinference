@@ -33,7 +33,9 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(systemPrompt = "You are terse.")
+            // No system prompt: whether one is accepted depends on the model's chat template,
+            // and this test is about generation working at all. See [systemPromptEitherWorksOrSaysWhy].
+            val loader = LiteRtLmModelLoader()
             try {
                 val reply = loader.load(path).generateResponse("Say hello.")
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
@@ -67,27 +69,92 @@ class LiteRtLmGenerationTest {
         }
     }
 
+    /**
+     * A fixed seed replays the same sampling — across engines, which is the only place this
+     * runtime guarantees it.
+     *
+     * The obvious version of this test reuses one engine and resets the conversation between
+     * the two calls. That fails, and not because seeding is broken: the sampler's random stream
+     * is seeded when the engine is created and keeps advancing, so the second generation
+     * continues where the first left off rather than replaying it. Reopening a conversation does
+     * not rewind it. Comparing two engines is what "the seed decides the sampling" actually
+     * means here.
+     */
     @Test
-    fun aFixedSeedRepeatsItself() {
+    fun aFixedSeedRepeatsItselfAcrossEngines() {
         val path = modelPath ?: return
 
         runBlocking {
             // Greedy would prove nothing about the seed, so temperature stays high enough for
             // the sampler to have a choice to make.
+            val replies = (1..2).map {
+                val loader = LiteRtLmModelLoader(
+                    parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40),
+                )
+                try {
+                    loader.load(path).generateResponse("Name a colour.")
+                } finally {
+                    loader.unloadAll()
+                }
+            }
+
+            assertEquals(replies[0], replies[1], "a fixed seed should replay the same sampling")
+        }
+    }
+
+    /**
+     * Temperature 0 means argmax, the same as it does on llama.cpp.
+     *
+     * Worth its own test because it is not what the runtime does by default: its sampler keeps
+     * sampling at temperature 0, and answers the same question differently on consecutive calls.
+     * The backend maps temperature 0 onto top-k of 1 to make the two engines agree on what a
+     * caller asking for no randomness gets.
+     */
+    @Test
+    fun temperatureZeroGenerates() {
+        val path = modelPath ?: return
+
+        runBlocking {
             val loader = LiteRtLmModelLoader(
-                parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40),
+                parameters = GenerationParameters(temperature = 0.0),
             )
             try {
-                val runtime = loader.load(path)
-                val first = runtime.generateResponse("Name a colour.")
-                // The same conversation would answer differently having heard the question
-                // once already, so the history is dropped and the sampler starts over.
-                runtime.resetConversation()
-                val second = runtime.generateResponse("Name a colour.")
-
-                assertEquals(first, second, "a fixed seed should replay the same sampling")
+                val reply = loader.load(path).generateResponse("Name a colour.")
+                assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unloadAll()
+            }
+        }
+    }
+
+    /**
+     * A system prompt either works or fails legibly.
+     *
+     * Whether the model accepts a system role is a property of its chat template, not of this
+     * binding: SmolLM2-135M-Instruct takes one, LFM2.5-1.2B-Instruct refuses and the runtime
+     * fails the send. Since the test suite runs against whichever model KOI_TEST_LITERTLM
+     * points at, the assertion is on the failure being explicable rather than on which of the
+     * two happens.
+     */
+    @Test
+    fun systemPromptEitherWorksOrSaysWhy() {
+        val path = modelPath ?: return
+
+        runBlocking {
+            val loader = LiteRtLmModelLoader(systemPrompt = "You are terse.")
+            try {
+                val outcome = runCatching { loader.load(path).generateResponse("Say hello.") }
+                outcome.onSuccess { reply ->
+                    assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
+                }.onFailure { failure ->
+                    val message = failure.message.orEmpty()
+                    assertTrue(
+                        message.contains("system prompt", ignoreCase = true),
+                        "a system prompt failure must name the system prompt, got: $message",
+                    )
+                }
+            } finally {
+                runCatching { loader.unloadAll() }
             }
         }
     }

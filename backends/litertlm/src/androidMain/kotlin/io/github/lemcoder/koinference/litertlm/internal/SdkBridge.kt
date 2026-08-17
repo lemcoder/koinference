@@ -50,11 +50,18 @@ private class SdkEngineHandle(private val engine: SdkEngine) : LiteRtLmEngine {
         // SamplerConfig's seed defaults to 0, i.e. deterministic, where the facade leaves
         // LiteRT-LM to seed itself. Copying onto the default rather than naming seed in the
         // constructor keeps an unset seed meaning the same thing on both legs.
-        var sampler = SamplerConfig(
-            topK = options.topK,
-            topP = options.topP.toDouble(),
-            temperature = options.temperature.toDouble(),
-        )
+        var sampler = if (options.greedy) {
+            // No sampler type in the public config, so argmax is spelled top-k of 1. Temperature
+            // is irrelevant once there is one candidate, and is left at the runtime's own value
+            // rather than passed as 0, which this sampler does not treat as "no randomness".
+            SamplerConfig(topK = 1, topP = options.topP.toDouble(), temperature = 1.0)
+        } else {
+            SamplerConfig(
+                topK = options.topK,
+                topP = options.topP.toDouble(),
+                temperature = options.temperature.toDouble(),
+            )
+        }
         options.seed?.let { sampler = sampler.copy(seed = it) }
 
         val conversation = engine.createConversation(

@@ -192,6 +192,7 @@ KoiLmSessionParams koilm_default_session_params(void) {
     params.top_p = 0.95f;
     params.temp = 0.8f;
     params.seed = -1;
+    params.greedy = 0;
     return params;
 }
 
@@ -207,15 +208,29 @@ KoiLmConversation* koilm_session_create(
         return nullptr;
     }
 
+    // Always the top-p sampler, even for greedy.
+    //
+    // The runtime declares kLiteRtLmSamplerTypeGreedy, but a conversation created with it fails
+    // every send_message in this prebuilt (v0.15.0), on both models tested. Top-k of 1 through
+    // the ordinary sampler is argmax by another name, it is verified to work, and it is what the
+    // Android leg has to use anyway — its public SamplerConfig exposes no sampler type. Both
+    // legs spelling greedy the same way is worth more than using the type.
     LiteRtLmSamplerParams* sampler =
         litert_lm_sampler_params_create(kLiteRtLmSamplerTypeTopP);
     if (sampler == nullptr) {
         set_error("could not create sampler params");
         return nullptr;
     }
-    if (params.top_k > 0) litert_lm_sampler_params_set_top_k(sampler, params.top_k);
+
+    const int   top_k = (params.greedy != 0) ? 1 : params.top_k;
+    // Temperature is irrelevant once there is a single candidate, and 0 is not "no randomness"
+    // to this sampler — it keeps sampling — so greedy passes a neutral value rather than the
+    // caller's 0.
+    const float temp  = (params.greedy != 0) ? 1.0f : params.temp;
+
+    if (top_k > 0) litert_lm_sampler_params_set_top_k(sampler, top_k);
     if (params.top_p > 0.0f) litert_lm_sampler_params_set_top_p(sampler, params.top_p);
-    litert_lm_sampler_params_set_temperature(sampler, params.temp);
+    litert_lm_sampler_params_set_temperature(sampler, temp);
     // Only when asked for: an unconditional seed would make every conversation on this leg
     // reproducible while the Android leg's default is not, for callers who never set one.
     if (params.seed >= 0) litert_lm_sampler_params_set_seed(sampler, params.seed);

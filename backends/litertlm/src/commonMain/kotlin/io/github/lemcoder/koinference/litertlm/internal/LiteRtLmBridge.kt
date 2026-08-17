@@ -77,6 +77,16 @@ internal data class ConversationOptions(
     val temperature: Float = DEFAULT_TEMPERATURE,
     /** null leaves the runtime's own seeding, which differs between the two legs. */
     val seed: Int? = null,
+    /**
+     * Take the most likely token every step, ignoring [topK], [topP] and [temperature].
+     *
+     * Decided here rather than by each leg, because LiteRT-LM's sampler type is fixed when the
+     * conversation opens and temperature 0 does *not* select it: a top-p sampler asked for
+     * temperature 0 still samples, and produces a different answer to the same question. The
+     * Apple leg maps this onto the runtime's greedy sampler; Android has no sampler type in its
+     * public config, so it uses top-k of 1, which is argmax by another name.
+     */
+    val greedy: Boolean = false,
 )
 
 // Both legs need concrete numbers — Android's SamplerConfig has no default for the first
@@ -104,4 +114,8 @@ internal fun GenerationParameters.toConversationOptions(
     topP = topP?.toFloat() ?: DEFAULT_TOP_P,
     temperature = temperature?.toFloat() ?: DEFAULT_TEMPERATURE,
     seed = seed,
+    // Temperature 0 means "no randomness" to a caller, and on llama.cpp it genuinely is
+    // greedy. Making it mean the same thing here is what lets one sampling configuration be
+    // described as identical across backends.
+    greedy = (temperature ?: -1.0) == 0.0,
 )

@@ -84,7 +84,9 @@ class LiteRtLmRuntime internal constructor(
         return lock.withLock {
             check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
             withContext(Dispatchers.Default) {
-                currentConversation().generate(text, schema)
+                explainingSystemPromptFailures {
+                    currentConversation().generate(text, schema)
+                }
             }
         }
     }
@@ -105,7 +107,7 @@ class LiteRtLmRuntime internal constructor(
 
         lock.withLock {
             check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
-            emitAll(currentConversation().stream(text, schema))
+            emitAll(explainingSystemPromptFailures { currentConversation().stream(text, schema) })
         }
     }
 
@@ -169,6 +171,25 @@ class LiteRtLmRuntime internal constructor(
             releaseConversation()
             engine.close()
         }
+    }
+
+    /**
+     * Adds the likely cause when a generation fails and a system prompt is set.
+     *
+     * Whether a model accepts a system role is a property of its chat template, and the
+     * runtime's own report is "send_message failed" either way. LFM2.5-1.2B-Instruct refuses
+     * one where SmolLM2-135M-Instruct accepts it, so the difference is worth naming rather
+     * than leaving to whoever next spends an afternoon on it.
+     */
+    private inline fun <T> explainingSystemPromptFailures(block: () -> T): T = try {
+        block()
+    } catch (failure: IllegalStateException) {
+        if (systemPrompt == null) throw failure
+        throw IllegalStateException(
+            "${failure.message} — this runtime was given a system prompt, and some models' chat " +
+                "templates reject one. Try loading without a system prompt to confirm.",
+            failure,
+        )
     }
 
     private fun currentConversation(): LiteRtLmConversation =

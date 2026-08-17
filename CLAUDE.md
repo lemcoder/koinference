@@ -252,6 +252,19 @@ so generation tests are env-gated rather than run in CI.
   `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
+- **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same
+  question differently on consecutive calls, which quietly broke the benchmark's reproducibility
+  claim. `ConversationOptions.greedy` maps temperature 0 onto top-k of 1 on both legs.
+  `kLiteRtLmSamplerTypeGreedy` exists and looks like the right answer, but a conversation created
+  with it fails *every* send_message in the v0.15.0 prebuilt, on both models tested.
+- **Its sampler RNG is seeded per engine, not per conversation.** Two fresh engines with the same
+  seed replay each other exactly; reopening a conversation does not rewind the stream, so a
+  second generation continues rather than repeating. `resetConversation()` does not give a clean
+  slate either — under argmax the second answer still differs, so the model is still seeing the
+  earlier turn. Any test of seeding has to compare engines.
+- **A system prompt is a model-dependent feature.** SmolLM2-135M-Instruct accepts one;
+  LFM2.5-1.2B-Instruct refuses and the runtime reports only "send_message failed" either way.
+  `LiteRtLmRuntime` adds the likely cause when a system prompt is set.
 - **Backends stream; the harness measures.** Neither backend reports timings any more. Both
   implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
   code that touches a clock — one definition of time to first token for every engine, instead
