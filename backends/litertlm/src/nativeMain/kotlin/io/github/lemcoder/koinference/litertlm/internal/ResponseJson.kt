@@ -5,7 +5,6 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 private val json = Json { ignoreUnknownKeys = true }
 
@@ -33,10 +32,14 @@ internal fun extractResponseText(raw: String): String {
 
     return when (val content = message["content"]) {
         is JsonPrimitive -> content.contentOrEmpty()
+        // as?, not jsonPrimitive: the accessor throws when the value is an object or an
+        // array, which would turn an envelope this function is meant to tolerate into an
+        // exception out of generateResponse.
         is JsonArray -> content.joinToString("") { part ->
             val partObject = part as? JsonObject ?: return@joinToString ""
-            if (partObject["type"]?.jsonPrimitive?.contentOrEmpty() != "text") return@joinToString ""
-            partObject["text"]?.jsonPrimitive?.contentOrEmpty().orEmpty()
+            val type = partObject["type"] as? JsonPrimitive
+            if (type?.contentOrEmpty() != "text") return@joinToString ""
+            (partObject["text"] as? JsonPrimitive)?.contentOrEmpty().orEmpty()
         }
         else -> ""
     }

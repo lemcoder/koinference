@@ -13,8 +13,21 @@ namespace {
 // other's message.
 thread_local std::string g_last_error;
 
+// The most recent reply, kept so that a caller whose buffer was too small can collect it
+// without generating again. Thread-local for the same reason as the error.
+thread_local std::string g_last_response;
+
 void set_error(std::string message) { g_last_error = std::move(message); }
 void clear_error() { g_last_error.clear(); }
+
+// snprintf semantics: copy when it fits, report what was needed either way.
+int copy_out(const std::string& value, char* out_buf, int buf_size) {
+    if (value.size() + 1 <= static_cast<size_t>(buf_size)) {
+        std::memcpy(out_buf, value.data(), value.size());
+        out_buf[value.size()] = '\0';
+    }
+    return static_cast<int>(value.size());
+}
 
 // LiteRT-LM speaks JSON at its message boundary, and the facade has no JSON
 // library linked in — it only ever *builds* one object shape, so a minimal
@@ -126,6 +139,7 @@ KoiLmSessionParams koilm_default_session_params(void) {
     params.top_k = 40;
     params.top_p = 0.95f;
     params.temp = 0.8f;
+    params.seed = -1;
     return params;
 }
 
@@ -150,6 +164,9 @@ KoiLmConversation* koilm_session_create(
     if (params.top_k > 0) litert_lm_sampler_params_set_top_k(sampler, params.top_k);
     if (params.top_p > 0.0f) litert_lm_sampler_params_set_top_p(sampler, params.top_p);
     litert_lm_sampler_params_set_temperature(sampler, params.temp);
+    // Only when asked for: an unconditional seed would make every conversation on this leg
+    // reproducible while the Android leg's default is not, for callers who never set one.
+    if (params.seed >= 0) litert_lm_sampler_params_set_seed(sampler, params.seed);
 
     LiteRtLmSessionConfig* session_config = litert_lm_session_config_create();
     if (session_config == nullptr) {
@@ -248,18 +265,21 @@ int koilm_generate(
         return -1;
     }
 
-    const size_t length = std::strlen(text);
-    if (length + 1 > static_cast<size_t>(buf_size)) {
-        litert_lm_json_response_delete(response);
-        set_error("response needs " + std::to_string(length + 1) +
-                  " bytes but the buffer holds " + std::to_string(buf_size));
+    // Kept before any size check. A reply that does not fit must not be thrown away: asking
+    // for it again would mean a second send_message, which is another user turn in the
+    // conversation's history and another full generation.
+    g_last_response.assign(text);
+    litert_lm_json_response_delete(response);
+
+    return copy_out(g_last_response, out_buf, buf_size);
+}
+
+int koilm_last_response(char* out_buf, int buf_size) {
+    if (out_buf == nullptr || buf_size <= 0) {
+        set_error("invalid arguments to koilm_last_response");
         return -1;
     }
-
-    std::memcpy(out_buf, text, length);
-    out_buf[length] = '\0';
-    litert_lm_json_response_delete(response);
-    return static_cast<int>(length);
+    return copy_out(g_last_response, out_buf, buf_size);
 }
 
 }  // extern "C"

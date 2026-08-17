@@ -3,6 +3,8 @@ package io.github.lemcoder.koinference.llamacpp
 import io.github.lemcoder.koinference.ModelLoader
 import io.github.lemcoder.koinference.RuntimeSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -24,15 +26,36 @@ class LlamaCppModelLoader(
 
     private val runtimes = mutableMapOf<String, LlamaCppRuntime>()
 
+    // Held across the load, not only around the map: two callers asking for the same model
+    // would otherwise both load the weights, and the one that lost the race would be dropped
+    // from the map with no way left to free it.
+    private val lock = Mutex()
+
     override suspend fun load(modelPath: String): LlamaCppModelRuntime {
         require(modelPath.endsWith(".gguf")) {
             "llama.cpp loader expects a .gguf model path."
         }
 
-        runtimes[modelPath]?.let { return it }
+        return lock.withLock {
+            runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
+        }
+    }
 
-        // mmap or not, loading touches the file and can take seconds on a large model.
-        val runtime = withContext(Dispatchers.Default) {
+    override suspend fun unload(modelPath: String) {
+        // Dropping the reference is not enough: the model and its session are native memory
+        // and would live until the process exits.
+        val runtime = lock.withLock { runtimes.remove(modelPath) }
+        runtime?.close()
+    }
+
+    override suspend fun unloadAll() {
+        val all = lock.withLock { runtimes.values.toList().also { runtimes.clear() } }
+        all.forEach { it.close() }
+    }
+
+    // mmap or not, loading touches the file and can take seconds on a large model.
+    private suspend fun newRuntime(modelPath: String): LlamaCppRuntime =
+        withContext(Dispatchers.Default) {
             LlamaCppRuntime.load(
                 modelPath = modelPath,
                 systemPrompt = systemPrompt,
@@ -42,13 +65,4 @@ class LlamaCppModelLoader(
                 nPredict = nPredict,
             )
         }
-        runtimes[modelPath] = runtime
-        return runtime
-    }
-
-    override suspend fun unload(modelPath: String) {
-        // Dropping the reference is not enough: the model and its session are native memory
-        // and would live until the process exits.
-        runtimes.remove(modelPath)?.close()
-    }
 }

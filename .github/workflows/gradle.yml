@@ -134,6 +134,11 @@ jobs:
         ./gradlew :backends:llamacpp:bundleAndroidMainAar :core:bundleAndroidMainAar \
                   :backends:litertlm:bundleAndroidMainAar
 
+    # The runtime's logic is common code and needs no device: this compiles the Android actuals
+    # against it and runs the lot on the JVM, minutes before the emulator is even up.
+    - name: LiteRT-LM host tests
+      run: ./gradlew :backends:litertlm:testAndroidHostTest
+
     - name: Check the AAR ships a library per ABI
       run: |
         aar=backends/llamacpp/build/outputs/aar/llamacpp.aar

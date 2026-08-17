@@ -5,7 +5,7 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 ## Modules
 
 - `:core` — high-level common interfaces:
-  - `ModelLoader` (`load` / `unload`)
+  - `ModelLoader` (`load` / `unload` / `unloadAll`)
   - `ModelRuntime` (response generation, generation params, runtime settings, schema constraints)
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
@@ -111,7 +111,7 @@ differently:
 ```
 backends/litertlm/
 ├── src/
-│   ├── commonMain/            LiteRtLmModelLoader, LiteRtLmRuntime, the expect bridge
+│   ├── commonMain/            LiteRtLmModelLoader, LiteRtLmRuntime, the bridge interfaces
 │   ├── nativeMain/            actuals over cinterop + the reply-JSON reader
 │   ├── androidMain/           actuals over Google's Kotlin API
 │   └── androidDeviceTest/     on-device generation
@@ -127,8 +127,15 @@ Apple targets bind a C facade the way `:backends:llamacpp` does. **Android does 
 the AAR's `liblitertlm_jni.so` is version-scripted down to its 24 `Java_…_LiteRtLmJni_*` entry
 points and exports no `litert_lm_*` C symbols, so there is nothing for a facade to link against.
 That leg goes through `com.google.ai.edge.litertlm`'s Kotlin API instead. The shared seam is
-therefore `internal expect`ed at the level of engine/conversation handles rather than at the C
-API's shape, so neither side has to pretend to be the other.
+therefore a trio of `internal` interfaces — bridge → engine → conversation — with a single
+`expect fun platformBridge()` behind it, so neither side has to pretend to be the other and a
+fake stands in for both in `commonTest`.
+
+A runtime is a resource. `unload`/`unloadAll` free the engine, and every call that frees
+something native suspends (`updateGenerationParameters`, `updateRuntimeSettings`,
+`resetConversation`) so that it waits for an in-flight generation instead of pulling the
+handles out from under it. Changing the backend reloads the model, because LiteRT-LM decides
+where a model runs when the engine is created.
 
 The AAR this module produces carries no `.so` of its own — the runtime comes transitively from
 `com.google.ai.edge.litertlm:litertlm-android` and is merged by the consuming app. The Maven

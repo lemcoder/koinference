@@ -43,4 +43,19 @@ class ResponseJsonTest {
         assertEquals("", extractResponseText("not json"))
         assertEquals("", extractResponseText("""{"role":"assistant"}"""))
     }
+
+    @Test
+    fun aPartWhoseFieldsAreNotStringsIsSkippedRatherThanThrown() {
+        // The documented contract is "empty for malformed", and it has to hold for a part
+        // whose type or text is an object or an array too — jsonPrimitive throws on those,
+        // which would come out of generateResponse as an IllegalArgumentException.
+        assertEquals("", extractResponseText("""{"content":[{"type":"text","text":["a","b"]}]}"""))
+        assertEquals("", extractResponseText("""{"content":[{"type":{"a":1},"text":"x"}]}"""))
+        assertEquals("", extractResponseText("""{"content":{"type":"text"}}"""))
+        // A good part alongside a bad one still comes through.
+        assertEquals(
+            "kept",
+            extractResponseText("""{"content":[{"type":"text","text":{}},{"type":"text","text":"kept"}]}"""),
+        )
+    }
 }

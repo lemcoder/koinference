@@ -49,3 +49,19 @@ internal expect fun llamaEmbed(sessionHandle: Long, text: String): FloatArray
  * @return the grammar, or an empty string if the schema does not parse or convert.
  */
 internal expect fun llamaJsonSchemaToGrammar(schema: String): String
+
+/**
+ * Timings and token counts of the last [llamaGenerate] on a session.
+ *
+ * Each returns -1 when nothing has been measured, which is why they are not folded into the
+ * generate call: a benchmark has to tell "no measurement" from "measured zero".
+ */
+internal expect fun llamaLastPromptTokens(sessionHandle: Long): Int
+
+internal expect fun llamaLastDecodeTokens(sessionHandle: Long): Int
+
+internal expect fun llamaLastPrefillMicros(sessionHandle: Long): Int
+
+internal expect fun llamaLastTtftMicros(sessionHandle: Long): Int
+
+internal expect fun llamaLastDecodeMicros(sessionHandle: Long): Int

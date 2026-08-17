@@ -19,14 +19,14 @@ enum {
 /**
  * Sampling parameters for a conversation.
  *
- * Four 4-byte fields, no padding. The JVM leg packs this as a ByteBuffer, so the
- * field order and count are part of the contract — see LiteRtLmBridge.
+ * Plain 4-byte fields, no padding.
  */
 typedef struct {
     int   max_tokens;  /**< Max tokens to generate; <= 0 = model default. */
     int   top_k;       /**< Top-k sampling; 0 = disabled. */
     float top_p;       /**< Top-p sampling; 0.0 = disabled. */
     float temp;        /**< Sampling temperature. */
+    int   seed;        /**< Sampler seed; < 0 = leave the runtime's own seeding. */
 } KoiLmSessionParams;
 
 /* ── diagnostics ──────────────────────────────────────────────────────────── */
@@ -96,9 +96,15 @@ void koilm_session_free(KoiLmConversation* conversation);
  *                    prebuilt runtime.
  * @param out_buf     Destination for the null-terminated JSON response.
  * @param buf_size    Size of out_buf in bytes, including the null terminator.
- * @return            Bytes written (excluding the null terminator), or -1 on
- *                    error. If the reply does not fit, -1 is returned and
- *                    koilm_last_error() reports the size that was needed.
+ * @return            The reply's length in bytes, excluding the null terminator,
+ *                    or -1 on error.
+ *
+ *                    snprintf's contract: the return value is what the reply
+ *                    needs, not what was written. A value >= buf_size means
+ *                    nothing was written; collect the reply with
+ *                    koilm_last_response() and a buffer of return + 1 bytes.
+ *                    Sizing the buffer up front is impossible — the length is a
+ *                    property of what the model produced.
  */
 int koilm_generate(
     KoiLmConversation* conversation,
@@ -107,6 +113,18 @@ int koilm_generate(
     char*              out_buf,
     int                buf_size
 );
+
+/**
+ * Copy the most recent reply on this thread into out_buf.
+ *
+ * For the case where koilm_generate() reported a size larger than the buffer it
+ * was given. Generating again is not the way out of that: it would send a second
+ * user message, adding a turn to the conversation and paying for the tokens
+ * twice. The reply is retained until the next koilm_generate() on this thread.
+ *
+ * @return same contract as koilm_generate(), or -1 on invalid arguments.
+ */
+int koilm_last_response(char* out_buf, int buf_size);
 
 #ifdef __cplusplus
 }

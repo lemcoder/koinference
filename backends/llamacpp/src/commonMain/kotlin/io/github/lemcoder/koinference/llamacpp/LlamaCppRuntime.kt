@@ -2,6 +2,9 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.GenerationTelemetry
+import io.github.lemcoder.koinference.InstrumentedRuntime
+import io.github.lemcoder.koinference.TelemetrySource
 import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
@@ -11,6 +14,11 @@ import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaBackend
 import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerate
+import io.github.lemcoder.koinference.llamacpp.internal.llamaLastDecodeMicros
+import io.github.lemcoder.koinference.llamacpp.internal.llamaLastDecodeTokens
+import io.github.lemcoder.koinference.llamacpp.internal.llamaLastPrefillMicros
+import io.github.lemcoder.koinference.llamacpp.internal.llamaLastPromptTokens
+import io.github.lemcoder.koinference.llamacpp.internal.llamaLastTtftMicros
 import io.github.lemcoder.koinference.llamacpp.internal.llamaJsonSchemaToGrammar
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
@@ -46,12 +54,12 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     settings: RuntimeSettings,
-) : LlamaCppTextRuntime {
+) : LlamaCppTextRuntime, InstrumentedRuntime {
 
-    var generationParameters: GenerationParameters = GenerationParameters()
+    override var generationParameters: GenerationParameters = GenerationParameters()
         private set
 
-    var runtimeSettings: RuntimeSettings = settings
+    override var runtimeSettings: RuntimeSettings = settings
         private set
 
     // The session owns the KV cache and the batch, so a second generation running against it
@@ -61,17 +69,22 @@ class LlamaCppRuntime internal constructor(
     private val lock = Mutex()
     private var closed: Boolean = false
 
+    override var lastGeneration: GenerationTelemetry? = null
+        private set
+
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
     ): String {
-        check(!closed) { "This runtime has been unloaded: $modelPath" }
-
         // The facade is text-only: llama.cpp has mtmd upstream, but koi_generate takes a
-        // single user string and nothing wires the multimodal projector.
+        // single user string and nothing wires the multimodal projector. Rejected before the
+        // lock: a bad prompt is the caller's mistake, not something to queue for.
         val text = prompt.textOnly("llama.cpp")
 
         return lock.withLock {
+            // Under the lock, so that an unload racing this cannot pass the check and free the
+            // session between here and the call into the facade.
+            check(!closed) { "This runtime has been unloaded: $modelPath" }
             withContext(Dispatchers.Default) {
                 // Conversion happens here rather than in Kotlin: llama.cpp ships the
                 // schema-to-GBNF compiler its own sampler was built against.
@@ -85,8 +98,12 @@ class LlamaCppRuntime internal constructor(
                 val session = currentSession()
                 // A -1 from the facade is an empty string here, which is indistinguishable from
                 // a model that produced nothing, so it is raised instead.
-                llamaGenerate(session, systemPrompt, text, grammar)
+                val reply = llamaGenerate(session, systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for $modelPath") }
+                // Read while the session is still the one that produced the reply: any later
+                // parameter change frees it and the numbers go with it.
+                lastGeneration = readTelemetry(session)
+                reply
             }
         }
     }
@@ -95,9 +112,11 @@ class LlamaCppRuntime internal constructor(
      * Sampling is fixed when the session is created, so the session is dropped and rebuilt on
      * the next call — cheap, since the weights stay loaded.
      */
-    override fun updateGenerationParameters(parameters: GenerationParameters) {
-        generationParameters = parameters
-        releaseSession()
+    override suspend fun updateGenerationParameters(parameters: GenerationParameters) {
+        lock.withLock {
+            generationParameters = parameters
+            releaseSession()
+        }
     }
 
     /**
@@ -105,21 +124,30 @@ class LlamaCppRuntime internal constructor(
      * llama.cpp. The reload is deferred to the next generation rather than run here, where it
      * would block the caller on hundreds of megabytes of I/O from a non-suspending function.
      */
-    override fun updateRuntimeSettings(settings: RuntimeSettings) {
-        val backendChanged = settings.backend != runtimeSettings.backend
-        runtimeSettings = settings
-        releaseSession()
-        if (backendChanged) releaseModel()
+    override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
+        lock.withLock {
+            val backendChanged = settings.backend != runtimeSettings.backend
+            runtimeSettings = settings
+            releaseSession()
+            if (backendChanged) releaseModel()
+        }
     }
 
     suspend fun readGgufMetadata(): GgufMetadata = GgufParser.parse(readFileBytes(modelPath))
 
-    /** Releases the session and the model. Called by the loader; idempotent. */
-    internal fun close() {
-        if (closed) return
-        releaseSession()
-        releaseModel()
-        closed = true
+    /**
+     * Releases the session and the model. Called by the loader; idempotent.
+     *
+     * Suspends for the same reason the updates do: a generation holding the session has to
+     * finish before the session is freed underneath it.
+     */
+    internal suspend fun close() {
+        lock.withLock {
+            if (closed) return@withLock
+            closed = true
+            releaseSession()
+            releaseModel()
+        }
     }
 
     private fun currentSession(): Long {
@@ -130,7 +158,10 @@ class LlamaCppRuntime internal constructor(
                 nCtx = nCtx,
                 nThreads = nThreads,
                 nPredict = nPredict,
-                temp = DEFAULT_TEMP,
+                // topP and seed are not here: koi_session_create takes neither, so a caller
+                // that sets them on this backend is ignored rather than surprised by one knob
+                // standing in for another.
+                temp = generationParameters.temperature?.toFloat() ?: DEFAULT_TEMP,
                 topK = generationParameters.topK ?: DEFAULT_TOP_K,
                 minP = generationParameters.minP?.toFloat() ?: DEFAULT_MIN_P,
             )
@@ -138,6 +169,40 @@ class LlamaCppRuntime internal constructor(
         }
         return sessionHandle
     }
+
+    /**
+     * Reads the facade's `koi_last_*` getters, mapping their -1 sentinel to null.
+     *
+     * Rates are derived here rather than in C: llama.cpp reports counts and durations, and
+     * computing tokens/sec from them at the call site keeps the formula visible next to the
+     * numbers it uses. Prefill rate is the prompt divided by prefill time; decode rate counts
+     * from the first token, matching what [GenerationTelemetry.decodeMs] measures.
+     */
+    private fun readTelemetry(session: Long): GenerationTelemetry {
+        fun stat(value: Int): Int? = value.takeIf { it >= 0 }
+
+        val promptTokens = stat(llamaLastPromptTokens(session))
+        val decodeTokens = stat(llamaLastDecodeTokens(session))
+        val prefillMs = stat(llamaLastPrefillMicros(session))?.let { it / 1000.0 }
+        val decodeMs = stat(llamaLastDecodeMicros(session))?.let { it / 1000.0 }
+
+        return GenerationTelemetry(
+            // The facade stamps these inside its decode loop, not at this boundary.
+            source = TelemetrySource.ENGINE,
+            timeToFirstTokenMs = stat(llamaLastTtftMicros(session))?.let { it / 1000.0 },
+            prefillMs = prefillMs,
+            decodeMs = decodeMs,
+            promptTokens = promptTokens,
+            decodeTokens = decodeTokens,
+            prefillTokensPerSecond = ratePerSecond(promptTokens, prefillMs),
+            decodeTokensPerSecond = ratePerSecond(decodeTokens, decodeMs),
+            // llama.cpp has no equivalent: loading is koi_model_load, timed by the caller.
+            engineInitMs = null,
+        )
+    }
+
+    private fun ratePerSecond(tokens: Int?, millis: Double?): Double? =
+        if (tokens == null || millis == null || millis <= 0.0) null else tokens * 1000.0 / millis
 
     private fun releaseSession() {
         if (sessionHandle != 0L) llamaSessionFree(sessionHandle)

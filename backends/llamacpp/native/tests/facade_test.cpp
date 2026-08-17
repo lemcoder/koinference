@@ -108,6 +108,17 @@ TEST_F(FacadeTest, EmbedReturnsErrorForNullBuffer) {
     EXPECT_EQ(koi_embed(reinterpret_cast<KoiSession*>(1), "hello", nullptr, 4), -1);
 }
 
+// ── generation telemetry ───────────────────────────────────────────────────
+
+TEST_F(FacadeTest, TelemetryReturnsMinusOneWithoutASession) {
+    // -1 is "unmeasured". A benchmark reading 0 here would report a real measurement of zero.
+    EXPECT_EQ(koi_last_prompt_tokens(nullptr), -1);
+    EXPECT_EQ(koi_last_decode_tokens(nullptr), -1);
+    EXPECT_EQ(koi_last_prefill_us(nullptr), -1);
+    EXPECT_EQ(koi_last_ttft_us(nullptr), -1);
+    EXPECT_EQ(koi_last_decode_us(nullptr), -1);
+}
+
 // ── json schema → grammar ──────────────────────────────────────────────────
 
 TEST_F(FacadeTest, SchemaToGrammarProducesARootRule) {

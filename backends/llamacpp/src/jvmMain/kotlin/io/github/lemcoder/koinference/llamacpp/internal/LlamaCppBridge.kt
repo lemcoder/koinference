@@ -10,6 +10,11 @@ import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge9
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
 import io.github.lemcoder.koinference.llamacpp.jni.kniCString
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -75,3 +80,20 @@ internal actual fun llamaJsonSchemaToGrammar(schema: String): String {
     val written = kniBridge10(schema, out, out.size)
     return if (written <= 0) "" else String(out, 0, written, Charsets.UTF_8)
 }
+
+// Bridges 11-15 are the koi_last_* getters, in header order. Each returns -1 when the session
+// has no measurement, which callers pass through rather than turning into 0.
+internal actual fun llamaLastPromptTokens(sessionHandle: Long): Int =
+    if (sessionHandle == 0L) -1 else kniBridge11(sessionHandle)
+
+internal actual fun llamaLastDecodeTokens(sessionHandle: Long): Int =
+    if (sessionHandle == 0L) -1 else kniBridge12(sessionHandle)
+
+internal actual fun llamaLastPrefillMicros(sessionHandle: Long): Int =
+    if (sessionHandle == 0L) -1 else kniBridge13(sessionHandle)
+
+internal actual fun llamaLastTtftMicros(sessionHandle: Long): Int =
+    if (sessionHandle == 0L) -1 else kniBridge14(sessionHandle)
+
+internal actual fun llamaLastDecodeMicros(sessionHandle: Long): Int =
+    if (sessionHandle == 0L) -1 else kniBridge15(sessionHandle)

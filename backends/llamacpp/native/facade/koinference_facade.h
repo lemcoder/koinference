@@ -116,6 +116,30 @@ int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_siz
  */
 int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size);
 
+/* ── generation telemetry ─────────────────────────────────────────────────── */
+
+/**
+ * Timings and token counts of the last koi_generate() on this session.
+ *
+ * Recorded inside the decode loop, which is the only place time-to-first-token exists: dividing
+ * a total duration by a token count answers a different question. Every getter returns -1 when
+ * the session is NULL or no generation has completed on it, so "unmeasured" stays distinct from
+ * "measured as zero".
+ *
+ * Scalar getters rather than an out-struct because the JNI bridge generator marshals an `int`
+ * return with no ambiguity. They are appended here for the same reason as the function above:
+ * bridge numbering follows declaration order.
+ *
+ * Durations are microseconds. koi_last_prefill_us covers tokenizing and decoding the prompt;
+ * koi_last_ttft_us is call entry to first sampled token; koi_last_decode_us runs from the first
+ * sampled token to the last, so decode throughput does not depend on prompt length.
+ */
+int koi_last_prompt_tokens(KoiSession* session);
+int koi_last_decode_tokens(KoiSession* session);
+int koi_last_prefill_us(KoiSession* session);
+int koi_last_ttft_us(KoiSession* session);
+int koi_last_decode_us(KoiSession* session);
+
 #ifdef __cplusplus
 }
 #endif

@@ -162,15 +162,27 @@ new place. The facade archive references `libCLiteRTLM_mac.dylib`, so CMake stag
 next to the archive and Gradle passes `-lCLiteRTLM_mac` and an `-rpath` alongside
 `-lkoinference-litertlm-facade`. Setting those on `main.compileTaskProvider` alone is not
 enough: the test executable is linked by this project and needs `binaries.all { linkerOpts(…) }`
-too, or it fails with undefined `koilm_*`.
+too, or it fails with undefined `koilm_*`. The `dependsOn(buildFacade)` goes on
+`binaries.all { linkTaskProvider }` for the same reason — naming link tasks individually covers
+whichever ones existed that day. `cinterop` also needs `native/facade` as an explicit input:
+the task tracks the `.def`, not the header it names, so a new facade function surfaces as an
+unresolved reference in Kotlin rather than as a stale interop.
 
 **Android cannot use the facade, and this is structural.** The AAR's `liblitertlm_jni.so` is
 version-scripted (`VERS_1.0`) down to 24 `Java_..._LiteRtLmJni_*` entry points plus six section
 markers — `nm -D` finds **zero** `litert_lm_*` symbols. There is nothing for a C facade to link
 against, and no amount of NDK work changes that. So the Android leg is Google's Kotlin API, and
-the `internal expect` seam sits at engine/conversation handles rather than at the C API's shape.
-Don't "unify" it by making Android hold Long handles into a registry; the two bindings are
-genuinely different and the handle types say so.
+the seam sits at engine/conversation *objects* rather than at the C API's shape. Don't "unify"
+it by making Android hold Long handles into a registry; the two bindings are genuinely
+different.
+
+**The seam is interfaces, not `expect class` handles, and that is a testability decision.** An
+`expect class` can only be produced by a platform, so with handles at the seam nothing in
+`LiteRtLmRuntime` — conversation reuse, engine reload on a backend change, unload while a
+generation is running — could be checked without a 136 MB model. `LiteRtLmBridge` /
+`LiteRtLmEngine` / `LiteRtLmConversation` are ordinary interfaces, `platformBridge()` is the one
+`expect fun`, and `FakeLiteRtLmBridge` in commonTest covers all of it. The nesting is
+deliberate: an engine hands out conversations, so neither can be used without its owner.
 
 **The two runtimes ship separately and must be bumped together.** `litertlm` in the version
 catalog and `KOILM_VERSION` in `native/CMakeLists.txt` are the same release; a skew between them
@@ -183,8 +195,19 @@ consumer compiles and then dies at the first generate.
 **A commonMain file with any top-level declaration collides with a same-named androidMain file.**
 `expect` declarations generate no JVM class, which is why `:backends:llamacpp` can reuse
 `LlamaCppBridge.kt` across source sets. Adding one `const` to the common bridge produced
-`Duplicate JVM class name … LiteRtLmBridgeKt`; the constants live in `Backends.kt` for that
-reason alone.
+`Duplicate JVM class name … LiteRtLmBridgeKt`. Hence the platform files are named after their
+binding — `SdkBridge.kt`, `FacadeBridge.kt` — and never after the common file they implement.
+
+**The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
+follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer
+is not an error and does not lose the reply — the facade keeps it thread-locally so
+`koilm_last_response` can collect it. Generating again would be wrong twice over: a second
+`send_message` is another turn in the conversation's history and another full decode.
+
+**Sampler defaults exist twice on purpose.** Android's `SamplerConfig` has no default for
+top-k/top-p/temperature (only `seed`, which is 0 — deterministic, unlike the facade), so common
+code has to hold concrete numbers. `SessionDefaultsTest` compares them against
+`koilm_default_session_params()`, which is what keeps the two copies from drifting.
 
 **Instrumented tests need block bodies.** JUnit4 rejects a non-void test method, so
 `fun x() = runBlocking { … }` fails at runtime with `Method x() should be void` rather than at
