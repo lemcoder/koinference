@@ -245,11 +245,17 @@ so generation tests are env-gated rather than run in CI.
 - **A klib does not carry the producing project's linker options.** Any module that links a
   binary against a backend names its libraries again; `:benchmark:core` repeats the `-L`, `-l`,
   `-rpath` and `-framework` flags for both backends. Same lesson as the `.a`, one level out.
-- **AGP 9 cannot apply `com.android.application` in this build at all.** It sees the Kotlin
-  plugin on the classpath and tries to create a `KotlinAndroidTarget`, which reaches for the
-  removed variant API (`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`). The
-  only Kotlin-capable Android plugin in AGP 9 is the multiplatform library one. Hence
-  `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
+- **AGP 9 compiles Kotlin itself.** `org.jetbrains.kotlin.android` is rejected outright ("no
+  longer required for Kotlin support since AGP 9.0"), and `com.android.application` alone
+  handles Kotlin sources. The serialization *compiler* plugin still has to be applied by hand,
+  or `@Serializable` classes compile with no generated serializer and every `.serializer()` is
+  unresolved.
+- **What AGP 9 cannot do is apply `com.android.application` in a build that has the Kotlin
+  Multiplatform plugin on its classpath.** It tries to create a `KotlinAndroidTarget`, which
+  reaches for the removed variant API (`NoClassDefFoundError:
+  com/android/build/gradle/api/BaseVariant`). So `benchmark/app` is its own build and includes
+  the main one — the reverse would be a cycle. Two toolchains in one daemon exhaust Metaspace,
+  which surfaces as unrelated task-creation errors; its gradle.properties raises the limit.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
 - **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same

@@ -20,3 +20,6 @@ xcuserdata
 
 # Downloaded LiteRT-LM release archives (xcframeworks, ~44 MB each)
 .prebuilt/
+
+# JVM heap dumps, e.g. from a Gradle daemon running out of Metaspace
+*.hprof
