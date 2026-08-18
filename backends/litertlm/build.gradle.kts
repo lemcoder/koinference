@@ -96,7 +96,7 @@ kotlin {
         val linkerOptions = listOf(
             "-L$libDir",
             "-lkoinference-litertlm-facade",
-            "-lCLiteRTLM_mac",
+            "-llitert-lm",
             "-rpath", libDir,
         )
 

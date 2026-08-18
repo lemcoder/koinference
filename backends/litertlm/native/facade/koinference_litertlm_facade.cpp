@@ -8,7 +8,10 @@
 #include <map>
 #include <string>
 
-#include "engine.h"  // from the CLiteRTLM prebuilt
+#include "engine.h"        // from the LiteRT-LM C API prebuilt
+// Since 0.16.0 the conversation declarations live in their own header rather than in engine.h.
+// It includes engine.h itself, but both are named here so the dependency is visible.
+#include "conversation.h"
 
 namespace {
 
