@@ -9,9 +9,10 @@ import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.ResponseFormat
 import com.google.ai.edge.litertlm.SamplerConfig
 import io.github.lemcoder.koinference.InferenceBackend
+import com.google.ai.edge.litertlm.MessageCallback
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.callbackFlow
 import com.google.ai.edge.litertlm.Conversation as SdkConversation
 import com.google.ai.edge.litertlm.Engine as SdkEngine
 
@@ -105,20 +106,45 @@ private class SdkConversationHandle(
     }
 
     /**
-     * The SDK's own streaming flow, with each message's text parts concatenated.
+     * Streams through the SDK's *callback* API, not its Flow one.
      *
-     * Nothing is timed here. The caller timestamps emissions, which is the same thing it does
-     * to the llama.cpp binding's chunks — one clock, one code path, two engines.
+     * `sendMessageAsync` also has a `Flow<Message>` overload, and using it throws
+     * `NoSuchMethodError: SendChannel.close$default` from inside the SDK the moment a
+     * generation finishes: the AAR was compiled against an older kotlinx-coroutines, and the
+     * synthetic it calls no longer exists in 1.10.x. It compiles, installs and dies on device.
+     *
+     * MessageCallback has no coroutine types in its signature, so it cannot drift with the
+     * coroutines version. The channel is ours, and closing it is our call rather than theirs.
      */
-    override fun stream(prompt: String, jsonSchema: String?): Flow<String> =
+    override fun stream(prompt: String, jsonSchema: String?): Flow<String> = callbackFlow {
+        val callback = object : MessageCallback {
+            override fun onMessage(message: Message) {
+                val text = message.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString("") { it.text }
+                if (text.isNotEmpty()) trySend(text)
+            }
+
+            override fun onDone() {
+                close()
+            }
+
+            override fun onError(error: Throwable) {
+                close(error)
+            }
+        }
+
         conversation.sendMessageAsync(
             message = Message.user(prompt),
+            callback = callback,
             responseFormat = jsonSchema?.let { ResponseFormat.json(it) },
-        ).map { chunk ->
-            chunk.contents.contents
-                .filterIsInstance<Content.Text>()
-                .joinToString("") { it.text }
-        }.filter { it.isNotEmpty() }
+        )
+
+        // The SDK generates on its own thread and offers no handle to stop it, so a collector
+        // that walks away leaves it running to completion; awaitClose keeps this flow open
+        // until then rather than cancelling into a callback that will still fire.
+        awaitClose { conversation.cancelProcess() }
+    }
 
     override fun close() {
         conversation.close()

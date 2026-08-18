@@ -258,6 +258,21 @@ so generation tests are env-gated rather than run in CI.
   which surfaces as unrelated task-creation errors; its gradle.properties raises the limit.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
+- **Give LiteRT-LM a writable `cacheDir` or it will not run a 1.2B model.** Without one it puts
+  XNNPACK's weight cache next to the model; when that is `/data/local/tmp` (shell's) SELinux
+  denies the write, the delegate rebuilds all nine prefill signatures on every load, and lmkd
+  kills the process at 3.4 GB RSS — `Kill … reason: min watermark is breached`. With
+  `cacheDir` pointed at the app's own cache, LFM2.5-1.2B-Instruct int4 loads and generates on a
+  Pixel 8a. A model may live on /data/local/tmp (readable); the cache may not.
+- **The SDK's `sendMessageAsync` Flow overload throws on a current kotlinx-coroutines.**
+  `NoSuchMethodError: SendChannel.close$default`, from inside `Conversation$sendMessageAsync$1$1
+  .onDone` — the AAR was compiled against an older coroutines and calls a synthetic that 1.10.x
+  no longer has. It compiles and installs and dies on device. The bridge uses the
+  `MessageCallback` overload instead, which has no coroutine types in its signature and so
+  cannot drift with the version.
+- **`/sdcard/Android/data/<pkg>/` is wiped when the package is reinstalled**, which AGP does on
+  every `connectedAndroidDeviceTest`. A model pushed there before a run is gone by the time the
+  test looks for it.
 - **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same
   question differently on consecutive calls, which quietly broke the benchmark's reproducibility
   claim. `ConversationOptions.greedy` maps temperature 0 onto top-k of 1 on both legs.

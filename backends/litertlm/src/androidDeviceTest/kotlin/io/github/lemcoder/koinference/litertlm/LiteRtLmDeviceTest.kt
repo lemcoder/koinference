@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import android.util.Log
+import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lemcoder.koinference.GenerationParameters
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -29,9 +30,46 @@ import kotlin.test.assertTrue
  */
 class LiteRtLmDeviceTest {
 
-    private val modelPath = "/data/local/tmp/koinference/SmolLM2_135M_Instruct.litertlm"
+    /**
+     * Which model to exercise, and whether its absence may pass silently.
+     *
+     * Passed explicitly, a missing file fails: a skip that looks like a pass is how a device
+     * test reports four green runs without ever loading a model.
+     *
+     * Push it somewhere the app can *write*. /data/local/tmp belongs to shell, and while the
+     * runtime can read a model there it cannot write XNNPACK's weight cache beside it — the
+     * delegate then rebuilds every prefill signature on every load, which is seconds of setup
+     * and gigabytes of RSS.
+     *
+     *     adb push model.litertlm /sdcard/Android/data/io.github.lemcoder.koinference.litertlm.test/files/
+     *     ./gradlew :backends:litertlm:connectedAndroidDeviceTest \
+     *         -Pandroid.testInstrumentationRunnerArguments.litertlmModel=/sdcard/Android/data/io.github.lemcoder.koinference.litertlm.test/files/model.litertlm
+     */
+    private val requestedModel: String? =
+        InstrumentationRegistry.getArguments().getString("litertlmModel")
 
-    private fun modelPresent(): Boolean = File(modelPath).isFile
+    private val modelPath: String =
+        requestedModel ?: "/data/local/tmp/koinference/SmolLM2_135M_Instruct.litertlm"
+
+    /**
+     * A directory the runtime may write to.
+     *
+     * Without one, LiteRT-LM tries to put the delegate's weight cache next to the model and is
+     * denied by SELinux when that is shell's directory. The app's own cache dir always works.
+     */
+    private val cacheDir: String =
+        InstrumentationRegistry.getInstrumentation().targetContext.cacheDir.absolutePath
+
+    private fun modelPresent(): Boolean {
+        if (File(modelPath).isFile) return true
+        if (requestedModel != null) {
+            throw AssertionError(
+                "litertlmModel was set to $modelPath but no readable file is there. Push the " +
+                    "model, or drop the argument to skip these tests.",
+            )
+        }
+        return false
+    }
 
     @Test
     fun rejectsANonLiteRtLmPath() {
@@ -75,6 +113,7 @@ class LiteRtLmDeviceTest {
 
         runBlocking {
             val loader = LiteRtLmModelLoader(
+                cacheDir = cacheDir,
                 maxOutputTokens = 24,
                 // Greedy, so the two calls are answering identically rather than by luck.
                 parameters = GenerationParameters(temperature = 0.0, seed = 42),
@@ -104,7 +143,7 @@ class LiteRtLmDeviceTest {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(systemPrompt = "You are terse.")
+            val loader = LiteRtLmModelLoader(cacheDir = cacheDir, systemPrompt = "You are terse.")
             val runtime = loader.load(modelPath)
             try {
                 val reply = runtime.generateResponse("Say hello.")
@@ -120,7 +159,7 @@ class LiteRtLmDeviceTest {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader()
+            val loader = LiteRtLmModelLoader(cacheDir = cacheDir)
             val runtime = loader.load(modelPath)
             try {
                 val schema =

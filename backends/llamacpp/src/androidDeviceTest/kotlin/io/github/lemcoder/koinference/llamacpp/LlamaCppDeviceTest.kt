@@ -9,6 +9,7 @@ import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSystemInfo
 import kotlinx.coroutines.runBlocking
+import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertIs
@@ -24,7 +25,38 @@ import kotlin.test.assertTrue
  */
 class LlamaCppDeviceTest {
 
-    private val modelPath = "/data/local/tmp/koinference/stories260K.gguf"
+    /**
+     * The model to generate from, and whether its absence is allowed to pass.
+     *
+     * Passed explicitly, a missing file fails the test. It used to skip, which meant a run
+     * reported four passes while never loading a model — the difference between "the engine
+     * generates on this device" and "the file was not where I looked" is the whole point of a
+     * device test.
+     *
+     * Push it somewhere the app can *write*, not just read. /data/local/tmp is shell's: an app
+     * can open a model there but not create the delegate's weight cache beside it, which costs
+     * seconds of setup and gigabytes of RSS on every load.
+     *
+     *     adb push model.gguf /sdcard/Android/data/io.github.lemcoder.koinference.llamacpp.test/files/
+     *     ./gradlew :backends:llamacpp:connectedAndroidDeviceTest \
+     *         -Pandroid.testInstrumentationRunnerArguments.ggufModel=/sdcard/Android/data/io.github.lemcoder.koinference.llamacpp.test/files/model.gguf
+     */
+    private val requestedModel: String? =
+        InstrumentationRegistry.getArguments().getString("ggufModel")
+
+    private val modelPath: String =
+        requestedModel ?: "/data/local/tmp/koinference/stories260K.gguf"
+
+    /** Null when the test should run, or a reason to skip when no model was asked for. */
+    private fun skipReason(): String? = when {
+        File(modelPath).isFile -> null
+        requestedModel != null -> throw AssertionError(
+            "ggufModel was set to $modelPath but no readable file is there. Push the model, " +
+                "or drop the argument to skip these tests.",
+        )
+
+        else -> "no model at the default path and none requested"
+    }
 
     @Test
     fun backendReportsSystemInfo() {
@@ -49,7 +81,7 @@ class LlamaCppDeviceTest {
 
     @Test
     fun generatesThroughTheLoader() {
-        if (!File(modelPath).isFile) return
+        if (skipReason() != null) return
 
         // The bridge test below proves the .so runs; this proves the public API reaches it —
         // the loader owns backend init and session creation, which the bridge test does by hand.
@@ -68,7 +100,7 @@ class LlamaCppDeviceTest {
 
     @Test
     fun generatesFromARealModel() {
-        if (!File(modelPath).isFile) return // no model pushed; the other tests still cover loading
+        if (skipReason() != null) return
 
         llamaBackendInit()
         try {
