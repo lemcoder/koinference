@@ -38,7 +38,6 @@ import kotlinx.cinterop.toKString
 private const val INITIAL_REPLY_BYTES = 1 shl 16
 
 /** Leaves the runtime's own seeding, matching koilm_default_session_params(). */
-private const val UNSEEDED = -1
 
 internal actual fun platformBridge(): LiteRtLmBridge = FacadeBridge
 

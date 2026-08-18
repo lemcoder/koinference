@@ -143,7 +143,10 @@ class LiteRtLmDeviceTest {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(cacheDir = cacheDir, systemPrompt = "You are terse.")
+            // No system prompt: whether one is accepted is a property of the model's chat
+                // template — LFM2.5 rejects one, SmolLM2 takes it — and this test is about
+                // generation working on device at all.
+                val loader = LiteRtLmModelLoader(cacheDir = cacheDir)
             val runtime = loader.load(modelPath)
             try {
                 val reply = runtime.generateResponse("Say hello.")

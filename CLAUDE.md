@@ -183,13 +183,29 @@ whichever ones existed that day. `cinterop` also needs `native/facade` as an exp
 the task tracks the `.def`, not the header it names, so a new facade function surfaces as an
 unresolved reference in Kotlin rather than as a stale interop.
 
-**Android cannot use the facade, and this is structural.** The AAR's `liblitertlm_jni.so` is
-version-scripted (`VERS_1.0`) down to 24 `Java_..._LiteRtLmJni_*` entry points plus six section
-markers — `nm -D` finds **zero** `litert_lm_*` symbols. There is nothing for a C facade to link
-against, and no amount of NDK work changes that. So the Android leg is Google's Kotlin API, and
-the seam sits at engine/conversation *objects* rather than at the C API's shape. Don't "unify"
-it by making Android hold Long handles into a registry; the two bindings are genuinely
-different.
+**Android binds the facade through JNI.** This paragraph used to say it could not, and that was
+true of the Maven AAR: `liblitertlm_jni.so` is version-scripted (`VERS_1.0`) down to 24
+`Java_..._LiteRtLmJni_*` entry points, and `nm -D` finds **zero** `litert_lm_*` symbols. Release
+0.16.0 added `litert_lm_c_api-0.1.0.zip`, whose Android slices export 144 of them, so both legs
+bind the same facade — cinterop on Apple, generated JNI bridges on Android — and `SdkBridge.kt`
+is gone along with Google's Kotlin API and its Maven dependency.
+
+Check a claim like the old one with `nm -D --defined-only` rather than by trusting a library
+named after the product. Four things follow from the move:
+
+- **`ANDROID_STL=c++_static` for the stub.** `liblitert-lm.so` statically links its own C++
+  runtime — nine NEEDED entries, all system libraries — so a shared STL shares nothing and costs
+  a `dlopen failed: library "libc++_shared.so" not found` unless it is packaged too.
+- **The runtime ships beside the stub in `jniLibs/<abi>/`**, copied by the JNI target's
+  POST_BUILD step, because the stub records it as a DT_NEEDED and Android resolves that from the
+  same directory.
+- **The reply reader and the backend ids live in commonMain now**, since both legs parse the
+  same envelope; `BackendIdTest` compares the hand-written ids against the generated ones,
+  because only the cinterop leg gets the enum.
+- **A system prompt is a regression against the AAR.** The Kotlin API accepted one for
+  LFM2.5-1.2B; `litert_lm_conversation_config_set_system_message` refuses it, and neither a typed
+  content array nor the role-less Contents shape the Kotlin API sends changes that. Models whose
+  template takes a system role, like SmolLM2, still work.
 
 **The seam is interfaces, not `expect class` handles, and that is a testability decision.** An
 `expect class` can only be produced by a platform, so with handles at the seam nothing in

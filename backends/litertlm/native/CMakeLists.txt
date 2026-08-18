@@ -111,6 +111,64 @@ target_link_libraries(koinference-litertlm-facade
 # time, which is the same place the facade archive lands, so one -L covers the pair. A static
 # archive records nothing about the shared library it needs, which is why they travel together.
 
+# ── JNI stub ─────────────────────────────────────────────────────────────────
+# Android reaches the C API the same way the JVM leg of :backends:llamacpp does: the Konan plugin
+# generates the bridge sources from the facade header, and this compiles and links them. Keeping
+# the link here rather than in the plugin keeps one toolchain end to end — the stub, the facade
+# and the prebuilt runtime are all seen by the same NDK clang.
+#
+# Until 0.16.0 this was impossible: the only Android artifact was the Maven AAR, whose
+# liblitertlm_jni.so is version-scripted down to its own Java_* entry points and exports no
+# litert_lm_* symbols at all. The C API archive's Android slice exports 144.
+option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
+
+# Set by the Konan plugin's externalNativeBuild block — its contract with an external build.
+set(KONAN_JNI_STUB_DIR "" CACHE PATH "Directory holding the generated JNI .c sources")
+set(KONAN_JNI_LIB_NAME "" CACHE STRING "Output name of the JNI stub library")
+
+if(KOI_BUILD_JNI)
+    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_JNI_LIB_NAME)
+        message(FATAL_ERROR
+            "KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME are set by the Konan plugin. "
+            "Build through the interop's task, or pass both by hand.")
+    endif()
+
+    file(GLOB KOI_JNI_SOURCES "${KONAN_JNI_STUB_DIR}/*.c")
+    if(NOT KOI_JNI_SOURCES)
+        message(FATAL_ERROR "No generated JNI sources under ${KONAN_JNI_STUB_DIR}.")
+    endif()
+
+    # The presets build this with ANDROID_STL=c++_static. liblitert-lm.so statically links its
+    # own C++ runtime — its NEEDED list is nine system libraries and no libc++_shared — so there
+    # is nothing to share, and a shared STL would mean packaging libc++_shared.so beside the stub
+    # or failing at dlopen with "library libc++_shared.so not found".
+    add_library(koinference-litertlm-jni SHARED ${KOI_JNI_SOURCES})
+    set_target_properties(koinference-litertlm-jni PROPERTIES
+        OUTPUT_NAME "${KONAN_JNI_LIB_NAME}")
+    target_link_libraries(koinference-litertlm-jni PRIVATE koinference-litertlm-facade)
+
+    # The runtime library has to sit beside the stub in the APK, because the stub records it as a
+    # DT_NEEDED and Android's loader resolves that from the same jniLibs directory. Copied into
+    # the stub's output directory, which is what the plugin hands to AGP for packaging.
+    add_custom_command(TARGET koinference-litertlm-jni POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${KOILM_STAGED}"
+            "$<TARGET_FILE_DIR:koinference-litertlm-jni>/${KOILM_LIBRARY}"
+        COMMENT "Staging ${KOILM_LIBRARY} beside the JNI stub")
+
+    if(NOT ANDROID)
+        # The NDK sysroot ships jni.h; every other toolchain needs a JDK to supply it, and
+        # FindJNI insists on a full one when all this needs is the header.
+        if(DEFINED ENV{JAVA_HOME} AND EXISTS "$ENV{JAVA_HOME}/include/jni.h")
+            target_include_directories(koinference-litertlm-jni PRIVATE
+                "$ENV{JAVA_HOME}/include" "$ENV{JAVA_HOME}/include/darwin")
+        else()
+            find_package(JNI REQUIRED)
+            target_include_directories(koinference-litertlm-jni PRIVATE ${JNI_INCLUDE_DIRS})
+        endif()
+    endif()
+endif()
+
 # ── tests ─────────────────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build the facade smoke test" OFF)
 

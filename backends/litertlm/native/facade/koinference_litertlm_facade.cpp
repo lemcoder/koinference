@@ -259,6 +259,11 @@ KoiLmConversation* koilm_session_create(
     litert_lm_conversation_config_set_session_config(config, session_config);
 
     if (system_prompt != nullptr && system_prompt[0] != '\0') {
+        // The shape the header asks for: "the system message in JSON format". Two other
+        // shapes were tried against a model whose template rejects a system role — content as a
+        // typed array, and Contents with no role at all, which is what the Maven AAR's Kotlin
+        // API sends — and neither is accepted either. The limitation is the template's, not the
+        // encoding's.
         const std::string system = message_json("system", system_prompt);
         litert_lm_conversation_config_set_system_message(config, system.c_str());
     }

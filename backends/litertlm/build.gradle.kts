@@ -1,8 +1,13 @@
+@file:OptIn(ExperimentalKotlinGradlePluginApi::class)
+
+import io.github.lemcoder.interop.jvmInterops
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.kotlinSerialization)
+    alias(libs.plugins.konan)
     alias(libs.plugins.androidKmpLibrary)
 }
 
@@ -60,10 +65,37 @@ kotlin {
         // a duplicate JVM class name or a drifted SamplerConfig would show up.
         withHostTest {}
 
-        // On-device is the only place the AAR's .so is actually loaded and the only place
+        // On-device is the only place the packaged .so is actually loaded and the only place
         // generation can be proven; everything else about Android is structural.
         withDeviceTest {
             instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        }
+
+        // Android now binds the same C facade the Apple leg does, through generated JNI bridges,
+        // exactly as :backends:llamacpp does. Before 0.16.0 there was nothing to bind: the Maven
+        // AAR exported only its own Java_* entry points. Google's Kotlin API is gone from this
+        // module along with the coroutines-version coupling that came with it.
+        compilations["main"].jvmInterops {
+            create("koinferenceLiteRtLmAndroid") {
+                defFile(project.file("src/nativeInterop/cinterop/koinference_litertlm.def"))
+                packageName.set("io.github.lemcoder.koinference.litertlm.jni")
+                includeDirs.from(file("native/facade"))
+
+                externalNativeBuild {
+                    cmake {
+                        path.set(file("native/CMakeLists.txt"))
+                        targets.add("koinference-litertlm-jni")
+                        arguments.add("-DKOI_BUILD_JNI=ON")
+
+                        // The NDK compiles with -g whatever the build type and ELF carries DWARF
+                        // inside the .so, which is tens of megabytes per ABI of nothing useful.
+                        arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
+
+                        abi("arm64-v8a") { preset.set("androidNativeArm64") }
+                        abi("x86_64") { preset.set("androidNativeX64") }
+                    }
+                }
+            }
         }
     }
 
@@ -124,16 +156,11 @@ kotlin {
             // :core on the compile classpath.
             api(project(":core"))
             implementation(libs.kotlinx.coroutines.core)
-        }
-        // Only the facade's replies need parsing; the Android SDK hands back a typed Message.
-        nativeMain.dependencies {
+            // Both legs now parse the facade's reply envelope, so this is common rather than
+            // native-only: Android used to get a typed Message from Google's Kotlin API.
             implementation(libs.kotlinx.serialization.json)
         }
-        // api, not implementation: LiteRtLmRuntime is created from types this brings in, and
-        // a consumer that never sees the AAR gets a NoClassDefFoundError at first generate.
-        androidMain.dependencies {
-            api(libs.litertlm.android)
-        }
+
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
