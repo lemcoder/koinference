@@ -134,6 +134,32 @@ jobs:
         ./gradlew :backends:llamacpp:bundleAndroidMainAar :core:bundleAndroidMainAar \
                   :backends:litertlm:bundleAndroidMainAar
 
+    # Its own build, so the main build's `assemble` never touches it — which means nothing here
+    # would notice it breaking. It carries the inference service and the OpenAI server, and is
+    # also the app APK the instrumentation tests are installed alongside.
+    - name: Assemble the benchmark app
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+      working-directory: benchmark/app
+      run: ./gradlew assembleBenchmark
+
+    - name: Check the app ships the service in its own process
+      run: |
+        apk=benchmark/app/build/outputs/apk/benchmark/koinference-benchmark-app-benchmark.apk
+        aapt2=$(find "${ANDROID_HOME}/build-tools" -name aapt2 | sort | tail -1)
+        manifest=$("$aapt2" dump xmltree --file AndroidManifest.xml "$apk")
+        # The separate process is the entire reason the service exists: in a shared one its PSS
+        # would include the UI and the test runner. A merge or refactor dropping the attribute
+        # would leave every memory number quietly wrong, so it is asserted rather than trusted.
+        echo "$manifest" | grep -q 'android:process.*":inference"' || {
+          echo "the inference service is not in its own process"; exit 1; }
+        # Both engines' libraries, both ABIs: the app is useless for benchmarking otherwise.
+        for abi in arm64-v8a x86_64; do
+          unzip -l "$apk" | grep -q "lib/$abi/.*llamacpp.*\.so" || { echo "missing llama.cpp for $abi"; exit 1; }
+          unzip -l "$apk" | grep -q "lib/$abi/liblitertlm_jni.so" || { echo "missing LiteRT-LM for $abi"; exit 1; }
+        done
+        echo "app APK carries both engines for both ABIs, service is process-isolated"
+
     # The runtime's logic is common code and needs no device: this compiles the Android actuals
     # against it and runs the lot on the JVM, minutes before the emulator is even up.
     - name: LiteRT-LM host tests

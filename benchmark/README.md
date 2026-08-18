@@ -145,8 +145,9 @@ The two engines still differ in what repeats:
   visible in the sample rows.
 * **LiteRT-LM** repeats across *engines*, not across iterations of one. Its sampler RNG is
   seeded when the engine is created and keeps advancing, and reopening a conversation does not
-  rewind it. Under argmax the text is stable in practice, but nothing guarantees iteration *n*
-  matches iteration *n+1*.
+  rewind it. Its first generation after loading also differs from every later one — systematically,
+  not as noise — while later ones agree with each other. Warmup iterations are therefore discarded
+  for correctness on this backend, not only to skip a cold cache.
 
 This affects how variance in the results should be read, not whether the comparison is fair:
 both engines answer the same prompt with the same output budget, and every timing comes from

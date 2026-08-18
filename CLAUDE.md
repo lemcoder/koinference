@@ -265,9 +265,12 @@ so generation tests are env-gated rather than run in CI.
   with it fails *every* send_message in the v0.15.0 prebuilt, on both models tested.
 - **Its sampler RNG is seeded per engine, not per conversation.** Two fresh engines with the same
   seed replay each other exactly; reopening a conversation does not rewind the stream, so a
-  second generation continues rather than repeating. `resetConversation()` does not give a clean
-  slate either — under argmax the second answer still differs, so the model is still seeing the
-  earlier turn. Any test of seeding has to compare engines.
+  second generation continues rather than repeating. Any test of seeding has to compare engines.
+- **The first generation on a freshly loaded engine differs from every later one.** Under argmax
+  it answers "The color blue." once and "The colour **blue**." every time after, and it does so
+  on a single thread too, so it is systematic rather than reduction-order noise. Reopened
+  conversations do agree with each other, which is the only property worth relying on. For
+  benchmarking this means warmup iterations are discarded for *correctness*, not just timing.
 - **A system prompt is a model-dependent feature.** SmolLM2-135M-Instruct accepts one;
   LFM2.5-1.2B-Instruct refuses and the runtime reports only "send_message failed" either way.
   `LiteRtLmRuntime` adds the likely cause when a system prompt is set.

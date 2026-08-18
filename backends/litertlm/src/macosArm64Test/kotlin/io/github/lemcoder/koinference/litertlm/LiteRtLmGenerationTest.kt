@@ -128,6 +128,45 @@ class LiteRtLmGenerationTest {
     }
 
     /**
+     * Under argmax, conversations reopened on one engine answer identically.
+     *
+     * Not the same claim as "reset gives a clean slate", which is not true: the *first*
+     * generation after an engine is loaded reliably differs from every later one — observed on a
+     * single thread, so it is systematic rather than a reduction-order fluke — which means some
+     * engine state outlives the conversation that produced it. What does hold is that every
+     * reopened conversation agrees with the others, and that is the property a caller can use.
+     *
+     * The practical consequence is for benchmarking: on this backend the first iteration can
+     * produce different text, not merely take longer, so warmup iterations have to be discarded
+     * for correctness and not just for timing.
+     */
+    @Test
+    fun reopenedConversationsAgreeWithEachOther() {
+        val path = modelPath ?: return
+
+        runBlocking {
+            val loader = LiteRtLmModelLoader(
+                parameters = GenerationParameters(temperature = 0.0),
+                nThreads = 1,
+            )
+            try {
+                val runtime = loader.load(path)
+                // Discarded: the first generation on a fresh engine is the odd one out.
+                runtime.generateResponse("Name a colour.")
+
+                runtime.resetConversation()
+                val second = runtime.generateResponse("Name a colour.")
+                runtime.resetConversation()
+                val third = runtime.generateResponse("Name a colour.")
+
+                assertEquals(second, third, "reopened conversations should answer identically")
+            } finally {
+                loader.unloadAll()
+            }
+        }
+    }
+
+    /**
      * A system prompt either works or fails legibly.
      *
      * Whether the model accepts a system role is a property of its chat template, not of this
