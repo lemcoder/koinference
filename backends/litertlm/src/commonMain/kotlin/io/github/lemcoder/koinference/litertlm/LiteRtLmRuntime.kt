@@ -112,6 +112,17 @@ class LiteRtLmRuntime internal constructor(
     }
 
     /**
+     * Counts with the model's own tokenizer, through the engine.
+     *
+     * Under the lock like everything else here: the engine is native memory, and an unload
+     * racing this would free it mid-call.
+     */
+    override suspend fun countTokens(text: String): Int = lock.withLock {
+        check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
+        withContext(Dispatchers.Default) { engine.tokenCount(text) }
+    }
+
+    /**
      * Sampling is fixed when the conversation is created, so the conversation is dropped and
      * reopened on the next call — which also drops its prefilled history.
      */

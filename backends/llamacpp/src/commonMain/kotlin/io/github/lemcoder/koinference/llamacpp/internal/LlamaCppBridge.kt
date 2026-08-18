@@ -69,3 +69,6 @@ internal expect fun llamaGenerateNext(sessionHandle: Long): String?
 
 /** Releases the generation. Safe to call when none is running; required if a loop is abandoned. */
 internal expect fun llamaGenerateEnd(sessionHandle: Long)
+
+/** Tokens in [text] by the model's vocabulary, or -1 when the session is gone. */
+internal expect fun llamaTokenCount(sessionHandle: Long, text: String): Int

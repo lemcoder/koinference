@@ -165,6 +165,22 @@ int koilm_stream_next(KoiLmConversation* conversation, char* out_buf, int buf_si
 
 void koilm_stream_end(KoiLmConversation* conversation);
 
+/* ── tokenizer ────────────────────────────────────────────────────────────── */
+
+/**
+ * Count the tokens in `text` using the engine's own tokenizer.
+ *
+ * The count, not the ids: a benchmark needs to divide by a number, and returning the ids would
+ * mean a second call to fetch them and a buffer to size. Ids can be added later without
+ * disturbing this, since new functions are appended.
+ *
+ * Appended at the end of the header, like every other addition here — the generated JNI bridge
+ * numbering follows declaration order, so inserting above renumbers every bridge after it.
+ *
+ * @return the number of tokens, or -1 on failure (see koilm_last_error()).
+ */
+int koilm_token_count(KoiLmEngine* engine, const char* text);
+
 #ifdef __cplusplus
 }
 #endif

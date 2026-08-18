@@ -326,6 +326,21 @@ so generation tests are env-gated rather than run in CI.
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
 
+## Token counts come from the harness, not the engines
+
+Both facades expose the model's own tokenizer — `koilm_token_count` over
+`litert_lm_engine_tokenize`, `koi_token_count` over `common_tokenize` — and `:benchmark:core`
+calls it on the finished reply. Same rule as the timings: one code path, so a token means the
+same thing in every row. An engine's own count would mean whatever that engine counts.
+
+Both count *content*: no BOS, no chat template. A prompt tokenizes to more than this once a
+backend wraps it in a turn, which is why `koi_generate_begin` reports the prompt's real length
+separately.
+
+Chunks stay in the schema beside tokens. Where the two agree — 32 and 32 on both engines for a
+32-token budget — chunks were tokens; the day they disagree, that is worth seeing rather than
+having been assumed away.
+
 ## Cinterop idioms that bite
 
 - `koi_default_session_params()` returns `CValue<T>`, an immutable snapshot — `.apply { field = … }`

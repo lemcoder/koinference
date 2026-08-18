@@ -49,6 +49,14 @@ interface BenchmarkInferenceEngine {
          */
         fun stream(request: GenerationRequest): Flow<String>
 
+        /**
+         * Tokens in [text] by this engine's tokenizer, or null when it has none.
+         *
+         * The harness calls this itself rather than reading a count an engine reports about its
+         * own generation, so that a token means the same thing in every row of the results.
+         */
+        suspend fun countTokens(text: String): Int?
+
         suspend fun close()
     }
 }

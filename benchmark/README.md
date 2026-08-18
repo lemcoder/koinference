@@ -38,8 +38,14 @@ has not arrived.
 | time to first chunk | harness clock, stamped when the first chunk reaches it |
 | total latency | harness clock, ask to last chunk |
 | chunks, chunks/sec | counted by the harness, from the first chunk |
+| tokens, tokens/sec | harness counts the reply with the engine's own tokenizer |
 | model load | harness clock around `initialize` |
 | peak PSS, thermal, battery | Android platform APIs, sampled by the harness |
+
+**Tokens are counted, not inferred.** Both backends expose their model's tokenizer, and the
+harness calls it on the finished reply after the clock has stopped. So tokens/sec is comparable
+across engines for the same reason the timings are: the harness does it, identically, rather than
+each engine reporting its own number.
 
 **Chunks are emissions, not tokens.** llama.cpp emits one token per chunk, because the facade's
 pull loop returns one sampled token per call. LiteRT-LM emits whatever it emits — on the models

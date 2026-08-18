@@ -109,6 +109,13 @@ data class GenerationSample(
      */
     val chunks: Int = 0,
     val chunksPerSecond: Double? = null,
+    /**
+     * Tokens in the reply, counted by the harness with the engine's own tokenizer.
+     *
+     * Null when a backend exposes no tokenizer. Never derived from chunks or characters.
+     */
+    val generatedTokens: Int? = null,
+    val tokensPerSecond: Double? = null,
     /** Characters produced. Not a token count, and never used as one. */
     val outputChars: Int,
     val peakPssKb: Long? = null,

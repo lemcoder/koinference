@@ -470,3 +470,25 @@ void koilm_stream_end(KoiLmConversation* conversation) {
     }
     delete state;
 }
+
+/* ── tokenizer ────────────────────────────────────────────────────────────── */
+
+int koilm_token_count(KoiLmEngine* engine, const char* text) {
+    clear_error();
+
+    if (engine == nullptr || text == nullptr) {
+        set_error("invalid arguments to koilm_token_count");
+        return -1;
+    }
+
+    LiteRtLmTokenizeResult* result = litert_lm_engine_tokenize(
+        reinterpret_cast<LiteRtLmEngine*>(engine), text);
+    if (result == nullptr) {
+        set_error("tokenize failed");
+        return -1;
+    }
+
+    const size_t count = litert_lm_tokenize_result_get_num_tokens(result);
+    litert_lm_tokenize_result_delete(result);
+    return static_cast<int>(count);
+}

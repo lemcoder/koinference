@@ -19,11 +19,12 @@ Rules this tool will not bend:
 * Records that are not SUCCESS never enter a statistic. They are counted and listed instead.
 * A missing metric is missing. Nothing is imputed, and a series with no data produces no bar
   rather than a zero-height one.
-* Chunks are emissions, not tokens. Every throughput figure is reported next to the chunk
-  count that produced it, because a chunk means whatever the engine decided it means — one
-  token for llama.cpp, whatever LiteRT-LM sends for LiteRT-LM. Latency and time to first chunk
-  need no such caveat: the harness measures both above the engine, with one clock and one code
-  path, so those columns are comparable as they stand.
+* Tokens/sec is counted by the harness calling each model's own tokenizer on the finished
+  reply — not taken from anything an engine reports about itself — so it means the same thing in
+  every row. Chunks/sec is kept beside it because a chunk is an emission, which is an engine's
+  own business; where the two agree, chunks were tokens.
+* Latency and time to first chunk need no caveat: the harness measures both above the engine,
+  with one clock and one code path.
 """
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ SUPPORTED_VERSIONS = {"1"}
 # (column, label, "higher is better")
 METRICS = [
     ("ttft_ms", "Time to first chunk (ms)", False),
+    ("tokens_per_second", "Tokens/sec", True),
     ("chunks_per_second", "Chunks/sec", True),
     ("wall_clock_ms", "Total latency (ms)", False),
     ("peak_pss_kb", "Peak PSS (KB)", False),
@@ -170,6 +172,8 @@ def flatten(files: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], list
                         "streaming_ms": sample.get("streamingMs"),
                         "chunks": sample.get("chunks"),
                         "chunks_per_second": sample.get("chunksPerSecond"),
+                        "generated_tokens": sample.get("generatedTokens"),
+                        "tokens_per_second": sample.get("tokensPerSecond"),
                         "output_chars": sample.get("outputChars"),
                         # Per-record values repeated on each sample row so a single CSV can be
                         # grouped without a join.

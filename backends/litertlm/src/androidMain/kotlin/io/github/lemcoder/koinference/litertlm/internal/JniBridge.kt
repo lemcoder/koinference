@@ -4,6 +4,7 @@ import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge10
+import io.github.lemcoder.koinference.litertlm.jni.kniBridge11
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge2
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge4
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge5
@@ -78,6 +79,12 @@ private class JniEngine(private val handle: Long) : LiteRtLmEngine {
         val conversation = kniBridge4(handle, params.array(), options.systemPrompt)
         check(conversation != 0L) { "LiteRT-LM could not open a conversation: ${lastError()}" }
         return JniConversation(conversation)
+    }
+
+    override fun tokenCount(text: String): Int {
+        val count = kniBridge11(handle, text)
+        check(count >= 0) { "LiteRT-LM could not tokenize: ${lastError()}" }
+        return count
     }
 
     override fun close() = kniBridge2(handle)
