@@ -209,7 +209,7 @@ class BenchmarkRunner(
         observePeak: (MemorySnapshot?) -> Unit,
     ): GenerationSample {
         // One measurement function for every engine — see measureGeneration.
-        val result = measureGeneration(probe, session.stream(request))
+        val result = measureGeneration(probe, session.stream(request)) { session.countTokens(it) ?: NO_TOKENIZER }
         // Immediately after generation, which is the closest this can get to the peak without
         // a sampling thread. Named peakPssKb per sample rather than "the" peak for that reason.
         val afterGeneration = probe.readMemory()
@@ -230,7 +230,7 @@ class BenchmarkRunner(
         var iterations = 0
 
         while (probe.monotonicNanos() - start < durationNanos) {
-            val result = measureGeneration(probe, session.stream(request))
+            val result = measureGeneration(probe, session.stream(request)) { session.countTokens(it) ?: NO_TOKENIZER }
             iterations++
             wallClocks += result.totalMs
             result.chunksPerSecond?.let { decodeRates += it }
@@ -336,6 +336,16 @@ private fun GenerationMeasurement.toSample(iteration: Int, peakPssKb: Long?) = G
     streamingMs = streamingMs,
     chunks = chunks,
     chunksPerSecond = chunksPerSecond,
+    generatedTokens = generatedTokens,
+    tokensPerSecond = tokensPerSecond,
     outputChars = text.length,
     peakPssKb = peakPssKb,
 )
+
+/**
+ * What a count is when the engine has no tokenizer.
+ *
+ * Negative rather than zero, and filtered out before it reaches a sample: zero tokens is a real
+ * outcome for a model that generated nothing, and the two must not collapse into one value.
+ */
+private const val NO_TOKENIZER = -1

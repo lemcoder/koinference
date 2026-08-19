@@ -172,19 +172,18 @@ jobs:
         unzip -l "$aar" | grep -q 'jni/x86_64/.*\.so' || { echo "missing x86_64"; exit 1; }
         unzip -l "$aar" | grep -E 'jni/|classes.jar'
 
-    # The opposite expectation, and the reason litertlm declares its runtime as `api`: the .so is
-    # Google's, merged into the app by the transitive dependency. An .so appearing in ours would
-    # mean something started building native code for a module that has no native code.
-    - name: Check the LiteRT-LM AAR ships no library of its own
+    # This assertion used to be the opposite: the AAR carried no .so of its own, because the
+    # runtime arrived from Maven as a transitive dependency. Since the move to the C API it
+    # packages both the JNI stub and liblitert-lm.so per ABI, and an AAR missing either is one
+    # that fails at dlopen on a device rather than at build time here.
+    - name: Check the LiteRT-LM AAR ships the runtime and the stub per ABI
       run: |
         aar=backends/litertlm/build/outputs/aar/litertlm.aar
-        # `if`, not `grep … && exit 1`: the steps run under `bash -e`, where a grep that matches
-        # nothing fails the list and would turn the good case into a red job.
-        if unzip -l "$aar" | grep -q '\.so'; then
-          echo "unexpected .so in $aar"
-          exit 1
-        fi
-        unzip -l "$aar" | grep -E 'classes.jar|AndroidManifest'
+        for abi in arm64-v8a x86_64; do
+          unzip -l "$aar" | grep -q "jni/$abi/liblitert-lm.so" || { echo "missing the runtime for $abi"; exit 1; }
+          unzip -l "$aar" | grep -q "jni/$abi/.*litertlm.*stubs\.so" || { echo "missing the JNI stub for $abi"; exit 1; }
+        done
+        unzip -l "$aar" | grep -E 'jni/|classes.jar'
 
     # llama.cpp's own test model: 1.2 MB, small enough to download and generate from on an emulator.
     - name: Fetch a tiny GGUF model

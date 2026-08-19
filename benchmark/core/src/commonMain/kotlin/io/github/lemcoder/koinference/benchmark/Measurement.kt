@@ -20,23 +20,38 @@ import kotlinx.coroutines.flow.Flow
  * tokens is how a benchmark reports a throughput number that means two different things in two
  * rows of the same table.
  */
-suspend fun measureGeneration(probe: PlatformProbe, chunks: Flow<String>): GenerationMeasurement {
+suspend fun measureGeneration(
+    probe: PlatformProbe,
+    chunks: Flow<String>,
+    /**
+     * Counts tokens in the finished reply with the engine's own tokenizer, or null when the
+     * engine has none.
+     *
+     * Called after the clock stops, so tokenizing never lands inside a timing. The harness does
+     * the counting for both engines rather than asking each for a number, which is the same rule
+     * the timings follow: one code path, one definition.
+     */
+    countTokens: (suspend (String) -> Int)? = null,
+): GenerationMeasurement {
     val startNanos = probe.monotonicNanos()
     var firstChunkNanos: Long? = null
     var chunkCount = 0
-    val text = StringBuilder()
+    val collected = StringBuilder()
 
     chunks.collect { chunk ->
         // Stamped before anything is done with the chunk, including appending it: the
         // measurement is when it arrived, not when the harness finished handling it.
         if (firstChunkNanos == null) firstChunkNanos = probe.monotonicNanos()
         chunkCount++
-        text.append(chunk)
+        collected.append(chunk)
     }
 
     val endNanos = probe.monotonicNanos()
+    val text = collected.toString()
+    val tokens = countTokens?.invoke(text)?.takeIf { it >= 0 }
+
     return GenerationMeasurement(
-        text = text.toString(),
+        text = text,
         totalMs = (endNanos - startNanos) / NANOS_PER_MILLI,
         // Null, not zero, when the engine produced nothing at all: no first chunk ever arrived,
         // so there is no first-token time to report.
@@ -44,6 +59,7 @@ suspend fun measureGeneration(probe: PlatformProbe, chunks: Flow<String>): Gener
         // From the first chunk, so a long prompt does not depress the rate.
         streamingMs = firstChunkNanos?.let { (endNanos - it) / NANOS_PER_MILLI },
         chunks = chunkCount,
+        generatedTokens = tokens,
     )
 }
 
@@ -61,7 +77,23 @@ data class GenerationMeasurement(
     val timeToFirstChunkMs: Double?,
     val streamingMs: Double?,
     val chunks: Int,
+    /** Tokens in [text] by the engine's own tokenizer, or null when it exposes none. */
+    val generatedTokens: Int? = null,
 ) {
+
+    /**
+     * Generated tokens per second over the streaming interval.
+     *
+     * The number a reader actually wants, and comparable between engines because both counts
+     * come from this harness calling each model's tokenizer — not from an engine's own report.
+     */
+    val tokensPerSecond: Double?
+        get() = if (generatedTokens != null && streamingMs != null && streamingMs > 0.0) {
+            generatedTokens * 1000.0 / streamingMs
+        } else {
+            null
+        }
+
     val chunksPerSecond: Double?
         get() = if (streamingMs != null && streamingMs > 0.0 && chunks > 1) {
             // chunks - 1: the first one arrived before this interval started.

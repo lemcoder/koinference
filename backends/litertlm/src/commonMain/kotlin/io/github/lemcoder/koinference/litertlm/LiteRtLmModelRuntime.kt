@@ -4,11 +4,12 @@ import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.ModelRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.StreamingTextRuntime
+import io.github.lemcoder.koinference.TokenCounting
 import io.github.lemcoder.koinference.TextRuntime
 
 sealed interface LiteRtLmModelRuntime : ModelRuntime
 
-interface LiteRtLmTextRuntime : LiteRtLmModelRuntime, TextRuntime, StreamingTextRuntime {
+interface LiteRtLmTextRuntime : LiteRtLmModelRuntime, TextRuntime, StreamingTextRuntime, TokenCounting {
     /** What the next conversation will be opened with. */
     val generationParameters: GenerationParameters
 

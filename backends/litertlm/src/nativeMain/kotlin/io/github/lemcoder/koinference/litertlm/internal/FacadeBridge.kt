@@ -11,6 +11,7 @@ import koinference_litertlm.KOILM_BACKEND_CPU
 import koinference_litertlm.KOILM_BACKEND_GPU
 import koinference_litertlm.KoiLmSessionParams
 import koinference_litertlm.koilm_stream_begin
+import koinference_litertlm.koilm_token_count
 import koinference_litertlm.koilm_stream_next
 import koinference_litertlm.koilm_stream_end
 import koinference_litertlm.koilm_generate
@@ -38,7 +39,6 @@ import kotlinx.cinterop.toKString
 private const val INITIAL_REPLY_BYTES = 1 shl 16
 
 /** Leaves the runtime's own seeding, matching koilm_default_session_params(). */
-private const val UNSEEDED = -1
 
 internal actual fun platformBridge(): LiteRtLmBridge = FacadeBridge
 
@@ -79,6 +79,12 @@ private class FacadeEngine(private val handle: CPointer<KoiLmEngine>) : LiteRtLm
         val conversation = koilm_session_create(handle, params, options.systemPrompt)
         checkNotNull(conversation) { "Could not open a LiteRT-LM conversation: ${lastError()}" }
         return FacadeConversation(conversation)
+    }
+
+    override fun tokenCount(text: String): Int {
+        val count = koilm_token_count(handle, text)
+        check(count >= 0) { "LiteRT-LM could not tokenize: ${lastError()}" }
+        return count
     }
 
     override fun close() {

@@ -16,6 +16,7 @@ import koinference.koi_json_schema_to_grammar
 import koinference.koi_model_free
 import koinference.koi_model_load
 import koinference.koi_session_create
+import koinference.koi_token_count
 import koinference.koi_session_free
 import koinference.koi_system_info
 import kotlinx.cinterop.CPointer
@@ -124,6 +125,9 @@ internal actual fun llamaGenerateNext(sessionHandle: Long): String? {
 internal actual fun llamaGenerateEnd(sessionHandle: Long) {
     if (sessionHandle != 0L) koi_generate_end(sessionHandle.toCPointer<KoiSession>())
 }
+
+internal actual fun llamaTokenCount(sessionHandle: Long, text: String): Int =
+    if (sessionHandle == 0L) -1 else koi_token_count(sessionHandle.toCPointer<KoiSession>(), text)
 
 internal actual fun llamaEmbed(sessionHandle: Long, text: String): FloatArray {
     if (sessionHandle == 0L) return FloatArray(0)

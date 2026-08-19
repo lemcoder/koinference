@@ -183,13 +183,29 @@ whichever ones existed that day. `cinterop` also needs `native/facade` as an exp
 the task tracks the `.def`, not the header it names, so a new facade function surfaces as an
 unresolved reference in Kotlin rather than as a stale interop.
 
-**Android cannot use the facade, and this is structural.** The AAR's `liblitertlm_jni.so` is
-version-scripted (`VERS_1.0`) down to 24 `Java_..._LiteRtLmJni_*` entry points plus six section
-markers — `nm -D` finds **zero** `litert_lm_*` symbols. There is nothing for a C facade to link
-against, and no amount of NDK work changes that. So the Android leg is Google's Kotlin API, and
-the seam sits at engine/conversation *objects* rather than at the C API's shape. Don't "unify"
-it by making Android hold Long handles into a registry; the two bindings are genuinely
-different.
+**Android binds the facade through JNI.** This paragraph used to say it could not, and that was
+true of the Maven AAR: `liblitertlm_jni.so` is version-scripted (`VERS_1.0`) down to 24
+`Java_..._LiteRtLmJni_*` entry points, and `nm -D` finds **zero** `litert_lm_*` symbols. Release
+0.16.0 added `litert_lm_c_api-0.1.0.zip`, whose Android slices export 144 of them, so both legs
+bind the same facade — cinterop on Apple, generated JNI bridges on Android — and `SdkBridge.kt`
+is gone along with Google's Kotlin API and its Maven dependency.
+
+Check a claim like the old one with `nm -D --defined-only` rather than by trusting a library
+named after the product. Four things follow from the move:
+
+- **`ANDROID_STL=c++_static` for the stub.** `liblitert-lm.so` statically links its own C++
+  runtime — nine NEEDED entries, all system libraries — so a shared STL shares nothing and costs
+  a `dlopen failed: library "libc++_shared.so" not found` unless it is packaged too.
+- **The runtime ships beside the stub in `jniLibs/<abi>/`**, copied by the JNI target's
+  POST_BUILD step, because the stub records it as a DT_NEEDED and Android resolves that from the
+  same directory.
+- **The reply reader and the backend ids live in commonMain now**, since both legs parse the
+  same envelope; `BackendIdTest` compares the hand-written ids against the generated ones,
+  because only the cinterop leg gets the enum.
+- **A system prompt is a regression against the AAR.** The Kotlin API accepted one for
+  LFM2.5-1.2B; `litert_lm_conversation_config_set_system_message` refuses it, and neither a typed
+  content array nor the role-less Contents shape the Kotlin API sends changes that. Models whose
+  template takes a system role, like SmolLM2, still work.
 
 **The seam is interfaces, not `expect class` handles, and that is a testability decision.** An
 `expect class` can only be produced by a platform, so with handles at the seam nothing in
@@ -258,6 +274,21 @@ so generation tests are env-gated rather than run in CI.
   which surfaces as unrelated task-creation errors; its gradle.properties raises the limit.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
+- **Give LiteRT-LM a writable `cacheDir` or it will not run a 1.2B model.** Without one it puts
+  XNNPACK's weight cache next to the model; when that is `/data/local/tmp` (shell's) SELinux
+  denies the write, the delegate rebuilds all nine prefill signatures on every load, and lmkd
+  kills the process at 3.4 GB RSS — `Kill … reason: min watermark is breached`. With
+  `cacheDir` pointed at the app's own cache, LFM2.5-1.2B-Instruct int4 loads and generates on a
+  Pixel 8a. A model may live on /data/local/tmp (readable); the cache may not.
+- **The SDK's `sendMessageAsync` Flow overload throws on a current kotlinx-coroutines.**
+  `NoSuchMethodError: SendChannel.close$default`, from inside `Conversation$sendMessageAsync$1$1
+  .onDone` — the AAR was compiled against an older coroutines and calls a synthetic that 1.10.x
+  no longer has. It compiles and installs and dies on device. The bridge uses the
+  `MessageCallback` overload instead, which has no coroutine types in its signature and so
+  cannot drift with the version.
+- **`/sdcard/Android/data/<pkg>/` is wiped when the package is reinstalled**, which AGP does on
+  every `connectedAndroidDeviceTest`. A model pushed there before a run is gone by the time the
+  test looks for it.
 - **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same
   question differently on consecutive calls, which quietly broke the benchmark's reproducibility
   claim. `ConversationOptions.greedy` maps temperature 0 onto top-k of 1 on both legs.
@@ -294,6 +325,21 @@ so generation tests are env-gated rather than run in CI.
   property, so `conversation.benchmarkInfo` fails with "Unresolved reference" and looks like an
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
+
+## Token counts come from the harness, not the engines
+
+Both facades expose the model's own tokenizer — `koilm_token_count` over
+`litert_lm_engine_tokenize`, `koi_token_count` over `common_tokenize` — and `:benchmark:core`
+calls it on the finished reply. Same rule as the timings: one code path, so a token means the
+same thing in every row. An engine's own count would mean whatever that engine counts.
+
+Both count *content*: no BOS, no chat template. A prompt tokenizes to more than this once a
+backend wraps it in a turn, which is why `koi_generate_begin` reports the prompt's real length
+separately.
+
+Chunks stay in the schema beside tokens. Where the two agree — 32 and 32 on both engines for a
+32-token budget — chunks were tokens; the day they disagree, that is worth seeing rather than
+having been assumed away.
 
 ## Cinterop idioms that bite
 

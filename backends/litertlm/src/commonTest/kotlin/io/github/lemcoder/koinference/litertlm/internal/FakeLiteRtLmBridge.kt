@@ -35,6 +35,9 @@ internal class FakeEngine(val options: EngineOptions) : LiteRtLmEngine {
 
     val conversation: FakeConversation get() = conversations.last()
 
+    /** Whitespace words, which is enough for a fake: tests assert plumbing, not tokenization. */
+    override fun tokenCount(text: String): Int = text.split(" ").count { it.isNotBlank() }
+
     override fun openConversation(options: ConversationOptions): LiteRtLmConversation =
         FakeConversation(options).also { conversations += it }
 

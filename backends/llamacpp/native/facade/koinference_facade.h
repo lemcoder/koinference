@@ -150,6 +150,22 @@ int koi_generate_next(KoiSession* session, char* out_buf, int buf_size);
 
 void koi_generate_end(KoiSession* session);
 
+/* ── tokenizer ────────────────────────────────────────────────────────────── */
+
+/**
+ * Count the tokens in `text` using the model's own vocabulary.
+ *
+ * Counts `text` as content: no BOS, no chat template. A prompt that koi_generate wraps in a
+ * template tokenizes to more than this, which is why koi_generate_begin reports the prompt's
+ * real length separately.
+ *
+ * Appended at the end, like every addition here — the JNI bridge numbering follows declaration
+ * order, so inserting above renumbers every bridge after it.
+ *
+ * @return the number of tokens, or -1 on invalid arguments.
+ */
+int koi_token_count(KoiSession* session, const char* text);
+
 #ifdef __cplusplus
 }
 #endif

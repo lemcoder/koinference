@@ -1,6 +1,10 @@
 {
   "version": 3,
-  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
   "configurePresets": [
     {
       "name": "base",
@@ -48,12 +52,72 @@
         "CMAKE_OSX_ARCHITECTURES": "arm64",
         "CMAKE_OSX_DEPLOYMENT_TARGET": "15.0"
       }
+    },
+    {
+      "name": "androidNativeArm64",
+      "displayName": "Android arm64-v8a",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        "ANDROID_PLATFORM": "android-24",
+        "ANDROID_STL": "c++_static",
+        "ANDROID_ABI": "arm64-v8a"
+      }
+    },
+    {
+      "name": "androidNativeX64",
+      "displayName": "Android x86_64",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{ANDROID_NDK_HOME}/build/cmake/android.toolchain.cmake",
+        "ANDROID_PLATFORM": "android-24",
+        "ANDROID_STL": "c++_static",
+        "ANDROID_ABI": "x86_64"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "macosArm64",        "configurePreset": "macosArm64",        "targets": ["koinference-litertlm-facade"] },
-    { "name": "macosX64",          "configurePreset": "macosX64",          "targets": ["koinference-litertlm-facade"] },
-    { "name": "iosArm64",          "configurePreset": "iosArm64",          "targets": ["koinference-litertlm-facade"] },
-    { "name": "iosSimulatorArm64", "configurePreset": "iosSimulatorArm64", "targets": ["koinference-litertlm-facade"] }
+    {
+      "name": "macosArm64",
+      "configurePreset": "macosArm64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    },
+    {
+      "name": "macosX64",
+      "configurePreset": "macosX64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    },
+    {
+      "name": "iosArm64",
+      "configurePreset": "iosArm64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    },
+    {
+      "name": "iosSimulatorArm64",
+      "configurePreset": "iosSimulatorArm64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    },
+    {
+      "name": "androidNativeArm64",
+      "configurePreset": "androidNativeArm64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    },
+    {
+      "name": "androidNativeX64",
+      "configurePreset": "androidNativeX64",
+      "targets": [
+        "koinference-litertlm-facade"
+      ]
+    }
   ]
 }

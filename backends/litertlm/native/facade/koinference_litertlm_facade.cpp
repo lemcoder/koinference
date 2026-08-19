@@ -8,7 +8,10 @@
 #include <map>
 #include <string>
 
-#include "engine.h"  // from the CLiteRTLM prebuilt
+#include "engine.h"        // from the LiteRT-LM C API prebuilt
+// Since 0.16.0 the conversation declarations live in their own header rather than in engine.h.
+// It includes engine.h itself, but both are named here so the dependency is visible.
+#include "conversation.h"
 
 namespace {
 
@@ -256,6 +259,11 @@ KoiLmConversation* koilm_session_create(
     litert_lm_conversation_config_set_session_config(config, session_config);
 
     if (system_prompt != nullptr && system_prompt[0] != '\0') {
+        // The shape the header asks for: "the system message in JSON format". Two other
+        // shapes were tried against a model whose template rejects a system role — content as a
+        // typed array, and Contents with no role at all, which is what the Maven AAR's Kotlin
+        // API sends — and neither is accepted either. The limitation is the template's, not the
+        // encoding's.
         const std::string system = message_json("system", system_prompt);
         litert_lm_conversation_config_set_system_message(config, system.c_str());
     }
@@ -461,4 +469,26 @@ void koilm_stream_end(KoiLmConversation* conversation) {
         state->ready.wait(lock, [state] { return state->finished; });
     }
     delete state;
+}
+
+/* ── tokenizer ────────────────────────────────────────────────────────────── */
+
+int koilm_token_count(KoiLmEngine* engine, const char* text) {
+    clear_error();
+
+    if (engine == nullptr || text == nullptr) {
+        set_error("invalid arguments to koilm_token_count");
+        return -1;
+    }
+
+    LiteRtLmTokenizeResult* result = litert_lm_engine_tokenize(
+        reinterpret_cast<LiteRtLmEngine*>(engine), text);
+    if (result == nullptr) {
+        set_error("tokenize failed");
+        return -1;
+    }
+
+    const size_t count = litert_lm_tokenize_result_get_num_tokens(result);
+    litert_lm_tokenize_result_delete(result);
+    return static_cast<int>(count);
 }

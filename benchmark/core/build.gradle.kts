@@ -39,7 +39,7 @@ kotlin {
         binaries.all {
             linkerOpts(
                 "-L$llamaCppLibDir", "-lkoinference-facade",
-                "-L$liteRtLmLibDir", "-lkoinference-litertlm-facade", "-lCLiteRTLM_mac",
+                "-L$liteRtLmLibDir", "-lkoinference-litertlm-facade", "-llitert-lm",
                 // The facade archive references the runtime dylib, which CMake stages beside
                 // it; without the rpath the binary links and then dies at load time.
                 "-rpath", liteRtLmLibDir,

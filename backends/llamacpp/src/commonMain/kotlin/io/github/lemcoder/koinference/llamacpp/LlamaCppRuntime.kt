@@ -20,6 +20,7 @@ import io.github.lemcoder.koinference.llamacpp.internal.llamaModelFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
+import io.github.lemcoder.koinference.llamacpp.internal.llamaTokenCount
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -162,6 +163,21 @@ class LlamaCppRuntime internal constructor(
             .ifEmpty { throw IllegalArgumentException("Not a convertible JSON schema: ${constraint.schema}") }
 
         null -> null
+    }
+
+    /**
+     * Counts with the model's own vocabulary.
+     *
+     * Needs a session, which is where the context lives, so the first call on a fresh runtime
+     * creates one — the same session a generation would use, not an extra one.
+     */
+    override suspend fun countTokens(text: String): Int = lock.withLock {
+        check(!closed) { "This runtime has been unloaded: $modelPath" }
+        withContext(Dispatchers.Default) {
+            val count = llamaTokenCount(currentSession(), text)
+            check(count >= 0) { "llama.cpp could not tokenize for $modelPath" }
+            count
+        }
     }
 
     suspend fun readGgufMetadata(): GgufMetadata = GgufParser.parse(readFileBytes(modelPath))

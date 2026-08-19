@@ -30,6 +30,14 @@ internal interface LiteRtLmBridge {
 internal interface LiteRtLmEngine {
     fun openConversation(options: ConversationOptions): LiteRtLmConversation
 
+    /**
+     * Tokens in [text], according to the model's own tokenizer.
+     *
+     * On the engine rather than the conversation because that is where the C API puts it, and
+     * because it is a property of the model rather than of a turn.
+     */
+    fun tokenCount(text: String): Int
+
     /** Releases the model. Calling anything on the engine afterwards is undefined. */
     fun close()
 }
@@ -93,6 +101,9 @@ internal data class ConversationOptions(
 // three — so the defaults live here rather than being read from one leg and copied into the
 // other. koilm_default_session_params() returns exactly these; SessionDefaultsTest fails if
 // the facade ever drifts from them.
+/** Sentinel the facade reads as "leave the runtime's own seeding alone". */
+internal const val UNSEEDED = -1
+
 internal const val DEFAULT_TOP_K = 40
 internal const val DEFAULT_TOP_P = 0.95f
 internal const val DEFAULT_TEMPERATURE = 0.8f

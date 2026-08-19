@@ -4,6 +4,7 @@ import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.StreamingTextRuntime
+import io.github.lemcoder.koinference.TokenCounting
 import io.github.lemcoder.koinference.litertlm.LiteRtLmModelLoader
 import io.github.lemcoder.koinference.llamacpp.LlamaCppModelLoader
 
@@ -56,6 +57,10 @@ private abstract class TextRuntimeEngine : BenchmarkInferenceEngine {
         // mapping, a dispatcher hop — would land in the first-chunk measurement for this engine
         // and not for the other.
         override fun stream(request: GenerationRequest) = runtime.streamResponse(request.prompt)
+
+        // Both backends expose a tokenizer; the null is for whatever is added next without one.
+        override suspend fun countTokens(text: String): Int? =
+            (runtime as? TokenCounting)?.countTokens(text)
 
         override suspend fun close() = release()
     }

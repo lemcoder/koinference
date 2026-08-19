@@ -304,6 +304,14 @@ int koi_generate(
     return len;
 }
 
+/* ── tokenizer ────────────────────────────────────────────────────────────── */
+
+int koi_token_count(KoiSession* session, const char* text) {
+    if (!session || !text) return -1;
+    // add_special=false, parse_special=false: this counts the text, not a turn built from it.
+    return static_cast<int>(common_tokenize(session->ctx, text, false, false).size());
+}
+
 /* ── embeddings ───────────────────────────────────────────────────────────── */
 
 int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_size) {

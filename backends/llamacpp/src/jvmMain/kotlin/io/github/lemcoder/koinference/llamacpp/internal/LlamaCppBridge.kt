@@ -13,6 +13,7 @@ import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
 import io.github.lemcoder.koinference.llamacpp.jni.kniCString
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -100,3 +101,7 @@ internal actual fun llamaGenerateNext(sessionHandle: Long): String? {
 internal actual fun llamaGenerateEnd(sessionHandle: Long) {
     if (sessionHandle != 0L) kniBridge13(sessionHandle)
 }
+
+// Bridge 14 is koi_token_count, appended after the streaming trio.
+internal actual fun llamaTokenCount(sessionHandle: Long, text: String): Int =
+    if (sessionHandle == 0L) -1 else kniBridge14(sessionHandle, text)

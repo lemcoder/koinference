@@ -203,3 +203,41 @@ tasks.named<Test>("jvmTest") {
     )
 }
 
+// Rebuild the host facade archive and merge it into build/prebuilt/, which is where the native
+// targets link from.
+//
+// CI builds these in its own job and downloads them, so this is for working locally: edit the
+// facade, run this, and the Kotlin/Native targets see the change. Without it the archive silently
+// stays whatever it was, and the failure arrives as "Undefined symbols: _koi_*" for a function
+// that is plainly in the header — which cost three debugging rounds before this task existed.
+val collectHostFacade by tasks.registering(Exec::class) {
+    group = "interop"
+    description = "Build the facade for this host and merge it into build/prebuilt/."
+
+    val nativeDir = layout.projectDirectory.dir("native").asFile
+    val konanName = if (System.getProperty("os.arch").lowercase().contains("aarch64")) {
+        "macos_arm64"
+    } else {
+        "macos_x64"
+    }
+    val outputDir = layout.buildDirectory.dir("prebuilt/$konanName").get().asFile
+
+    workingDir = nativeDir
+    commandLine(
+        "sh", "-c",
+        // KOI_BUILD_JNI=OFF explicitly: this task wants the facade archive, not the stub, and
+        // the build directory it shares with the interop has the option cached ON. Leaving it
+        // would send configure looking for jni.h, which the Gradle daemon's JBR does not ship.
+        "cmake --preset $hostPreset -DKOI_BUILD_JNI=OFF -DBUILD_TESTS=OFF && " +
+            "cmake --build --preset $hostPreset --target koinference-facade -j$(sysctl -n hw.ncpu) && " +
+            "mkdir -p ${outputDir.absolutePath} && " +
+            "find build/$hostPreset -name '*.a' | xargs libtool -static -o " +
+            "${outputDir.absolutePath}/libkoinference-facade.a",
+    )
+
+    inputs.files(fileTree("native/facade"))
+    inputs.file("native/CMakeLists.txt")
+    outputs.file(File(outputDir, "libkoinference-facade.a"))
+
+    onlyIf { org.gradle.internal.os.OperatingSystem.current().isMacOsX }
+}
