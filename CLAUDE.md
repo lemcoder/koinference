@@ -245,11 +245,17 @@ so generation tests are env-gated rather than run in CI.
 - **A klib does not carry the producing project's linker options.** Any module that links a
   binary against a backend names its libraries again; `:benchmark:core` repeats the `-L`, `-l`,
   `-rpath` and `-framework` flags for both backends. Same lesson as the `.a`, one level out.
-- **AGP 9 cannot apply `com.android.application` in this build at all.** It sees the Kotlin
-  plugin on the classpath and tries to create a `KotlinAndroidTarget`, which reaches for the
-  removed variant API (`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`). The
-  only Kotlin-capable Android plugin in AGP 9 is the multiplatform library one. Hence
-  `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
+- **AGP 9 compiles Kotlin itself.** `org.jetbrains.kotlin.android` is rejected outright ("no
+  longer required for Kotlin support since AGP 9.0"), and `com.android.application` alone
+  handles Kotlin sources. The serialization *compiler* plugin still has to be applied by hand,
+  or `@Serializable` classes compile with no generated serializer and every `.serializer()` is
+  unresolved.
+- **What AGP 9 cannot do is apply `com.android.application` in a build that has the Kotlin
+  Multiplatform plugin on its classpath.** It tries to create a `KotlinAndroidTarget`, which
+  reaches for the removed variant API (`NoClassDefFoundError:
+  com/android/build/gradle/api/BaseVariant`). So `benchmark/app` is its own build and includes
+  the main one — the reverse would be a cycle. Two toolchains in one daemon exhaust Metaspace,
+  which surfaces as unrelated task-creation errors; its gradle.properties raises the limit.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
 - **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same
@@ -259,9 +265,12 @@ so generation tests are env-gated rather than run in CI.
   with it fails *every* send_message in the v0.15.0 prebuilt, on both models tested.
 - **Its sampler RNG is seeded per engine, not per conversation.** Two fresh engines with the same
   seed replay each other exactly; reopening a conversation does not rewind the stream, so a
-  second generation continues rather than repeating. `resetConversation()` does not give a clean
-  slate either — under argmax the second answer still differs, so the model is still seeing the
-  earlier turn. Any test of seeding has to compare engines.
+  second generation continues rather than repeating. Any test of seeding has to compare engines.
+- **The first generation on a freshly loaded engine differs from every later one.** Under argmax
+  it answers "The color blue." once and "The colour **blue**." every time after, and it does so
+  on a single thread too, so it is systematic rather than reduction-order noise. Reopened
+  conversations do agree with each other, which is the only property worth relying on. For
+  benchmarking this means warmup iterations are discarded for *correctness*, not just timing.
 - **A system prompt is a model-dependent feature.** SmolLM2-135M-Instruct accepts one;
   LFM2.5-1.2B-Instruct refuses and the runtime reports only "send_message failed" either way.
   `LiteRtLmRuntime` adds the likely cause when a system prompt is set.

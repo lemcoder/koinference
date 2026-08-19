@@ -101,10 +101,10 @@ echo
 echo "building APKs"
 if [[ "${DRY_RUN}" -eq 0 ]]; then
     (cd "${REPO_ROOT}" && ./gradlew :benchmark:core:assembleAndroidDeviceTest)
-    (cd "${REPO_ROOT}/benchmark/stub-app" && ./gradlew assembleBenchmark)
+    (cd "${REPO_ROOT}/benchmark/app" && ./gradlew assembleBenchmark)
 fi
 
-APP_APK="${REPO_ROOT}/benchmark/stub-app/build/outputs/apk/benchmark/koinference-benchmark-stub-app-benchmark.apk"
+APP_APK="${REPO_ROOT}/benchmark/app/build/outputs/apk/benchmark/koinference-benchmark-app-benchmark.apk"
 TEST_APK="${REPO_ROOT}/benchmark/core/build/outputs/apk/androidTest/core-androidTest.apk"
 
 if [[ "${DRY_RUN}" -eq 0 ]]; then

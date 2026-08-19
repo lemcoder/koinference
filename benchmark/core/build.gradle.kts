@@ -17,7 +17,7 @@ kotlin {
         minSdk = libs.versions.androidMinSdk.get().toInt()
 
         // The benchmark runs here, as a device test, because AGP 9 has no Kotlin-capable
-        // application plugin — see benchmark/stub-app. AGP builds this into a self-instrumenting
+        // application plugin in *this* build — see benchmark/app. AGP builds this into a self-instrumenting
         // test APK, which is what Firebase Test Lab executes.
         withDeviceTest {
             instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:label="koinference"
+        android:usesCleartextTraffic="true"
+        android:hardwareAccelerated="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="koinference">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          android:process=":inference" is the point of this whole module. A model's memory is
+          most of what anyone wants to measure, and in a shared process it arrives mixed with the
+          UI toolkit and whatever else the app is doing. Alone in its own process, PSS is the
+          model, the engine and a small HTTP server.
+
+          exported, so `adb shell am start-foreground-service` can drive it without the UI.
+        -->
+        <service
+            android:name=".InferenceService"
+            android:exported="true"
+            android:process=":inference"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference server, started manually on a test device" />
+        </service>
+    </application>
+
+</manifest>

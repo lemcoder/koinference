@@ -12,6 +12,11 @@ subprojects {
     // Keyed off the Kotlin plugin so that `:backends`, the container project include() creates and
     // which has no build file of its own, does not publish an empty artifact called "backends".
     plugins.withId("org.jetbrains.kotlin.multiplatform") {
+        // The benchmark harness is not part of the library. Without this it publishes too, and
+        // because it sets no POM_ARTIFACT_ID it does so as `io.github.lemcoder:core` — a name
+        // that says nothing, next to the real `koinference-core`.
+        if (path.startsWith(":benchmark")) return@withId
+
         apply(plugin = "com.vanniktech.maven.publish")
 
         extensions.configure<MavenPublishBaseExtension> {

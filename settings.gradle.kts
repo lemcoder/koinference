@@ -25,4 +25,4 @@ include(":benchmark:core")
 // plugin on the build classpath and tries to create a KotlinAndroidTarget, which reaches for the
 // variant API that AGP 9 removed. An included build has its own plugin classpath and no Kotlin
 // on it, so the stub compiles.
-includeBuild("benchmark/stub-app")
+// benchmark/app includes *this* build rather than the other way round; see its settings.

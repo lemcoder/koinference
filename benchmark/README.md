@@ -6,7 +6,7 @@ JSON that the analysis tool turns into statistics, CSV, Markdown and charts.
 ```
 benchmark/
 ├── core/          the harness: engine adapters, protocol, schema, Android instrumentation
-├── stub-app/      an empty APK, separate build (see "Why a stub app")
+├── app/           the Android app: inference service + OpenAI server (its own build)
 ├── fixtures/      prompt corpus + the script that generates it
 ├── scripts/       Firebase Test Lab execution and device-matrix validation
 └── analysis/      analyze_results.py
@@ -145,8 +145,9 @@ The two engines still differ in what repeats:
   visible in the sample rows.
 * **LiteRT-LM** repeats across *engines*, not across iterations of one. Its sampler RNG is
   seeded when the engine is created and keeps advancing, and reopening a conversation does not
-  rewind it. Under argmax the text is stable in practice, but nothing guarantees iteration *n*
-  matches iteration *n+1*.
+  rewind it. Its first generation after loading also differs from every later one — systematically,
+  not as noise — while later ones agree with each other. Warmup iterations are therefore discarded
+  for correctness on this backend, not only to skip a cold cache.
 
 This affects how variance in the results should be read, not whether the comparison is fair:
 both engines answer the same prompt with the same output budget, and every timing comes from
@@ -197,17 +198,88 @@ plumbed through the LiteRT-LM loader the two were being asked for different amou
 llama.cpp stopped at 32 tokens while LiteRT-LM ran to its own stopping point and looked slower
 for it.
 
-## Why a stub app
+## The Android app and its inference service
 
-AGP 9 cannot apply `com.android.application` anywhere in this build: it sees the Kotlin plugin on
-the build classpath, tries to create a `KotlinAndroidTarget`, and that reaches for the variant
-API AGP 9 removed (`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`). The only
-Kotlin-capable Android plugin in AGP 9 is the multiplatform **library** one.
+`benchmark/app` is a real app with two jobs: it hosts the inference service, and it is the APK
+Firebase Test Lab installs beside the instrumentation test APK.
 
-So the benchmark lives in `:benchmark:core`'s device test, which AGP builds as a
-self-instrumenting test APK, and `benchmark/stub-app` is a separate included build — its own
-plugin classpath, no Kotlin on it — producing the empty APK that FTL requires as the app under
-test. Nothing in it ever runs.
+**The service runs in its own process** (`android:process=":inference"`). That is the whole
+reason it is a service: a model's memory is most of what anyone wants to measure, and in a
+shared process it arrives mixed with the UI toolkit, the HTTP client, and whatever the test
+runner brought along. Alone, `Debug.getMemoryInfo()` inside that process is the model, the
+engine and a small server — and `adb shell dumpsys meminfo` lists it separately.
+
+It is a *foreground* service because Android kills background ones, and a sustained run that
+dies at minute eleven of twenty has measured nothing.
+
+```bash
+adb install -r benchmark/app/build/outputs/apk/benchmark/koinference-benchmark-app-benchmark.apk
+adb shell mkdir -p /sdcard/Download/koinference
+adb push LFM2.5-1.2B-Instruct-Q4_0.gguf /sdcard/Download/koinference/
+
+adb shell am start-foreground-service \
+    -n io.github.lemcoder.koinference.benchmark.app/.InferenceService \
+    --es modelPath /sdcard/Download/koinference/LFM2.5-1.2B-Instruct-Q4_0.gguf \
+    --ei maxNewTokens 256
+```
+
+The engine is chosen by file extension — `.gguf` to llama.cpp, `.litertlm`/`.task` to LiteRT-LM
+— and the integration with the library is one small file, `LoadedModel.kt`: pick a loader, call
+`load`, call `streamResponse`. That file is also the example of how to use the library.
+
+### The OpenAI-compatible API
+
+| endpoint | |
+|---|---|
+| `GET /v1/models` | the loaded model, with its engine and path |
+| `POST /v1/chat/completions` | with `"stream": true` for SSE, without it for one JSON reply |
+| `GET /healthz` | liveness |
+| `GET /koinference/device` | the device as the harness's own probe reports it |
+| `GET /koinference/memory` | PSS/RSS/native/Java heap **of the inference process** |
+
+Compatible so that clients people already have work unchanged:
+
+```bash
+curl http://<device-ip>:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"LFM2.5-1.2B-Instruct-Q4_0","messages":[{"role":"user","content":"Say hello."}],"stream":true}'
+```
+
+`usage` is deliberately absent from responses. Filling it in would mean counting SSE events and
+calling them tokens, which is the one thing this project keeps refusing to do.
+
+**The server binds `0.0.0.0` with no authentication.** Anyone who can reach the device can drive
+the model and read its output. That is a deliberate choice for a benchmark device on a lab
+network; pass `--es bind 127.0.0.1` and use `adb forward tcp:8080 tcp:8080` anywhere else.
+
+### Benchmarking it from Python
+
+```bash
+python3 benchmark/analysis/openai_bench.py http://<device-ip>:8080 \
+    --prompt-id short_generation_v1 --iterations 5 --out results/raw
+python3 benchmark/analysis/analyze_results.py results/
+```
+
+Standard library only. It measures time to first SSE chunk and streaming throughput from the
+client, reads the inference process's memory from `/koinference/memory`, and writes the same
+schema `:benchmark:core` writes, so both kinds of run land in one analysis.
+
+Those numbers are **not** the on-device harness's numbers: they include HTTP, serialisation and
+the network. Every record from this client says so in its notes, and its device label is
+`http-client` so the two never merge into one row.
+
+## Why the app is its own Gradle build
+
+AGP 9 compiles Kotlin itself — `org.jetbrains.kotlin.android` is rejected as unnecessary — so an
+application module with Kotlin sources is fine. What is not fine is applying
+`com.android.application` in a build that has the Kotlin Multiplatform plugin on its classpath:
+AGP tries to create a `KotlinAndroidTarget` and hits the variant API it removed
+(`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`).
+
+So `benchmark/app` is a separate build that includes the main one, rather than the other way
+round, and depends on `:benchmark:core` through a composite substitution. Running two toolchains
+in one daemon exhausts Metaspace, which shows up as unrelated task-creation failures, so that
+build raises the limit in its own `gradle.properties`.
 
 ## Adding an engine
 
