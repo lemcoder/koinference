@@ -7,12 +7,25 @@
 
 name: Java CI with Gradle
 
+# Pull requests only, plus on demand. It used to also run on push to main, which meant every
+# merge paid for the whole matrix twice — once for the PR and again for the push of the same
+# commits. macOS runners bill at 10x on a private repository, and this workflow is mostly macOS.
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+    # Documentation-only changes cannot break a build, and this repository gets a lot of them.
+    paths-ignore:
+      - "**/*.md"
+      - "LICENSE"
+  workflow_dispatch:
   workflow_call:
+
+# A new push to a pull request cancels the run still working on the previous one. Without this,
+# a branch pushed three times in ten minutes pays for three full matrices to learn about the
+# last commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -23,89 +36,105 @@ jobs:
     name: Native artifacts
     uses: ./.github/workflows/build-artifacts.yml
 
-  build:
+  # Everything that needs a Mac, in one job.
+  #
+  # This was three: two matrix rows and a separate LiteRT-LM job. Each paid its own checkout, JDK
+  # setup and Kotlin/Native download before testing anything, and each minute of that counts ten
+  # times over on a private repository. One job pays the setup once and runs the lot.
+  apple:
+    name: Apple targets
     needs: natives
-    strategy:
-      # One target failing should not hide the others' results.
-      fail-fast: false
-      matrix:
-        include:
-          - target: :core:iosSimulatorArm64Test :backends:llamacpp:iosSimulatorArm64Test
-            os: macos-latest
-          - target: :core:macosX64Test :backends:llamacpp:macosX64Test
-            os: macos-latest
-          - target: :core:jvmTest :backends:llamacpp:jvmTest :core:linuxX64Test :backends:llamacpp:linuxX64Test
-            os: ubuntu-latest
-            # The stub is built by the natives job; do not rebuild it through CMake here.
-            # Relative to the module: github.workspace is unavailable in a matrix and expands to "".
-            extraArgs: -PkoiStubDir=build/prebuilt/jni/linux_x64
-    runs-on: ${{ matrix.os }}
-
+    runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
-    # llama.cpp's own test model, 1.2 MB. The generation tests skip without it, which would mean
-    # CI proving that the bridges link and nothing about whether they produce tokens.
-    # Not set for the iOS row: the simulator gets its own filesystem view and a host path there
-    # is a different kind of test than this one.
-    - name: Fetch a tiny GGUF model
-      if: matrix.os != 'macos-latest' || contains(matrix.target, 'macosX64')
-      run: |
-        curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" \
-          https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
-        echo "KOI_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
+    - name: Validate Gradle Wrapper
+      uses: gradle/actions/wrapper-validation@v4
+
     - name: Download prebuilt natives
       uses: actions/download-artifact@v4
       with:
         pattern: "*-prebuilt"
         merge-multiple: true
         path: backends/llamacpp/build/prebuilt/
-    - name: Validate Gradle Wrapper
-      uses: gradle/actions/wrapper-validation@v4
+
+    # Keyed on the version catalogue, which is where the Kotlin version lives. It used to hash
+    # '**/.lock', which matches only git-ignored Gradle files: on a fresh checkout that hashes
+    # nothing, so the key never changed and the cache never refreshed after a Kotlin bump —
+    # paying for the distribution download on every run instead.
     - uses: actions/cache@v4
       with:
-        path: |
-          ~/.konan
-        key: ${{ runner.os }}-${{ hashFiles('**/.lock') }}
-    - name: Set up JDK 17
-      uses: actions/setup-java@v3
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-    - name: Build with Gradle
-      uses: gradle/gradle-build-action@ce999babab2de1c4b649dc15f0ee67e6246c994f
-      with:
-        arguments: ${{ matrix.target }} ${{ matrix.extraArgs }}
+        path: ~/.konan
+        key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+        restore-keys: konan-${{ runner.os }}-
 
-  # Its own job rather than a row in the matrix above: this module does not consume the prebuilt
-  # llama.cpp archives, it drives its own CMake (which downloads and hash-checks Google's
-  # xcframework), and macOS arm64 is the only host target it has.
-  litertlm:
-    name: LiteRT-LM macOS arm64
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Validate Gradle Wrapper
-      uses: gradle/actions/wrapper-validation@v4
-    # 44 MB per release, pinned by SHA256 in native/CMakeLists.txt — the key tracks that file so a
-    # version bump re-downloads instead of linking against the previous release.
+    # 154 MB, pinned by SHA256 in native/CMakeLists.txt; the key tracks that file so a version
+    # bump re-downloads rather than linking against the previous release.
     - uses: actions/cache@v4
       with:
         path: backends/litertlm/native/.prebuilt
         key: litertlm-prebuilt-${{ hashFiles('backends/litertlm/native/CMakeLists.txt') }}
-    - uses: actions/cache@v4
-      with:
-        path: |
-          ~/.konan
-        key: ${{ runner.os }}-${{ hashFiles('**/.lock') }}
+
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         java-version: '17'
         distribution: 'temurin'
-    # Generation needs a 136 MB model and is skipped here; what this proves is that the facade
-    # builds, cinterop binds it and the test binary links against the runtime dylib.
-    - name: Build the facade and run the tests
-      run: ./gradlew :backends:litertlm:macosArm64Test
+
+    # llama.cpp's own test model, 1.2 MB. Without it the generation tests skip, and CI would be
+    # proving that the bridges link and nothing about whether they produce tokens.
+    - name: Fetch a tiny GGUF model
+      run: |
+        curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" \
+          https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+        echo "KOI_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
+
+    # macosX64 runs the generation tests against that model; the iOS simulator gets its own
+    # filesystem view, so a host path there would be testing something else.
+    - name: macOS and iOS tests
+      run: |
+        ./gradlew :core:macosX64Test :backends:llamacpp:macosX64Test \
+                  :core:iosSimulatorArm64Test :backends:llamacpp:iosSimulatorArm64Test
+
+    # Its own step rather than its own job: it needs the same Mac, and generation is skipped here
+    # because the smallest published .litertlm is 136 MB. What this proves is that the facade
+    # builds, cinterop binds it and the test binary links against the runtime.
+    - name: LiteRT-LM tests
+      run: ./gradlew :backends:litertlm:macosArm64Test :benchmark:core:macosArm64Test
+
+  jvm:
+    name: JVM and Linux
+    needs: natives
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: "*-prebuilt"
+        merge-multiple: true
+        path: backends/llamacpp/build/prebuilt/
+    - uses: actions/cache@v4
+      with:
+        path: ~/.konan
+        key: konan-${{ runner.os }}-${{ hashFiles('gradle/libs.versions.toml') }}
+        restore-keys: konan-${{ runner.os }}-
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+    - name: Fetch a tiny GGUF model
+      run: |
+        curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" \
+          https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
+        echo "KOI_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
+    # The stub comes from the natives job; -PkoiStubDir stops CMake rebuilding it here. Relative
+    # because github.workspace expanded to "" inside the matrix this replaced, which silently
+    # produced /backends/… and an UnsatisfiedLinkError.
+    - name: Tests
+      run: |
+        ./gradlew :core:jvmTest :backends:llamacpp:jvmTest \
+                  :core:linuxX64Test :backends:llamacpp:linuxX64Test \
+                  -PkoiStubDir=build/prebuilt/jni/linux_x64
 
   android:
     name: Android AAR

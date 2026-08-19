@@ -132,6 +132,16 @@ class LiteRtLmDeviceTest {
 
                 assertTrue(streamed.isNotEmpty(), "no chunks were emitted")
                 assertEquals(blocking, streamed.joinToString(""))
+
+                // More than one, which is the difference between streaming and a buffered reply
+                // delivered in a single piece. A binding that did the latter would still satisfy
+                // the concatenation check above, while making time to first token equal to total
+                // latency — a plausible-looking number that measures nothing.
+                assertTrue(
+                    streamed.size > 1,
+                    "expected several chunks; one chunk means the reply was buffered, and TTFT " +
+                        "would then be indistinguishable from total latency",
+                )
             } finally {
                 loader.unload(modelPath)
             }

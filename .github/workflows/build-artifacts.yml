@@ -12,8 +12,13 @@ env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/backends/llamacpp/native/.cpm
 
 jobs:
-  build-macos:
-    name: Build macOS targets
+  # macOS and iOS in one job.
+  #
+  # They were two, each paying its own checkout, Xcode selection, CPM cache restore and JDK setup
+  # before compiling anything — and every minute of that bills at ten times on a private
+  # repository. The presets differ; the setup does not.
+  build-apple:
+    name: Build Apple targets
     runs-on: macos-latest
     defaults:
       run:
@@ -21,11 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
       - name: Cache CPM packages
         uses: actions/cache@v4
         with:
           path: backends/llamacpp/native/.cpm
-          key: cpm-macos-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
+          key: cpm-apple-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
       # The host JNI stub comes from the interop's own build — generate, configure and link in one
       # task — so the JVM job downloads it instead of running CMake itself.
@@ -51,9 +59,25 @@ jobs:
           mkdir -p ../build/prebuilt/macos_x64
           find build/macosX64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_x64/libkoinference-facade.a
 
+      - name: Build iosArm64
+        run: |
+          cmake --preset iosArm64 -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+          cmake --build --preset iosArm64 -j$(sysctl -n hw.ncpu)
+          mkdir -p ../build/prebuilt/ios_arm64
+          find build/iosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_arm64/libkoinference-facade.a
+
+      - name: Build iosSimulatorArm64
+        run: |
+          cmake --preset iosSimulatorArm64 -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          cmake --build --preset iosSimulatorArm64 -j$(sysctl -n hw.ncpu)
+          mkdir -p ../build/prebuilt/ios_simulator_arm64
+          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_simulator_arm64/libkoinference-facade.a
+
+      # One artifact for every Apple slice. Consumers download with pattern "*-prebuilt" and
+      # merge-multiple, so the name matters only in that it ends with -prebuilt.
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-prebuilt
+          name: apple-prebuilt
           path: backends/llamacpp/build/prebuilt/
 
   build-linux:
@@ -96,45 +120,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: linux-prebuilt
-          path: backends/llamacpp/build/prebuilt/
-
-  build-ios:
-    name: Build iOS targets
-    runs-on: macos-latest
-    defaults:
-      run:
-        working-directory: backends/llamacpp/native
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
-
-      - name: Cache CPM packages
-        uses: actions/cache@v4
-        with:
-          path: backends/llamacpp/native/.cpm
-          key: cpm-ios-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
-
-      - name: Build iosArm64
-        run: |
-          cmake --preset iosArm64 \
-            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphoneos --show-sdk-path)
-          cmake --build --preset iosArm64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../build/prebuilt/ios_arm64
-          find build/iosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_arm64/libkoinference-facade.a
-
-      - name: Build iosSimulatorArm64
-        run: |
-          cmake --preset iosSimulatorArm64 \
-            -DCMAKE_OSX_SYSROOT=$(xcrun --sdk iphonesimulator --show-sdk-path)
-          cmake --build --preset iosSimulatorArm64 -j$(sysctl -n hw.ncpu)
-          mkdir -p ../build/prebuilt/ios_simulator_arm64
-          find build/iosSimulatorArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/ios_simulator_arm64/libkoinference-facade.a
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ios-prebuilt
           path: backends/llamacpp/build/prebuilt/
 
 # No Android job: those targets take the JNI leg now, and the Android AAR job builds their libraries

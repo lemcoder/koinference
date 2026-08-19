@@ -93,6 +93,8 @@ class HostBenchmarkTest {
             val ttft = assertNotNull(sample.ttftMs, "time to first chunk")
             // llama.cpp emits one token per chunk, so the cap is observable from outside.
             assertTrue(sample.chunks in 1..MAX_NEW_TOKENS, "chunks ${sample.chunks}")
+            // More than one, or the reply was buffered and ttft is really total latency.
+            assertTrue(sample.chunks > 1, "expected a stream, got ${sample.chunks} chunk")
             assertTrue(ttft <= sample.wallClockMs, "ttft $ttft > wall clock ${sample.wallClockMs}")
             assertNotNull(sample.chunksPerSecond, "chunks/sec")
         }
@@ -125,7 +127,7 @@ class HostBenchmarkTest {
             // first token is available anyway, because the harness measures it.
             val ttft = assertNotNull(sample.ttftMs, "time to first chunk")
             assertTrue(ttft <= sample.wallClockMs, "ttft $ttft > wall clock ${sample.wallClockMs}")
-            assertTrue(sample.chunks > 0, "no chunks were emitted")
+            assertTrue(sample.chunks > 1, "expected a stream, got ${sample.chunks} chunk")
         }
         assertTrue(
             record.notes.any { it.contains("Chunks are emissions") },

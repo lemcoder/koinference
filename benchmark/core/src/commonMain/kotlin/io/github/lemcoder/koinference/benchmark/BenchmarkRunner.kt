@@ -177,6 +177,16 @@ class BenchmarkRunner(
         val memoryAfter = probe.readMemory()
         observePeak(memoryAfter)
 
+        // A reply that arrived in one piece was not streamed, whatever the API promised, and its
+        // time to first chunk is just its total latency wearing another name. Recorded rather
+        // than silently averaged into a TTFT column beside engines that really do stream.
+        val buffered = samples.filter { it.chunks == 1 && (it.generatedTokens ?: 0) > 1 }
+        if (buffered.isNotEmpty()) {
+            notes += "${buffered.size} of ${samples.size} measured iterations arrived as a " +
+                "single chunk despite generating several tokens: for those, time to first " +
+                "chunk is total latency and is not a first-token measurement."
+        }
+
         // Chunk sizes are an engine's own business, so throughput in chunks/sec is only
         // comparable between engines whose chunks are comparable. Said once per record rather
         // than assumed by whoever reads the table.
