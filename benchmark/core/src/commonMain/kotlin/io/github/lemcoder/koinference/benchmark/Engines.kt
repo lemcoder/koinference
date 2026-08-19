@@ -31,6 +31,25 @@ fun engineById(id: String): BenchmarkInferenceEngine? = availableEngines().first
  */
 private abstract class TextRuntimeEngine : BenchmarkInferenceEngine {
 
+    /**
+     * The per-workload knobs, set by the runner before [initialize].
+     *
+     * They live on the base class rather than on each subclass because both engines fix their
+     * output limit and sampler when the model is loaded rather than per request — which is also
+     * why the runner reloads between workloads instead of reusing one session. Holding them here
+     * is what lets [applyWorkload] be one assignment instead of a downcast per engine.
+     */
+    var maxNewTokens: Int = 0
+        private set
+
+    var sampling: SamplingConfig = SamplingConfig()
+        private set
+
+    final override fun applyWorkload(workload: WorkloadConfig, sampling: SamplingConfig) {
+        maxNewTokens = workload.maxNewTokens
+        this.sampling = sampling
+    }
+
     protected abstract suspend fun loadRuntime(
         config: BenchmarkModelConfig,
     ): Pair<StreamingTextRuntime, suspend () -> Unit>
@@ -77,9 +96,6 @@ private class LlamaCppBenchmarkEngine : TextRuntimeEngine() {
 
     override val id: String = "llama.cpp"
 
-    var maxNewTokens: Int = 0
-    var sampling: SamplingConfig = SamplingConfig()
-
     override fun metadata(config: BenchmarkModelConfig): Map<String, String> = buildMap {
         put("backend", if (config.useGpu) "GPU" else "CPU")
         put("gpuOffload", config.useGpu.toString())
@@ -105,7 +121,8 @@ private class LlamaCppBenchmarkEngine : TextRuntimeEngine() {
             nThreads = config.threads,
             nPredict = maxNewTokens,
         )
-        val runtime = loader.load(config.modelPath) as io.github.lemcoder.koinference.llamacpp.LlamaCppTextRuntime
+        // No cast: the loader returns its text runtime, since that is the only kind there is.
+        val runtime = loader.load(config.modelPath)
         runtime.updateGenerationParameters(parameters(config, sampling))
         return runtime to suspend { loader.unload(config.modelPath) }
     }
@@ -115,9 +132,6 @@ private class LlamaCppBenchmarkEngine : TextRuntimeEngine() {
 private class LiteRtLmBenchmarkEngine : TextRuntimeEngine() {
 
     override val id: String = "litert-lm"
-
-    var maxNewTokens: Int = 0
-    var sampling: SamplingConfig = SamplingConfig()
 
     override fun metadata(config: BenchmarkModelConfig): Map<String, String> = buildMap {
         put("backend", if (config.useGpu) "GPU" else "CPU")
@@ -147,26 +161,5 @@ private class LiteRtLmBenchmarkEngine : TextRuntimeEngine() {
         )
         val runtime = loader.load(config.modelPath)
         return runtime to suspend { loader.unload(config.modelPath) }
-    }
-}
-
-/**
- * The per-workload knobs both adapters need before [BenchmarkInferenceEngine.initialize].
- *
- * Set by the runner, because both engines fix their output limit and sampler when the model is
- * loaded rather than per request — which is also why the runner reloads between workloads
- * instead of reusing one session.
- */
-internal fun BenchmarkInferenceEngine.applyWorkload(workload: WorkloadConfig, sampling: SamplingConfig) {
-    when (this) {
-        is LlamaCppBenchmarkEngine -> {
-            maxNewTokens = workload.maxNewTokens
-            this.sampling = sampling
-        }
-
-        is LiteRtLmBenchmarkEngine -> {
-            maxNewTokens = workload.maxNewTokens
-            this.sampling = sampling
-        }
     }
 }

@@ -66,42 +66,16 @@ class BenchmarkInstrumentation {
             }
 
             val corpus = PromptCorpus.parse(loadCorpus(arguments.getString("promptFile")))
-            val engines = (arguments.getString("engine") ?: "all")
-                .split(',')
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
 
-            val maxNewTokens = arguments.getString("maxNewTokens")?.toIntOrNull() ?: 128
-            val workloads = (arguments.getString("promptSet") ?: "default")
-                .let { set -> workloadsFor(set, corpus.prompts.map { it.id }, maxNewTokens) }
-
-            val config = BenchmarkConfig(
-                benchmarkRunId = arguments.getString("runId") ?: "local-${System.currentTimeMillis()}",
-                engineIds = engines,
-                model = BenchmarkModelConfig(
-                    modelId = arguments.getString("modelId") ?: File(modelPath).nameWithoutExtension,
-                    modelVersion = arguments.getString("modelVersion") ?: "unknown",
-                    modelPath = modelPath,
-                    // Recorded, never inferred: quantization cannot be read off a file size,
-                    // and a wrong label here makes two incomparable runs look comparable.
-                    quantization = arguments.getString("quantization") ?: "unknown",
-                    sha256 = arguments.getString("modelSha256"),
-                    maxContextTokens = arguments.getString("maxContextTokens")?.toIntOrNull() ?: 0,
-                    threads = arguments.getString("threads")?.toIntOrNull() ?: 0,
-                    useGpu = arguments.getString("gpu")?.toBooleanStrictOrNull() ?: false,
-                ),
-                workloads = workloads,
-                sampling = SamplingConfig(
-                    temperature = arguments.getString("temperature")?.toDoubleOrNull() ?: 0.0,
-                    topK = arguments.getString("topK")?.toIntOrNull(),
-                    topP = arguments.getString("topP")?.toDoubleOrNull(),
-                    seed = arguments.getString("seed")?.toIntOrNull() ?: 42,
-                ),
-                warmupIterations = arguments.getString("warmup")?.toIntOrNull() ?: 1,
-                measurementIterations = arguments.getString("iterations")?.toIntOrNull() ?: 5,
-                sustainedDurationSeconds = arguments.getString("sustainedDurationSeconds")?.toIntOrNull() ?: 0,
-                ftlModelId = arguments.getString("ftlModelId"),
-                ftlVersion = arguments.getString("ftlVersion"),
+            // Everything about turning arguments into a run lives in commonMain and is unit
+            // tested there; this class supplies the two things only a device can — the Bundle and
+            // a clock.
+            val config = BenchmarkArguments.toConfig(
+                arguments = arguments.keySet().mapNotNull { key ->
+                    arguments.getString(key)?.let { key to it }
+                }.toMap(),
+                corpusPromptIds = corpus.prompts.map { it.id },
+                runIdFallback = "local-${System.currentTimeMillis()}",
             )
 
             val file = runBlocking {
@@ -160,27 +134,6 @@ class BenchmarkInstrumentation {
         val file = File(corpusPath)
         check(file.isFile) { "No prompt corpus at $corpusPath" }
         return file.readText()
-    }
-
-    private fun workloadsFor(set: String, allIds: List<String>, maxNewTokens: Int): List<WorkloadConfig> =
-        when (set) {
-            // The full corpus, each with the token budget its prompt was written for: a
-            // long-generation prompt capped at 128 tokens would measure something else.
-            "all" -> allIds.map { WorkloadConfig(it, budgetFor(it, maxNewTokens)) }
-            "default" -> listOf(
-                WorkloadConfig("short_generation_v1", budgetFor("short_generation_v1", maxNewTokens)),
-                WorkloadConfig("long_generation_v1", budgetFor("long_generation_v1", maxNewTokens)),
-                WorkloadConfig("long_context_v1", budgetFor("long_context_v1", maxNewTokens)),
-            )
-
-            else -> set.split(',').map { it.trim() }.filter { it.isNotEmpty() }
-                .map { WorkloadConfig(it, budgetFor(it, maxNewTokens)) }
-        }
-
-    private fun budgetFor(promptId: String, requested: Int): Int = when {
-        promptId.startsWith("long_generation") -> maxOf(requested, 512)
-        promptId.startsWith("reasoning") -> maxOf(requested, 384)
-        else -> requested
     }
 
     private companion object {

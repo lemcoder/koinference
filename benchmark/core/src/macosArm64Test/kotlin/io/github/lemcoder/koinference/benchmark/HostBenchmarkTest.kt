@@ -190,26 +190,8 @@ class HostBenchmarkTest {
     }
 }
 
-/**
- * Strips the extension and any quantization suffix, so
- * `LFM2.5-1.2B-Instruct-Q4_0.gguf` and `LFM2.5-1.2B-Instruct_int4.litertlm` both give
- * `LFM2.5-1.2B-Instruct`.
- *
- * A convenience for local runs only. On device the id is passed in with `-e modelId`, because
- * guessing it from a filename is exactly the kind of thing that silently makes two runs look
- * like the same experiment.
- */
-private fun modelIdOf(path: String): String =
-    path.substringAfterLast('/')
-        .substringBeforeLast('.')
-        .replace(Regex("[-_](?i)(q4_0|q4_k_m|q5_k_m|q6_k|q8_0|int4|int8|f16|bf16|f32)$"), "")
-
-/** The label the file's producer used, taken from the name rather than inferred from its size. */
-private fun quantizationOf(path: String): String {
-    val name = path.substringAfterLast('/').substringBeforeLast('.')
-    val match = Regex("[-_]((?i)q4_0|q4_k_m|q5_k_m|q6_k|q8_0|int4|int8|f16|bf16|f32)$").find(name)
-    return match?.groupValues?.get(1)?.lowercase() ?: "unknown"
-}
+// modelIdOf and quantizationOf moved to commonMain (ModelNaming.kt), where they are unit tested
+// rather than only exercised by whichever model a developer happened to point this at.
 
 private fun fixturePath(): String {
     // The test runs from the module directory; the fixtures live beside the modules.

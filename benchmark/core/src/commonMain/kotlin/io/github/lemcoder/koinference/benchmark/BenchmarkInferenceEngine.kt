@@ -31,6 +31,17 @@ interface BenchmarkInferenceEngine {
     fun metadata(config: BenchmarkModelConfig): Map<String, String>
 
     /**
+     * Apply the knobs for the workload about to run, before [initialize].
+     *
+     * On the interface rather than resolved by type: both current engines fix their output limit
+     * and their sampler when the model is loaded rather than per request, and an engine that does
+     * not need either can ignore this. The alternative — the runner matching on concrete engine
+     * types — meant a new backend silently ran with the wrong token budget instead of failing to
+     * compile.
+     */
+    fun applyWorkload(workload: WorkloadConfig, sampling: SamplingConfig)
+
+    /**
      * Load the model and prepare to generate.
      *
      * Timing this is the caller's job, so an adapter must not defer loading work into the first

@@ -25,13 +25,22 @@ class BenchmarkRunner(
     private val prompts: PromptCorpus,
     private val probe: PlatformProbe = platformProbe(),
     private val log: (String) -> Unit = {},
+    /**
+     * The engines [BenchmarkConfig.engineIds] may name.
+     *
+     * A parameter rather than a call to [availableEngines] inside, so that everything this class
+     * decides — warmup kept out of the samples, what a failed record contains, which notes a
+     * record carries — can be exercised with a fake engine instead of two real runtimes and a
+     * pair of model files. The default is the real registry, so callers see no difference.
+     */
+    private val engines: List<BenchmarkInferenceEngine> = availableEngines(),
 ) {
 
     suspend fun run(): BenchmarkFile {
-        val engines = resolveEngines()
+        val selected = resolveEngines()
         val records = mutableListOf<BenchmarkRecord>()
 
-        for ((index, engine) in engines.withIndex()) {
+        for ((index, engine) in selected.withIndex()) {
             for (workload in config.workloads) {
                 records += runOne(
                     engine = engine,
@@ -55,9 +64,10 @@ class BenchmarkRunner(
     }
 
     private fun resolveEngines(): List<BenchmarkInferenceEngine> =
-        if (config.engineIds.singleOrNull() == "all") availableEngines()
+        if (config.engineIds.singleOrNull() == "all") engines
         else config.engineIds.map { id ->
-            engineById(id) ?: error("Unknown engine id '$id'. Available: ${availableEngines().map { it.id }}")
+            engines.firstOrNull { it.id == id }
+                ?: error("Unknown engine id '$id'. Available: ${engines.map { it.id }}")
         }
 
     private suspend fun runOne(

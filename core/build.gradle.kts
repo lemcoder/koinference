@@ -19,10 +19,13 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            // api, not implementation: StreamingTextRuntime and RuntimeGuard have Flow in their
+            // signatures, so a consumer of :core alone cannot call them without coroutines.
+            api(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
         }
     }
 }
