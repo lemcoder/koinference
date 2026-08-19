@@ -1,0 +1,39 @@
+# Firebase Test Lab device matrix.
+#
+# Every model id and version here MUST exist in the live FTL catalogue — they are not invented,
+# and they go stale as Google retires devices. Check before a run:
+#
+#     ./benchmark/scripts/validate-device-matrix.sh benchmark/scripts/devices.yaml
+#
+# which queries `gcloud firebase test android models list` and fails on anything unknown, plus
+# prints the SoC of each device it did find. To see what is currently offered:
+#
+#     ./benchmark/scripts/validate-device-matrix.sh --catalog
+#
+# Deliberately small. A benchmark that runs on forty devices costs forty times as much and says
+# little more than one that covers the SoC families you care about: a current flagship, a
+# mid-range part, a competing vendor's silicon, and something old enough to throttle.
+#
+# The entries below are placeholders in the sense that they must be validated before use, not
+# in the sense that they are made up: they are the shapes the matrix wants filled.
+
+devices:
+  # Flagship Google silicon (Tensor). Recent Android, big cores, aggressive thermal management.
+  - model: shiba
+    version: 34
+    note: Pixel 8, Tensor G3
+
+  # Mid-range: where an on-device LLM is actually painful.
+  - model: bluejay
+    version: 32
+    note: Pixel 6a, Tensor
+
+  # Different vendor, different memory bandwidth.
+  - model: b0q
+    version: 33
+    note: Samsung Galaxy S22 Ultra, Snapdragon 8 Gen 1 or Exynos depending on region
+
+  # Old enough to throttle, which is the point: sustained runs should show it.
+  - model: redfin
+    version: 30
+    note: Pixel 5, Snapdragon 765G

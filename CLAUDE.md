@@ -110,8 +110,23 @@ its first successful run, after every structural check had passed. Keep it.
 ## Upstream llama.cpp
 
 `LLAMA_BUILD_COMMON` defaults to `LLAMA_STANDALONE` — OFF under CPM — and the facade uses `common_*`
-helpers. `native/CMakeLists.txt` forces it on and links `common`; a stale reference to a
-non-existent `llama-common` target once left every one of those symbols out of the archive.
+helpers. `native/CMakeLists.txt` forces it on and links whichever common target exists.
+
+**The pin is b10472, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
+it, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
+cost four breakages, all silent-ish:
+
+- **`common` was renamed `llama-common`.** Getting this wrong does not fail at configure time:
+  CMake treats an unknown name as a raw `-lcommon`, the static archive records it happily, and
+  the error only surfaces when something finally links an executable. `CMakeLists.txt` now
+  detects the target rather than naming it.
+- **`llama_kv_cache_clear` was removed**, not deprecated-and-kept. Its replacement is
+  `llama_memory_clear(llama_get_memory(ctx), true)`.
+- **`common_params_sampling::grammar` became a tagged struct**, so a bare string no longer
+  assigns: `common_grammar(COMMON_GRAMMAR_TYPE_USER, gbnf)`.
+- **The common headers include `<nlohmann/json_fwd.hpp>`**, which lives in `vendor/`, and
+  `json-schema-to-grammar.h` now only forward-declares the type — parsing needs
+  `<nlohmann/json.hpp>` included explicitly.
 
 `common` is also what makes `GenerationConstraint.JsonSchema` work: `json_schema_to_grammar` lives
 there, so the facade converts and the Kotlin side never sees GBNF. Both the parse and the
@@ -162,15 +177,27 @@ new place. The facade archive references `libCLiteRTLM_mac.dylib`, so CMake stag
 next to the archive and Gradle passes `-lCLiteRTLM_mac` and an `-rpath` alongside
 `-lkoinference-litertlm-facade`. Setting those on `main.compileTaskProvider` alone is not
 enough: the test executable is linked by this project and needs `binaries.all { linkerOpts(…) }`
-too, or it fails with undefined `koilm_*`.
+too, or it fails with undefined `koilm_*`. The `dependsOn(buildFacade)` goes on
+`binaries.all { linkTaskProvider }` for the same reason — naming link tasks individually covers
+whichever ones existed that day. `cinterop` also needs `native/facade` as an explicit input:
+the task tracks the `.def`, not the header it names, so a new facade function surfaces as an
+unresolved reference in Kotlin rather than as a stale interop.
 
 **Android cannot use the facade, and this is structural.** The AAR's `liblitertlm_jni.so` is
 version-scripted (`VERS_1.0`) down to 24 `Java_..._LiteRtLmJni_*` entry points plus six section
 markers — `nm -D` finds **zero** `litert_lm_*` symbols. There is nothing for a C facade to link
 against, and no amount of NDK work changes that. So the Android leg is Google's Kotlin API, and
-the `internal expect` seam sits at engine/conversation handles rather than at the C API's shape.
-Don't "unify" it by making Android hold Long handles into a registry; the two bindings are
-genuinely different and the handle types say so.
+the seam sits at engine/conversation *objects* rather than at the C API's shape. Don't "unify"
+it by making Android hold Long handles into a registry; the two bindings are genuinely
+different.
+
+**The seam is interfaces, not `expect class` handles, and that is a testability decision.** An
+`expect class` can only be produced by a platform, so with handles at the seam nothing in
+`LiteRtLmRuntime` — conversation reuse, engine reload on a backend change, unload while a
+generation is running — could be checked without a 136 MB model. `LiteRtLmBridge` /
+`LiteRtLmEngine` / `LiteRtLmConversation` are ordinary interfaces, `platformBridge()` is the one
+`expect fun`, and `FakeLiteRtLmBridge` in commonTest covers all of it. The nesting is
+deliberate: an engine hands out conversations, so neither can be used without its owner.
 
 **The two runtimes ship separately and must be bumped together.** `litertlm` in the version
 catalog and `KOILM_VERSION` in `native/CMakeLists.txt` are the same release; a skew between them
@@ -183,8 +210,19 @@ consumer compiles and then dies at the first generate.
 **A commonMain file with any top-level declaration collides with a same-named androidMain file.**
 `expect` declarations generate no JVM class, which is why `:backends:llamacpp` can reuse
 `LlamaCppBridge.kt` across source sets. Adding one `const` to the common bridge produced
-`Duplicate JVM class name … LiteRtLmBridgeKt`; the constants live in `Backends.kt` for that
-reason alone.
+`Duplicate JVM class name … LiteRtLmBridgeKt`. Hence the platform files are named after their
+binding — `SdkBridge.kt`, `FacadeBridge.kt` — and never after the common file they implement.
+
+**The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
+follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer
+is not an error and does not lose the reply — the facade keeps it thread-locally so
+`koilm_last_response` can collect it. Generating again would be wrong twice over: a second
+`send_message` is another turn in the conversation's history and another full decode.
+
+**Sampler defaults exist twice on purpose.** Android's `SamplerConfig` has no default for
+top-k/top-p/temperature (only `seed`, which is 0 — deterministic, unlike the facade), so common
+code has to hold concrete numbers. `SessionDefaultsTest` compares them against
+`koilm_default_session_params()`, which is what keeps the two copies from drifting.
 
 **Instrumented tests need block bodies.** JUnit4 rejects a non-void test method, so
 `fun x() = runBlocking { … }` fails at runtime with `Method x() should be void` rather than at
@@ -197,6 +235,56 @@ Gradle.
 **Models are `.litertlm` or `.task`; raw `.tflite` is rejected** by LiteRT-LM itself. The
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
+
+## The benchmark harness
+
+- **cinterop does not track the headers behind its compiler options.** Editing a facade leaves
+  the task UP-TO-DATE and the klib describing the previous API — "Unresolved reference koi_*"
+  for a function plainly in the header. Both backends now declare `native/facade` as an input on
+  `CInteropProcess`.
+- **A klib does not carry the producing project's linker options.** Any module that links a
+  binary against a backend names its libraries again; `:benchmark:core` repeats the `-L`, `-l`,
+  `-rpath` and `-framework` flags for both backends. Same lesson as the `.a`, one level out.
+- **AGP 9 cannot apply `com.android.application` in this build at all.** It sees the Kotlin
+  plugin on the classpath and tries to create a `KotlinAndroidTarget`, which reaches for the
+  removed variant API (`NoClassDefFoundError: com/android/build/gradle/api/BaseVariant`). The
+  only Kotlin-capable Android plugin in AGP 9 is the multiplatform library one. Hence
+  `benchmark/stub-app` as a separate included build for the APK Firebase Test Lab requires.
+- **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
+  device and passed with `-e promptFile` instead of being packaged.
+- **LiteRT-LM's temperature 0 is not greedy.** Its sampler keeps sampling and answers the same
+  question differently on consecutive calls, which quietly broke the benchmark's reproducibility
+  claim. `ConversationOptions.greedy` maps temperature 0 onto top-k of 1 on both legs.
+  `kLiteRtLmSamplerTypeGreedy` exists and looks like the right answer, but a conversation created
+  with it fails *every* send_message in the v0.15.0 prebuilt, on both models tested.
+- **Its sampler RNG is seeded per engine, not per conversation.** Two fresh engines with the same
+  seed replay each other exactly; reopening a conversation does not rewind the stream, so a
+  second generation continues rather than repeating. `resetConversation()` does not give a clean
+  slate either — under argmax the second answer still differs, so the model is still seeing the
+  earlier turn. Any test of seeding has to compare engines.
+- **A system prompt is a model-dependent feature.** SmolLM2-135M-Instruct accepts one;
+  LFM2.5-1.2B-Instruct refuses and the runtime reports only "send_message failed" either way.
+  `LiteRtLmRuntime` adds the likely cause when a system prompt is set.
+- **Backends stream; the harness measures.** Neither backend reports timings any more. Both
+  implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
+  code that touches a clock — one definition of time to first token for every engine, instead
+  of one per binding. Resist adding a metric to a backend: it would only be comparable with
+  itself.
+- **The llama.cpp facade streams as a pull loop** (`koi_generate_begin`/`_next`/`_end`), not a
+  callback, because the JVM leg reaches it through generated JNI bridges that cannot hand a C
+  callback back into the JVM. `koi_generate` is that loop drained, so there is one decode path.
+- **LiteRT-LM's C streaming is push, from the runtime's own thread**, so the facade buffers into
+  a queue and the Kotlin side pulls — same loop shape as llama.cpp, and no Kotlin running on a
+  thread it does not own.
+- **LiteRT-LM's stream chunks are JSON envelopes carrying deltas**, the same
+  `{role, content}` shape as a blocking reply. Emitting them raw concatenates to about 14× the
+  reply length, which looks like a plausible output size unless you check it; `extractResponseText`
+  unwraps each one. `LiteRtLmDeviceTest` asserts streamed chunks concatenate to the blocking
+  reply, because the Android SDK is a different binding and could have chosen cumulative chunks.
+- **LiteRT-LM's `getBenchmarkInfo()` exists and is reachable** — it is a function, not a
+  property, so `conversation.benchmarkInfo` fails with "Unresolved reference" and looks like an
+  access problem. Unused now, but check the Kotlin metadata before concluding a member is
+  inaccessible.
 
 ## Cinterop idioms that bite
 

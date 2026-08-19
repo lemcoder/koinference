@@ -9,6 +9,9 @@ import koinference.koi_backend_free
 import koinference.koi_backend_init
 import koinference.koi_embed
 import koinference.koi_generate
+import koinference.koi_generate_begin
+import koinference.koi_generate_end
+import koinference.koi_generate_next
 import koinference.koi_json_schema_to_grammar
 import koinference.koi_model_free
 import koinference.koi_model_load
@@ -93,6 +96,33 @@ internal actual fun llamaJsonSchemaToGrammar(schema: String): String {
         val len = koi_json_schema_to_grammar(schema, buf, bufSize)
         if (len > 0) buf.toKString() else ""
     }
+}
+
+internal actual fun llamaGenerateBegin(
+    sessionHandle: Long,
+    systemPrompt: String?,
+    userPrompt: String,
+    grammar: String?,
+): Int {
+    if (sessionHandle == 0L) return -1
+    return koi_generate_begin(sessionHandle.toCPointer<KoiSession>(), systemPrompt, userPrompt, grammar)
+}
+
+internal actual fun llamaGenerateNext(sessionHandle: Long): String? {
+    if (sessionHandle == 0L) return null
+    // One token per call, and a token is at most a handful of bytes; the facade reports an
+    // error rather than truncating, so a fixed buffer is safe here.
+    val bufSize = 512
+    return memScoped {
+        val buf = allocArray<kotlinx.cinterop.ByteVar>(bufSize)
+        val written = koi_generate_next(sessionHandle.toCPointer<KoiSession>(), buf, bufSize)
+        check(written >= 0) { "llama.cpp streaming failed" }
+        if (written == 0) null else buf.toKString()
+    }
+}
+
+internal actual fun llamaGenerateEnd(sessionHandle: Long) {
+    if (sessionHandle != 0L) koi_generate_end(sessionHandle.toCPointer<KoiSession>())
 }
 
 internal actual fun llamaEmbed(sessionHandle: Long, text: String): FloatArray {

@@ -5,6 +5,9 @@
 #include "chat.h"
 #include "sampling.h"
 #include "json-schema-to-grammar.h"
+// json-schema-to-grammar.h only forward-declares the json type since b10472; parsing needs the
+// definition.
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -24,12 +27,28 @@ struct KoiModel {
     llama_model* model;
 };
 
+/**
+ * State of a streaming generation, between koi_generate_begin() and koi_generate_end().
+ *
+ * The sampler is per-generation because the grammar can change per call, and the position has
+ * to survive across koi_generate_next() calls — that is the whole difference between a pull
+ * loop and the blocking call.
+ */
+struct KoiGeneration {
+    common_sampler* sampler   = nullptr;
+    llama_pos       pos       = 0;
+    int             produced  = 0;
+    int             n_predict = 0;
+    bool            finished  = true;
+};
+
 struct KoiSession {
     llama_model*              model;   // non-owning; lifetime tied to KoiModel
     llama_context*            ctx;
     llama_batch               batch;
     common_chat_templates_ptr chat_templates;
     KoiSessionParams          params;
+    KoiGeneration             generation;
 };
 
 /* ── backend ──────────────────────────────────────────────────────────────── */
@@ -103,6 +122,7 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
 
 void koi_session_free(KoiSession* session) {
     if (!session) return;
+    koi_generate_end(session);
     session->chat_templates.reset();
     llama_batch_free(session->batch);
     llama_free(session->ctx);
@@ -132,6 +152,125 @@ static int decode_in_batches(
 
 /* ── generation ───────────────────────────────────────────────────────────── */
 
+// Formats the prompt the way this model's chat template asks for, or plainly when it has none.
+static std::string koi_build_prompt(
+        KoiSession* session,
+        const char* system_prompt,
+        const char* user_prompt,
+        bool        has_template
+) {
+    std::string prompt;
+    if (has_template) {
+        std::vector<common_chat_msg> msgs;
+        if (system_prompt && system_prompt[0] != '\0') {
+            common_chat_msg sys{ "system", system_prompt };
+            prompt = common_chat_format_single(session->chat_templates.get(), msgs, sys, false, false);
+            msgs.push_back(std::move(sys));
+        }
+        common_chat_msg usr{ "user", user_prompt };
+        prompt += common_chat_format_single(session->chat_templates.get(), msgs, usr, true, false);
+    } else {
+        if (system_prompt && system_prompt[0] != '\0') {
+            prompt = std::string(system_prompt) + "\n";
+        }
+        prompt += user_prompt;
+    }
+    return prompt;
+}
+
+int koi_generate_begin(
+        KoiSession*  session,
+        const char*  system_prompt,
+        const char*  user_prompt,
+        const char*  grammar
+) {
+    if (!session || !user_prompt) return -1;
+
+    // Any generation left open is discarded rather than leaked: callers get this wrong, and a
+    // stranded sampler would otherwise outlive the session.
+    koi_generate_end(session);
+
+    // llama_kv_cache_clear was removed after b5001; the memory abstraction replaced it.
+    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
+
+    const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
+    const std::string prompt = koi_build_prompt(session, system_prompt, user_prompt, has_template);
+
+    const auto tokens = common_tokenize(session->ctx, prompt, has_template, has_template);
+    if (decode_in_batches(session->ctx, session->batch, tokens, 0, true) != 0) return -1;
+
+    common_params_sampling sparams;
+    sparams.temp  = session->params.temp;
+    sparams.top_k = session->params.top_k;
+    sparams.min_p = session->params.min_p;
+    if (grammar && grammar[0] != '\0') {
+        // common_params_sampling::grammar became a tagged struct: a bare string no longer
+        // assigns, and the tag is what tells the sampler this is user-provided GBNF rather
+        // than one of the built-in variants.
+        sparams.grammar = common_grammar(COMMON_GRAMMAR_TYPE_USER, grammar);
+    }
+
+    common_sampler* sampler = common_sampler_init(session->model, sparams);
+    if (!sampler) return -1;
+
+    session->generation.sampler   = sampler;
+    session->generation.pos       = static_cast<llama_pos>(tokens.size());
+    session->generation.produced  = 0;
+    session->generation.n_predict = (session->params.n_predict <= 0)
+        ? DEFAULT_N_PREDICT
+        : session->params.n_predict;
+    session->generation.finished  = false;
+
+    return static_cast<int>(tokens.size());
+}
+
+int koi_generate_next(KoiSession* session, char* out_buf, int buf_size) {
+    if (!session || !out_buf || buf_size <= 0) return -1;
+
+    KoiGeneration& gen = session->generation;
+    if (gen.finished || !gen.sampler) return 0;
+    if (gen.produced >= gen.n_predict) {
+        gen.finished = true;
+        return 0;
+    }
+
+    const llama_token id = common_sampler_sample(gen.sampler, session->ctx, -1);
+    common_sampler_accept(gen.sampler, id, true);
+
+    const llama_vocab* vocab = llama_model_get_vocab(session->model);
+    if (llama_vocab_is_eog(vocab, id)) {
+        gen.finished = true;
+        return 0;
+    }
+
+    const std::string piece = common_token_to_piece(session->ctx, id);
+    // A piece that does not fit is an error rather than a truncation: half a UTF-8 sequence
+    // handed to the caller would corrupt the reply silently.
+    if (static_cast<int>(piece.size()) >= buf_size) return -1;
+    std::memcpy(out_buf, piece.c_str(), piece.size());
+    out_buf[piece.size()] = '\0';
+    gen.produced++;
+
+    // Decoding the token just emitted is what prepares the next one, so it happens here rather
+    // than at the top: the caller gets its chunk as early as possible.
+    common_batch_clear(session->batch);
+    common_batch_add(session->batch, id, gen.pos++, {0}, true);
+    if (llama_decode(session->ctx, session->batch) != 0) {
+        gen.finished = true;
+        return -1;
+    }
+
+    return static_cast<int>(piece.size());
+}
+
+void koi_generate_end(KoiSession* session) {
+    if (!session) return;
+    if (session->generation.sampler) {
+        common_sampler_free(session->generation.sampler);
+    }
+    session->generation = KoiGeneration{};
+}
+
 int koi_generate(
         KoiSession*  session,
         const char*  system_prompt,
@@ -142,68 +281,22 @@ int koi_generate(
 ) {
     if (!session || !user_prompt || !out_buf || buf_size <= 0) return -1;
 
-    llama_kv_cache_clear(session->ctx);
+    // The blocking call is the streaming one, drained. One decode implementation, so the two
+    // cannot drift into producing different text.
+    if (koi_generate_begin(session, system_prompt, user_prompt, grammar) < 0) return -1;
 
-    // Build prompt string
-    const bool has_template = common_chat_templates_was_explicit(session->chat_templates.get());
-    std::string prompt;
-    std::vector<common_chat_msg> msgs;
-
-    if (has_template) {
-        if (system_prompt && system_prompt[0] != '\0') {
-            common_chat_msg sys{ "system", system_prompt };
-            prompt = common_chat_format_single(session->chat_templates.get(), msgs, sys, false, false);
-            msgs.push_back(std::move(sys));
-        }
-        common_chat_msg usr{ "user", user_prompt };
-        prompt += common_chat_format_single(session->chat_templates.get(), msgs, usr, true, false);
-        msgs.push_back(std::move(usr));
-    } else {
-        if (system_prompt && system_prompt[0] != '\0') {
-            prompt = std::string(system_prompt) + "\n";
-        }
-        prompt += user_prompt;
-    }
-
-    // Tokenize and prefill
-    const auto tokens = common_tokenize(session->ctx, prompt, has_template, has_template);
-    if (decode_in_batches(session->ctx, session->batch, tokens, 0, true) != 0) return -1;
-
-    // Build sampler (per-call so grammar can vary)
-    common_params_sampling sparams;
-    sparams.temp  = session->params.temp;
-    sparams.top_k = session->params.top_k;
-    sparams.min_p = session->params.min_p;
-    if (grammar && grammar[0] != '\0') {
-        sparams.grammar = grammar;
-    }
-
-    auto* sampler = common_sampler_init(session->model, sparams);
-    if (!sampler) return -1;
-
-    // Decode
     std::string result;
-    llama_pos pos = static_cast<llama_pos>(tokens.size());
-    const int n_predict = (session->params.n_predict <= 0) ? DEFAULT_N_PREDICT : session->params.n_predict;
-    const llama_vocab* vocab = llama_model_get_vocab(session->model);
-
-    for (int i = 0; i < n_predict; i++) {
-        const llama_token id = common_sampler_sample(sampler, session->ctx, -1);
-        common_sampler_accept(sampler, id, true);
-
-        if (llama_vocab_is_eog(vocab, id)) break;
-
-        result += common_token_to_piece(session->ctx, id);
-
-        common_batch_clear(session->batch);
-        common_batch_add(session->batch, id, pos++, {0}, true);
-        if (llama_decode(session->ctx, session->batch) != 0) {
-            common_sampler_free(sampler);
+    char piece[512];
+    while (true) {
+        const int written = koi_generate_next(session, piece, sizeof(piece));
+        if (written < 0) {
+            koi_generate_end(session);
             return -1;
         }
+        if (written == 0) break;
+        result.append(piece, static_cast<size_t>(written));
     }
-
-    common_sampler_free(sampler);
+    koi_generate_end(session);
 
     const int len = std::min(static_cast<int>(result.size()), buf_size - 1);
     std::memcpy(out_buf, result.c_str(), len);
@@ -216,7 +309,7 @@ int koi_generate(
 int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_size) {
     if (!session || !text || !out_buf || buf_size <= 0) return -1;
 
-    llama_kv_cache_clear(session->ctx);
+    llama_memory_clear(llama_get_memory(session->ctx), /*data=*/true);
 
     const auto tokens = common_tokenize(session->ctx, text, true, true);
     if (decode_in_batches(session->ctx, session->batch, tokens, 0, false) != 0) return -1;
@@ -253,3 +346,4 @@ int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size) 
     out_buf[grammar.size()] = '\0';
     return static_cast<int>(grammar.size());
 }
+

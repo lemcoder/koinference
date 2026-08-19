@@ -116,6 +116,40 @@ int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_siz
  */
 int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size);
 
+/* ── streaming generation ─────────────────────────────────────────────────── */
+
+/**
+ * Streaming, as a pull loop rather than a callback.
+ *
+ * Three calls instead of a function pointer because the JVM leg reaches this header through
+ * generated JNI bridges, which marshal scalars and buffers and have no way to hand a C
+ * callback back into the JVM. A pull loop needs neither: the caller drives it, and the same
+ * three functions work identically through cinterop and through JNI.
+ *
+ * Deliberately no timing here. The caller decides when a token arrived, which is what lets one
+ * clock in one place measure every engine the same way — a facade that timed itself would be
+ * measuring something no other engine measures.
+ *
+ * Usage:
+ *
+ *     if (koi_generate_begin(s, sys, user, grammar) < 0) { ... }
+ *     while ((n = koi_generate_next(s, buf, sizeof buf)) > 0) { ... }
+ *     koi_generate_end(s);          // also required if the loop is abandoned early
+ *
+ * @return koi_generate_begin: prompt tokens on success, -1 on failure.
+ *         koi_generate_next: bytes written (>0), 0 at end of generation, -1 on error.
+ */
+int koi_generate_begin(
+    KoiSession*  session,
+    const char*  system_prompt,
+    const char*  user_prompt,
+    const char*  grammar
+);
+
+int koi_generate_next(KoiSession* session, char* out_buf, int buf_size);
+
+void koi_generate_end(KoiSession* session);
+
 #ifdef __cplusplus
 }
 #endif

@@ -49,3 +49,23 @@ internal expect fun llamaEmbed(sessionHandle: Long, text: String): FloatArray
  * @return the grammar, or an empty string if the schema does not parse or convert.
  */
 internal expect fun llamaJsonSchemaToGrammar(schema: String): String
+
+/**
+ * Start a streaming generation. Returns the prompt's token count, or -1 on failure.
+ *
+ * A pull loop rather than a callback: the JVM leg goes through generated JNI bridges, which
+ * cannot hand a C callback back into the JVM. Timing lives in the caller, not here — that is
+ * what lets one clock measure every engine identically.
+ */
+internal expect fun llamaGenerateBegin(
+    sessionHandle: Long,
+    systemPrompt: String?,
+    userPrompt: String,
+    grammar: String?,
+): Int
+
+/** Next chunk, or null when the generation is finished. Throws on error. */
+internal expect fun llamaGenerateNext(sessionHandle: Long): String?
+
+/** Releases the generation. Safe to call when none is running; required if a loop is abandoned. */
+internal expect fun llamaGenerateEnd(sessionHandle: Long)

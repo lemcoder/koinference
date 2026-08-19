@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "koinference_litertlm_facade.h"
 
@@ -31,6 +32,7 @@ int main() {
     const KoiLmSessionParams defaults = koilm_default_session_params();
     check(defaults.top_k > 0, "default params carry a top_k");
     check(defaults.temp > 0.0f, "default params carry a temperature");
+    check(defaults.seed < 0, "default params leave the runtime's own seeding");
 
     // A path that does not exist must fail cleanly rather than crash, and must
     // leave a message behind. This is the call that proves we reached the
@@ -69,6 +71,17 @@ int main() {
         check(written > 0, "unconstrained generation returns text");
         if (written > 0) {
             std::printf("       reply: %s\n", buffer);
+
+            // The overflow path, without generating again: a buffer too small to hold the
+            // reply must report the size it needed and leave the reply collectable.
+            char tiny[4];
+            const int needed = koilm_last_response(tiny, sizeof(tiny));
+            check(needed == written, "an undersized buffer reports the size needed");
+
+            std::string collected(static_cast<size_t>(needed) + 1, '\0');
+            const int again = koilm_last_response(&collected[0], static_cast<int>(collected.size()));
+            check(again == written && std::strcmp(collected.c_str(), buffer) == 0,
+                  "the reply survives a buffer that was too small");
         } else {
             std::printf("       reported: %s\n", koilm_last_error());
         }

@@ -108,6 +108,22 @@ TEST_F(FacadeTest, EmbedReturnsErrorForNullBuffer) {
     EXPECT_EQ(koi_embed(reinterpret_cast<KoiSession*>(1), "hello", nullptr, 4), -1);
 }
 
+// ── streaming ──────────────────────────────────────────────────────────────
+
+TEST_F(FacadeTest, StreamingRejectsNullArguments) {
+    char buf[64] = {};
+    EXPECT_EQ(koi_generate_begin(nullptr, nullptr, "hi", nullptr), -1);
+    EXPECT_EQ(koi_generate_begin(reinterpret_cast<KoiSession*>(1), nullptr, nullptr, nullptr), -1);
+    EXPECT_EQ(koi_generate_next(nullptr, buf, sizeof(buf)), -1);
+    EXPECT_EQ(koi_generate_next(reinterpret_cast<KoiSession*>(1), nullptr, 64), -1);
+    EXPECT_EQ(koi_generate_next(reinterpret_cast<KoiSession*>(1), buf, 0), -1);
+}
+
+TEST_F(FacadeTest, EndingAGenerationThatNeverStartedIsSafe) {
+    // Callers abandon loops. Ending twice, or without beginning, must not crash.
+    koi_generate_end(nullptr);
+}
+
 // ── json schema → grammar ──────────────────────────────────────────────────
 
 TEST_F(FacadeTest, SchemaToGrammarProducesARootRule) {

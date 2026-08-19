@@ -5,18 +5,24 @@ import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.InferenceBackend
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.textOnly
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaBackend
 import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerate
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateBegin
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateEnd
+import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerateNext
 import io.github.lemcoder.koinference.llamacpp.internal.llamaJsonSchemaToGrammar
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -46,12 +52,12 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     settings: RuntimeSettings,
-) : LlamaCppTextRuntime {
+) : LlamaCppTextRuntime, StreamingTextRuntime {
 
-    var generationParameters: GenerationParameters = GenerationParameters()
+    override var generationParameters: GenerationParameters = GenerationParameters()
         private set
 
-    var runtimeSettings: RuntimeSettings = settings
+    override var runtimeSettings: RuntimeSettings = settings
         private set
 
     // The session owns the KV cache and the batch, so a second generation running against it
@@ -65,28 +71,26 @@ class LlamaCppRuntime internal constructor(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
     ): String {
-        check(!closed) { "This runtime has been unloaded: $modelPath" }
-
         // The facade is text-only: llama.cpp has mtmd upstream, but koi_generate takes a
-        // single user string and nothing wires the multimodal projector.
+        // single user string and nothing wires the multimodal projector. Rejected before the
+        // lock: a bad prompt is the caller's mistake, not something to queue for.
         val text = prompt.textOnly("llama.cpp")
 
         return lock.withLock {
+            // Under the lock, so that an unload racing this cannot pass the check and free the
+            // session between here and the call into the facade.
+            check(!closed) { "This runtime has been unloaded: $modelPath" }
             withContext(Dispatchers.Default) {
                 // Conversion happens here rather than in Kotlin: llama.cpp ships the
                 // schema-to-GBNF compiler its own sampler was built against.
-                val grammar = when (constraint) {
-                    is GenerationConstraint.JsonSchema -> llamaJsonSchemaToGrammar(constraint.schema)
-                        .ifEmpty { throw IllegalArgumentException("Not a convertible JSON schema: ${constraint.schema}") }
-
-                    null -> null
-                }
+                val grammar = grammarFor(constraint)
 
                 val session = currentSession()
                 // A -1 from the facade is an empty string here, which is indistinguishable from
                 // a model that produced nothing, so it is raised instead.
-                llamaGenerate(session, systemPrompt, text, grammar)
+                val reply = llamaGenerate(session, systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for $modelPath") }
+                reply
             }
         }
     }
@@ -95,9 +99,11 @@ class LlamaCppRuntime internal constructor(
      * Sampling is fixed when the session is created, so the session is dropped and rebuilt on
      * the next call — cheap, since the weights stay loaded.
      */
-    override fun updateGenerationParameters(parameters: GenerationParameters) {
-        generationParameters = parameters
-        releaseSession()
+    override suspend fun updateGenerationParameters(parameters: GenerationParameters) {
+        lock.withLock {
+            generationParameters = parameters
+            releaseSession()
+        }
     }
 
     /**
@@ -105,21 +111,74 @@ class LlamaCppRuntime internal constructor(
      * llama.cpp. The reload is deferred to the next generation rather than run here, where it
      * would block the caller on hundreds of megabytes of I/O from a non-suspending function.
      */
-    override fun updateRuntimeSettings(settings: RuntimeSettings) {
-        val backendChanged = settings.backend != runtimeSettings.backend
-        runtimeSettings = settings
-        releaseSession()
-        if (backendChanged) releaseModel()
+    override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
+        lock.withLock {
+            val backendChanged = settings.backend != runtimeSettings.backend
+            runtimeSettings = settings
+            releaseSession()
+            if (backendChanged) releaseModel()
+        }
+    }
+
+    /**
+     * Streams the reply a token at a time.
+     *
+     * The whole generation holds the lock: the session carries the KV cache and the sampler,
+     * and a second call decoding into it half way through this one would corrupt both. That
+     * makes an abandoned collection important — the `finally` ends the generation, so a caller
+     * that stops collecting does not leave the session mid-decode for the next one.
+     */
+    override fun streamResponse(
+        prompt: List<PromptPart>,
+        constraint: GenerationConstraint?,
+    ): Flow<String> = flow {
+        val text = prompt.textOnly("llama.cpp")
+
+        lock.withLock {
+            check(!closed) { "This runtime has been unloaded: $modelPath" }
+            val grammar = grammarFor(constraint)
+            val session = currentSession()
+
+            check(llamaGenerateBegin(session, systemPrompt, text, grammar) >= 0) {
+                "llama.cpp could not start generating for $modelPath"
+            }
+            try {
+                while (true) {
+                    // withContext per token rather than around the loop: emitting has to happen
+                    // in the flow's own context, and the decode is what belongs on Default.
+                    val chunk = withContext(Dispatchers.Default) { llamaGenerateNext(session) } ?: break
+                    emit(chunk)
+                }
+            } finally {
+                llamaGenerateEnd(session)
+            }
+        }
+    }
+
+    private fun grammarFor(constraint: GenerationConstraint?): String? = when (constraint) {
+        // Conversion happens here rather than in Kotlin: llama.cpp ships the schema-to-GBNF
+        // compiler its own sampler was built against.
+        is GenerationConstraint.JsonSchema -> llamaJsonSchemaToGrammar(constraint.schema)
+            .ifEmpty { throw IllegalArgumentException("Not a convertible JSON schema: ${constraint.schema}") }
+
+        null -> null
     }
 
     suspend fun readGgufMetadata(): GgufMetadata = GgufParser.parse(readFileBytes(modelPath))
 
-    /** Releases the session and the model. Called by the loader; idempotent. */
-    internal fun close() {
-        if (closed) return
-        releaseSession()
-        releaseModel()
-        closed = true
+    /**
+     * Releases the session and the model. Called by the loader; idempotent.
+     *
+     * Suspends for the same reason the updates do: a generation holding the session has to
+     * finish before the session is freed underneath it.
+     */
+    internal suspend fun close() {
+        lock.withLock {
+            if (closed) return@withLock
+            closed = true
+            releaseSession()
+            releaseModel()
+        }
     }
 
     private fun currentSession(): Long {
@@ -130,7 +189,10 @@ class LlamaCppRuntime internal constructor(
                 nCtx = nCtx,
                 nThreads = nThreads,
                 nPredict = nPredict,
-                temp = DEFAULT_TEMP,
+                // topP and seed are not here: koi_session_create takes neither, so a caller
+                // that sets them on this backend is ignored rather than surprised by one knob
+                // standing in for another.
+                temp = generationParameters.temperature?.toFloat() ?: DEFAULT_TEMP,
                 topK = generationParameters.topK ?: DEFAULT_TOP_K,
                 minP = generationParameters.minP?.toFloat() ?: DEFAULT_MIN_P,
             )
