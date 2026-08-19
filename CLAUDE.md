@@ -326,6 +326,17 @@ so generation tests are env-gated rather than run in CI.
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
 
+## A stream has to arrive in pieces, and that is asserted
+
+A binding that buffered a whole reply and delivered it in one chunk would satisfy every other
+property of streaming — the chunks concatenate, the text is right, the flow completes — while
+making time to first token equal to total latency. Every streaming test therefore asserts more
+than one chunk, and the harness records a note when a sample generates several tokens but
+arrives as one chunk, rather than letting that number sit in a TTFT column next to engines that
+really do stream.
+
+Measured on a Pixel 8a: llama.cpp emits 24 chunks for 84 characters, LiteRT-LM 9 for 34.
+
 ## Token counts come from the harness, not the engines
 
 Both facades expose the model's own tokenizer — `koilm_token_count` over

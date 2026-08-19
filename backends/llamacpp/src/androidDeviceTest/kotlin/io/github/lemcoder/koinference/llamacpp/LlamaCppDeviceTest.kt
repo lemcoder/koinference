@@ -8,10 +8,14 @@ import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
 import io.github.lemcoder.koinference.llamacpp.internal.llamaSystemInfo
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
+import io.github.lemcoder.koinference.GenerationParameters
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
@@ -92,6 +96,42 @@ class LlamaCppDeviceTest {
                 assertIs<LlamaCppTextRuntime>(runtime)
                 val reply = runtime.generateResponse("Once upon a time")
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
+            } finally {
+                loader.unload(modelPath)
+            }
+        }
+    }
+
+    /**
+     * Streaming arrives in pieces, and those pieces are the reply.
+     *
+     * The equivalent LiteRT-LM test exists because that binding could have chosen cumulative
+     * chunks; this one exists because nothing on this leg had ever checked streaming on a device
+     * at all. Both assert more than one chunk: a single chunk delivered at the end satisfies
+     * every other property of a stream while making time to first token equal to total latency.
+     */
+    @Test
+    fun streamedChunksConcatenateToTheBlockingReply() {
+        if (skipReason() != null) return
+
+        runBlocking {
+            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 24)
+            val runtime = loader.load(modelPath) as LlamaCppTextRuntime
+            try {
+                // Greedy, so the two calls answer identically rather than by luck.
+                runtime.updateGenerationParameters(GenerationParameters(temperature = 0.0))
+
+                val streamed = runtime.streamResponse("Once upon a time").toList()
+                val blocking = runtime.generateResponse("Once upon a time")
+
+                Log.i(
+                    "koinference-benchmark",
+                    "llama.cpp streaming: chunks=${streamed.size} " +
+                        "streamedChars=${streamed.sumOf { it.length }} blockingChars=${blocking.length}",
+                )
+
+                assertTrue(streamed.size > 1, "expected several chunks, got ${streamed.size}")
+                assertEquals(blocking, streamed.joinToString(""))
             } finally {
                 loader.unload(modelPath)
             }
