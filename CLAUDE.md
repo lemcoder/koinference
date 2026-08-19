@@ -1,7 +1,8 @@
 # Working in this repo
 
-Things that cost time to discover. The README covers layout and commands; this is the stuff that is
-not visible from the code.
+Things that cost time to discover. The README covers layout and commands, `docs/backends.md`
+covers the shape both backends share and what a third one has to fill in; this is the stuff that
+is not visible from the code.
 
 ## The native seam
 
@@ -49,6 +50,10 @@ The generated JNI bridges are numbered by position (`kniBridge0`, `kniBridge1`, 
 the struct-returning `koi_default_session_params`). **Append new functions at the end** — inserting
 one renumbers every bridge after it and each hand-written actual in `jvmMain`/`androidMain` silently
 calls the wrong C function.
+
+Deleting one is the same hazard. `koi_embed` (index 9) has no Kotlin caller since the unimplemented
+embedding runtime was removed, and it **stays in the header anyway**: taking it out would renumber
+`koi_json_schema_to_grammar` and the whole streaming trio. An unused C function costs nothing.
 
 ## Toolchain facts
 
@@ -215,19 +220,32 @@ generation is running — could be checked without a 136 MB model. `LiteRtLmBrid
 `expect fun`, and `FakeLiteRtLmBridge` in commonTest covers all of it. The nesting is
 deliberate: an engine hands out conversations, so neither can be used without its owner.
 
-**The two runtimes ship separately and must be bumped together.** `litertlm` in the version
-catalog and `KOILM_VERSION` in `native/CMakeLists.txt` are the same release; a skew between them
-is a behaviour skew between targets.
+`:backends:llamacpp` now has the identical shape — `LlamaCppBridge` / `LlamaCppModel` /
+`LlamaCppSession` — and it did not for a long time, which is why its `commonTest` was one
+assertion that a path ends in `.gguf`. **`docs/backends.md` is the reference for the seam**; read
+it before adding a backend or changing either one's shape.
 
-**Our AAR contains no `.so`.** The runtime is a transitive dependency merged by the consuming
-app. Hence `api(libs.litertlm.android)` rather than `implementation` — with `implementation`, a
-consumer compiles and then dies at the first generate.
+**`KOILM_VERSION` in `native/CMakeLists.txt` is the only place the runtime version is pinned.**
+It used to also be `litertlm` in the version catalog, back when Android took its runtime from
+Maven; that entry is gone, and so is the skew between targets it could produce.
 
-**A commonMain file with any top-level declaration collides with a same-named androidMain file.**
-`expect` declarations generate no JVM class, which is why `:backends:llamacpp` can reuse
-`LlamaCppBridge.kt` across source sets. Adding one `const` to the common bridge produced
-`Duplicate JVM class name … LiteRtLmBridgeKt`. Hence the platform files are named after their
-binding — `SdkBridge.kt`, `FacadeBridge.kt` — and never after the common file they implement.
+**Our AAR ships `liblitert-lm.so` itself**, in `jniLibs/<abi>/` beside the JNI stub. This
+paragraph used to say the opposite — that the AAR carried no `.so` and the runtime arrived
+transitively from `api(libs.litertlm.android)` — which was true of the SDK leg and survived its
+deletion by two releases. There is no Maven runtime dependency now.
+
+**A commonMain file with any top-level declaration collides with a same-named platform file.**
+`expect` declarations generate no JVM class, which is why a shared `LlamaCppBridge.kt` worked
+across source sets while that seam was expect/actual functions — and stopped working the moment it
+became interfaces. Adding one `const` to the common bridge produced `Duplicate JVM class name …
+LiteRtLmBridgeKt`. Hence platform files are named after their binding — `FacadeBridge.kt`,
+`JniBridge.kt` — and never after the common file they implement. Both backends follow this now.
+
+**Do not add a shared jvm/android source set.** `JniBridge.kt` is byte-identical in `jvmMain` and
+`androidMain`, and so is `GgufFileSource.kt`, and that duplication stays. The generated
+`…jni` bridges are produced per compilation into each target's own source set, so an intermediate
+source set holding the hand-written actual would not see them. Two copies of a file that only
+calls generated functions is cheaper than a source-set layout that fights the generator.
 
 **The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
 follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer
@@ -305,6 +323,19 @@ so generation tests are env-gated rather than run in CI.
 - **A system prompt is a model-dependent feature.** SmolLM2-135M-Instruct accepts one;
   LFM2.5-1.2B-Instruct refuses and the runtime reports only "send_message failed" either way.
   `LiteRtLmRuntime` adds the likely cause when a system prompt is set.
+- **The runner takes its engines as a parameter**, defaulting to `availableEngines()`. It used to
+  call that registry itself, which meant the protocol — warmup kept out of the samples, what a
+  FAILED record carries, the contamination and buffered-chunk notes — could only be exercised on
+  macosArm64 with both real models present. `BenchmarkRunnerTest` now covers it with a fake engine
+  and a fake clock.
+- **Argument parsing lives in `BenchmarkArguments`, not in the instrumentation.** Defaulting,
+  splitting and the per-prompt token budgets decide what a run measures, and none of it is
+  Android; inside the device test it was reachable only from an emulator. `modelIdOf` /
+  `quantizationOf` moved out of `HostBenchmarkTest` for the same reason, and their two copies of
+  the quantization-label list became one.
+- **`applyWorkload` is on `BenchmarkInferenceEngine`.** It used to be a `when (this)` over the two
+  private adapter classes, so a new backend silently ran with the wrong token budget instead of
+  failing to compile.
 - **Backends stream; the harness measures.** Neither backend reports timings any more. Both
   implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
   code that touches a clock — one definition of time to first token for every engine, instead

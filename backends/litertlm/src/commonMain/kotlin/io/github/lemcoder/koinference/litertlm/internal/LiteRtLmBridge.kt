@@ -7,18 +7,9 @@ import kotlinx.coroutines.flow.Flow
 /**
  * The seam between the common runtime and whichever LiteRT-LM binding a target has.
  *
- * It is deliberately not the C API's shape. Apple targets reach LiteRT-LM through the facade
- * in `native/` and hold raw pointers; Android cannot, because the runtime it ships
- * (`liblitertlm_jni.so` in the AAR) exports only its 24 `Java_..._LiteRtLmJni_*` entry points
- * and no `litert_lm_*` C symbols at all — its visibility is pinned by a version script. So the
- * Android leg goes through Google's own Kotlin API and holds objects.
- *
- * Interfaces rather than `expect class` handles: with expect/actual, a handle can only be
- * produced by a platform, so no test on any platform could stand in for the runtime and
- * everything in [io.github.lemcoder.koinference.litertlm.LiteRtLmRuntime] would need a 136 MB
- * model to exercise. The nesting (bridge opens engines, engines open conversations,
- * conversations generate) matches the lifetime nesting of the things themselves, so a handle
- * cannot be used without the thing that owns it.
+ * Both legs bind the same C facade — cinterop on Apple, generated JNI bridges on Android — and
+ * this is the shape `:backends:llamacpp` uses too. See `docs/backends.md` for why it is
+ * interfaces rather than `expect class` handles, and what a third backend has to fill in.
  *
  * Every function here throws on failure; callers do not check for null or zero.
  */

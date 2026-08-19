@@ -1,13 +1,8 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.llamacpp.internal.llamaBackendFree
-import io.github.lemcoder.koinference.llamacpp.internal.llamaBackendInit
-import io.github.lemcoder.koinference.llamacpp.internal.llamaGenerate
-import io.github.lemcoder.koinference.llamacpp.internal.llamaModelFree
-import io.github.lemcoder.koinference.llamacpp.internal.llamaModelLoad
-import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionCreate
-import io.github.lemcoder.koinference.llamacpp.internal.llamaSessionFree
-import io.github.lemcoder.koinference.llamacpp.internal.llamaSystemInfo
+import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
+import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
+import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import android.util.Log
@@ -17,7 +12,7 @@ import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertNotEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -62,25 +57,18 @@ class LlamaCppDeviceTest {
         else -> "no model at the default path and none requested"
     }
 
+    /**
+     * The generated JNI bridges reach the packaged `.so` and it runs on this ABI.
+     *
+     * Needs no model: the failure path crosses the boundary in both directions, which is what
+     * would break if the stub were missing or built for the wrong architecture.
+     */
     @Test
-    fun backendReportsSystemInfo() {
-        llamaBackendInit()
-        try {
-            val info = llamaSystemInfo()
-            assertTrue(info.isNotEmpty(), "expected a non-empty system info string")
-        } finally {
-            llamaBackendFree()
+    fun missingModelFailsThroughTheBridge() {
+        val failure = assertFailsWith<IllegalStateException> {
+            platformBridge().openModel(ModelOptions("/data/local/tmp/does-not-exist.gguf"))
         }
-    }
-
-    @Test
-    fun missingModelReturnsNullHandle() {
-        llamaBackendInit()
-        try {
-            assertTrue(llamaModelLoad("/data/local/tmp/does-not-exist.gguf", nGpuLayers = 0) == 0L)
-        } finally {
-            llamaBackendFree()
-        }
+        assertTrue(failure.message!!.contains("does-not-exist.gguf"))
     }
 
     @Test
@@ -116,7 +104,7 @@ class LlamaCppDeviceTest {
 
         runBlocking {
             val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 24)
-            val runtime = loader.load(modelPath) as LlamaCppTextRuntime
+            val runtime = loader.load(modelPath)
             try {
                 // Greedy, so the two calls answer identically rather than by luck.
                 runtime.updateGenerationParameters(GenerationParameters(temperature = 0.0))
@@ -138,36 +126,25 @@ class LlamaCppDeviceTest {
         }
     }
 
+    /** The same thing one layer down, so a failure says whether the seam or the runtime broke. */
     @Test
-    fun generatesFromARealModel() {
+    fun generatesFromARealModelThroughTheBridge() {
         if (skipReason() != null) return
 
-        llamaBackendInit()
+        val model = platformBridge().openModel(ModelOptions(modelPath))
         try {
-            val model = llamaModelLoad(modelPath, nGpuLayers = 0)
-            assertNotEquals(0L, model, "failed to load $modelPath")
+            val session = model.openSession(
+                SessionOptions(nCtx = 256, nThreads = 2, nPredict = 16, temperature = 0f, topK = 1, minP = 0f),
+            )
             try {
-                val session = llamaSessionCreate(
-                    modelHandle = model,
-                    nCtx = 256,
-                    nThreads = 2,
-                    nPredict = 16,
-                    temp = 0f,
-                    topK = 1,
-                    minP = 0f,
-                )
-                assertNotEquals(0L, session, "failed to create a session")
-                try {
-                    val text = llamaGenerate(session, null, "Once upon a time", null)
-                    assertTrue(text.isNotEmpty(), "expected the model to produce tokens")
-                } finally {
-                    llamaSessionFree(session)
-                }
+                val text = session.generate(null, "Once upon a time", null)
+                assertTrue(text.isNotEmpty(), "expected the model to produce tokens")
+                assertTrue(session.tokenCount("Once upon a time") > 0)
             } finally {
-                llamaModelFree(model)
+                session.close()
             }
         } finally {
-            llamaBackendFree()
+            model.close()
         }
     }
 }

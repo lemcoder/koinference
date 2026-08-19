@@ -58,10 +58,6 @@ class LiteRtLmModelLoader internal constructor(
     // machinery than a loader that is normally used from one place needs.
     private val lock = Mutex()
 
-    // Narrowed to the text runtime, not the sealed parent: LiteRT-LM has no embedding runtime,
-    // so returning the union would only force every caller into a downcast that can never
-    // fail. :backends:llamacpp cannot do this — which of its two runtimes you get depends on
-    // the model.
     override suspend fun load(modelPath: String): LiteRtLmTextRuntime {
         // LiteRT-LM rejects a raw .tflite: weights have to be packaged in one of these two
         // containers, together with the tokenizer and metadata it needs.

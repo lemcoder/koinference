@@ -3,8 +3,8 @@ package io.github.lemcoder.koinference.litertlm
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.PromptPart
+import io.github.lemcoder.koinference.RuntimeGuard
 import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.textOnly
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
@@ -14,9 +14,6 @@ import io.github.lemcoder.koinference.litertlm.internal.toConversationOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -25,8 +22,8 @@ import kotlinx.coroutines.withContext
  * Created by [LiteRtLmModelLoader]; the engine is already loaded by the time an instance
  * exists, so every method here is cheap apart from generation itself and a backend change.
  *
- * All state is behind one lock. The engine and the conversation are native memory reached
- * through raw handles, so freeing either while a generation is running is a use-after-free
+ * All state is behind one [RuntimeGuard]. The engine and the conversation are native memory
+ * reached through the bridge, so freeing either while a generation is running is a use-after-free
  * rather than an exception — which is why every method that touches them suspends instead of
  * mutating from whatever thread the caller happened to be on.
  */
@@ -45,7 +42,7 @@ class LiteRtLmRuntime internal constructor(
      * different amounts of work.
      */
     private val maxOutputTokens: Int = 0,
-) : LiteRtLmTextRuntime, StreamingTextRuntime {
+) : LiteRtLmTextRuntime {
 
     private var engineOptions: EngineOptions = engineOptions
 
@@ -62,8 +59,7 @@ class LiteRtLmRuntime internal constructor(
     // when the conversation is created.
     private var conversation: LiteRtLmConversation? = null
 
-    private var closed: Boolean = false
-    private val lock = Mutex()
+    private val guard = RuntimeGuard { engineOptions.modelPath }
 
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
@@ -72,7 +68,7 @@ class LiteRtLmRuntime internal constructor(
         // Text-only for now. The prebuilt runtime itself can do vision and audio — that code
         // is compiled into it, unlike a source build — but reaching it needs the engine
         // created with a vision/audio backend and the facade taught to pass content parts
-        // through, neither of which is wired up. Rejected before the lock: a bad prompt is
+        // through, neither of which is wired up. Rejected before the guard: a bad prompt is
         // the caller's mistake and should not queue behind someone else's generation.
         val text = prompt.textOnly("LiteRT-LM")
 
@@ -81,8 +77,7 @@ class LiteRtLmRuntime internal constructor(
             null -> null
         }
 
-        return lock.withLock {
-            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
+        return guard.whileOpen {
             withContext(Dispatchers.Default) {
                 explainingSystemPromptFailures {
                     currentConversation().generate(text, schema)
@@ -94,19 +89,18 @@ class LiteRtLmRuntime internal constructor(
     /**
      * Streams the reply chunk by chunk.
      *
-     * Holds the lock for the whole generation, like [generateResponse] does: the conversation
+     * Holds the guard for the whole generation, like [generateResponse] does: the conversation
      * carries prefilled state, and a second turn starting half way through this one would
      * interleave into it.
      */
     override fun streamResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): Flow<String> = flow {
+    ): Flow<String> {
         val text = prompt.textOnly("LiteRT-LM")
         val schema = (constraint as? GenerationConstraint.JsonSchema)?.schema
 
-        lock.withLock {
-            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
+        return guard.streamWhileOpen {
             emitAll(explainingSystemPromptFailures { currentConversation().stream(text, schema) })
         }
     }
@@ -114,11 +108,10 @@ class LiteRtLmRuntime internal constructor(
     /**
      * Counts with the model's own tokenizer, through the engine.
      *
-     * Under the lock like everything else here: the engine is native memory, and an unload
+     * Under the guard like everything else here: the engine is native memory, and an unload
      * racing this would free it mid-call.
      */
-    override suspend fun countTokens(text: String): Int = lock.withLock {
-        check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
+    override suspend fun countTokens(text: String): Int = guard.whileOpen {
         withContext(Dispatchers.Default) { engine.tokenCount(text) }
     }
 
@@ -127,9 +120,8 @@ class LiteRtLmRuntime internal constructor(
      * reopened on the next call — which also drops its prefilled history.
      */
     override suspend fun updateGenerationParameters(parameters: GenerationParameters) {
-        lock.withLock {
-            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
-            if (parameters == generationParameters) return@withLock
+        guard.whileOpen {
+            if (parameters == generationParameters) return@whileOpen
             generationParameters = parameters
             releaseConversation()
         }
@@ -144,9 +136,8 @@ class LiteRtLmRuntime internal constructor(
      * open, this runtime is left unloaded and the caller has to load the model again.
      */
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
-        lock.withLock {
-            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
-            if (settings.backend == engineOptions.backend) return@withLock
+        guard.whileOpen {
+            if (settings.backend == engineOptions.backend) return@whileOpen
 
             releaseConversation()
             val reopened = engineOptions.copy(backend = settings.backend)
@@ -156,7 +147,7 @@ class LiteRtLmRuntime internal constructor(
                     engine = bridge.openEngine(reopened)
                     engineOptions = reopened
                 } catch (failure: Throwable) {
-                    closed = true
+                    guard.markClosed()
                     throw IllegalStateException(
                         "Could not reopen ${reopened.modelPath} on ${settings.backend}; " +
                             "the runtime is unloaded and has to be loaded again",
@@ -168,17 +159,12 @@ class LiteRtLmRuntime internal constructor(
     }
 
     override suspend fun resetConversation() {
-        lock.withLock {
-            check(!closed) { "This runtime has been unloaded: ${engineOptions.modelPath}" }
-            releaseConversation()
-        }
+        guard.whileOpen { releaseConversation() }
     }
 
     /** Releases the conversation and the engine. Called by the loader; idempotent. */
     internal suspend fun close() {
-        lock.withLock {
-            if (closed) return@withLock
-            closed = true
+        guard.close {
             releaseConversation()
             engine.close()
         }

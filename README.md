@@ -6,10 +6,14 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 
 - `:core` — high-level common interfaces:
   - `ModelLoader` (`load` / `unload` / `unloadAll`)
-  - `ModelRuntime` (response generation, generation params, runtime settings, schema constraints)
+  - `TextRuntime` / `StreamingTextRuntime` / `TokenCounting` (generation, streaming, tokenizing)
+  - `RuntimeGuard`, the locking and use-after-unload scaffolding every backend shares
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
+
+Adding a third backend is documented in [docs/backends.md](docs/backends.md); both existing ones
+have the same shape on purpose.
 
 Published to Maven Central as `io.github.lemcoder:koinference-core`, `…:koinference-llamacpp` and
 `…:koinference-litertlm`. Each backend depends on `:core` with `api`, so adding a backend is
@@ -21,8 +25,10 @@ enough.
 core/                          common interfaces
 backends/llamacpp/
 ├── src/
-│   ├── commonMain/            LlamaCppModelLoader, gguf parser
+│   ├── commonMain/            LlamaCppModelLoader, LlamaCppRuntime, the bridge interfaces
+│   ├── commonTest/            the fake bridge and the runtime tests over it
 │   ├── jvmMain/               actuals over the generated JNI bridges
+│   ├── androidMain/           the same bridges, for the ART leg
 │   └── nativeMain/            actuals over cinterop
 ├── native/                    the C++ facade over llama.cpp
 │   ├── CMakeLists.txt         pulls llama.cpp via CPM
@@ -33,6 +39,10 @@ backends/llamacpp/
 ```
 
 ## Running the tests
+
+Most of both backends is covered by `commonTest` against a fake binding and needs no model or
+native library — `./gradlew :backends:llamacpp:jvmTest` runs it. Only the tests that exercise real
+inference need weights.
 
 Every generation test is gated on an environment variable pointing at a model, and skips without
 one — the two backends take different containers, so they take different variables:
@@ -113,23 +123,26 @@ backends/litertlm/
 ├── src/
 │   ├── commonMain/            LiteRtLmModelLoader, LiteRtLmRuntime, the bridge interfaces
 │   ├── nativeMain/            actuals over cinterop + the reply-JSON reader
-│   ├── androidMain/           actuals over Google's Kotlin API
+│   ├── androidMain/           actuals over the generated JNI bridges
 │   └── androidDeviceTest/     on-device generation
-├── native/                    Apple only
-│   ├── CMakeLists.txt         downloads the CLiteRTLM xcframework, builds the facade
+├── native/
+│   ├── CMakeLists.txt         downloads the C API archive, builds the facade + JNI stub
 │   ├── CMakePresets.json      macosArm64, macosX64, iosArm64, iosSimulatorArm64
 │   ├── facade/                koinference_litertlm_facade.{h,cpp}
 │   └── tests/                 facade smoke test
 └── native/build/<preset>/     libkoinference-litertlm-facade.a + the staged runtime dylib
 ```
 
-Apple targets bind a C facade the way `:backends:llamacpp` does. **Android does not, and cannot**:
-the AAR's `liblitertlm_jni.so` is version-scripted down to its 24 `Java_…_LiteRtLmJni_*` entry
-points and exports no `litert_lm_*` C symbols, so there is nothing for a facade to link against.
-That leg goes through `com.google.ai.edge.litertlm`'s Kotlin API instead. The shared seam is
-therefore a trio of `internal` interfaces — bridge → engine → conversation — with a single
-`expect fun platformBridge()` behind it, so neither side has to pretend to be the other and a
-fake stands in for both in `commonTest`.
+Both legs bind the same C facade, the way `:backends:llamacpp` does — cinterop on Apple, generated
+JNI bridges on Android. That was not always true: the Maven AAR's `liblitertlm_jni.so` is
+version-scripted down to its 24 `Java_…_LiteRtLmJni_*` entry points and exports no `litert_lm_*`
+symbols, so the Android leg used to go through `com.google.ai.edge.litertlm`'s Kotlin API. Release
+0.16.0 added `litert_lm_c_api-0.1.0.zip`, whose Android slices export 144 of them, and that
+dependency is gone.
+
+The shared seam is a trio of `internal` interfaces — bridge → engine → conversation — with a
+single `expect fun platformBridge()` behind it, so a fake stands in for both legs in `commonTest`.
+`:backends:llamacpp` has the same shape; see [docs/backends.md](docs/backends.md).
 
 A runtime is a resource. `unload`/`unloadAll` free the engine, and every call that frees
 something native suspends (`updateGenerationParameters`, `updateRuntimeSettings`,
@@ -137,10 +150,10 @@ something native suspends (`updateGenerationParameters`, `updateRuntimeSettings`
 handles out from under it. Changing the backend reloads the model, because LiteRT-LM decides
 where a model runs when the engine is created.
 
-The AAR this module produces carries no `.so` of its own — the runtime comes transitively from
-`com.google.ai.edge.litertlm:litertlm-android` and is merged by the consuming app. The Maven
-version and the xcframework version pinned in `native/CMakeLists.txt` are the same runtime and
-must be bumped together.
+The AAR this module produces carries `liblitert-lm.so` beside the JNI stub in `jniLibs/<abi>/`:
+the stub records it as a `DT_NEEDED` and Android's loader resolves that from the same directory,
+so CMake stages it there in a POST_BUILD step. There is no Maven runtime dependency any more, and
+`KOILM_VERSION` in `native/CMakeLists.txt` is the only place the runtime version is pinned.
 
 LiteRT-LM cannot be built from source here: its data processors include
 `support/preprocessor/*.h` "from @litert", which is not published in the open-source LiteRT
@@ -148,9 +161,11 @@ tree, so the CMake build fails on every platform. Google ships the C API prebuil
 `engine.h` in the xcframework is byte-identical to the one at the tag it was cut from, so the
 header and the binary agree. `native/CMakeLists.txt` downloads and hash-checks that archive.
 
-Gradle drives CMake itself (`buildFacade`) rather than through the Konan plugin, because this
-module has no JNI leg yet. `./gradlew :backends:litertlm:macosArm64Test` builds the facade,
-runs cinterop and links against both the facade archive and the runtime dylib.
+On Apple targets Gradle drives CMake itself (`buildFacade`) rather than through the Konan plugin.
+`./gradlew :backends:litertlm:macosArm64Test` builds the facade, runs cinterop and links against
+both the facade archive and the runtime dylib. The Android leg goes through the plugin, which
+generates the bridges and lets CMake build the stub — the same arrangement `:backends:llamacpp`
+uses.
 
 Generation tests need a real model and are skipped without one. The smallest published
 `.litertlm` is SmolLM2-135M-Instruct at 136 MB, too large for CI:
@@ -167,8 +182,8 @@ adb push SmolLM2_135M_Instruct.litertlm /data/local/tmp/koinference/
 ```
 
 Structured output works on both legs — verified generating against a real model, not assumed.
-`GenerationConstraint.JsonSchema` reaches llguidance, which is linked into the prebuilt runtime
-and constrains decoding token by token; on Android it goes via `ResponseFormat.json(schema)`.
+`GenerationConstraint.JsonSchema` is passed to the facade unchanged and reaches llguidance, which
+is linked into the prebuilt runtime and constrains decoding token by token.
 
 ## Targets (current)
 

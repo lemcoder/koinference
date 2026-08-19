@@ -4,31 +4,33 @@ import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.ModelRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.StreamingTextRuntime
-import io.github.lemcoder.koinference.TokenCounting
 import io.github.lemcoder.koinference.TextRuntime
+import io.github.lemcoder.koinference.TokenCounting
 
-sealed interface LlamaCppModelRuntime : ModelRuntime
+/**
+ * What a loaded GGUF model can do.
+ *
+ * Text only. There was an embedding counterpart here with no implementation behind it; it is
+ * gone, along with the sealed parent that existed to hold the two apart and the downcast every
+ * caller of [LlamaCppModelLoader.load] needed as a result. `koi_embed` is still in the facade —
+ * see `docs/backends.md` for why a C function outlives its Kotlin surface.
+ */
+interface LlamaCppTextRuntime : ModelRuntime, TextRuntime, StreamingTextRuntime, TokenCounting {
 
-interface LlamaCppTextRuntime : LlamaCppModelRuntime, TextRuntime, StreamingTextRuntime, TokenCounting {
     /** What the next session will be created with. */
     val generationParameters: GenerationParameters
 
     /** Where the model is currently running. */
     val runtimeSettings: RuntimeSettings
 
-    // generateResponse comes from TextRuntime. These two stay here: the signatures happen to
-    // match LiteRT-LM's but the contracts do not — changing the backend here reloads the
-    // model, because llama.cpp decides GPU offload at load time — and llama.cpp reads a
-    // different subset of GenerationParameters (topK/minP/temperature) than LiteRT-LM does.
+    // generateResponse comes from TextRuntime — it is identical across backends. These two are
+    // not: llama.cpp fixes its sampler when a session opens, so changing either rebuilds the
+    // session, and a backend change additionally reloads the weights. The LiteRT-LM equivalent
+    // reopens a conversation instead, and reads a different subset of GenerationParameters.
     //
-    // Both suspend: they free the session, and freeing it while a generation is decoding into
-    // it is a use-after-free, so they wait for the generation rather than race it.
+    // Both suspend. Neither is a field assignment: they free native memory a generation may be
+    // using, so they wait for it rather than race it.
     suspend fun updateGenerationParameters(parameters: GenerationParameters)
 
-    suspend fun updateRuntimeSettings(settings: RuntimeSettings)
-}
-
-interface LlamaCppEmbeddingRuntime : LlamaCppModelRuntime {
-    suspend fun embed(text: String): FloatArray
     suspend fun updateRuntimeSettings(settings: RuntimeSettings)
 }

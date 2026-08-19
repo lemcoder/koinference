@@ -224,6 +224,8 @@ class InferenceServer(
     private fun epochSeconds(): Long = System.currentTimeMillis() / 1000
 }
 
+private val SUPPORTED_ROLES = setOf("system", "user", "assistant")
+
 /**
  * Flattens a chat request into the single prompt string both backends take.
  *
@@ -235,15 +237,15 @@ internal fun ChatCompletionRequest.flattenPrompt(): String {
     require(messages.isNotEmpty()) { "messages must not be empty" }
 
     return messages.joinToString("\n\n") { message ->
-        val content = message.content
-            ?: throw IllegalArgumentException(
-                "message content must be a string; content arrays are not supported because " +
-                    "both backends are text-only",
-            )
-        when (message.role) {
-            "system" -> content
-            "user", "assistant" -> content
-            else -> throw IllegalArgumentException("Unsupported message role '${message.role}'")
+        require(message.role in SUPPORTED_ROLES) {
+            "Unsupported message role '${message.role}'; expected one of $SUPPORTED_ROLES"
+        }
+        // Every supported role contributes its text the same way — a system message is prepended
+        // rather than set as the runtime's system prompt, since the model here was not loaded
+        // with one.
+        requireNotNull(message.content) {
+            "message content must be a string; content arrays are not supported because both " +
+                "backends are text-only"
         }
     }
 }
