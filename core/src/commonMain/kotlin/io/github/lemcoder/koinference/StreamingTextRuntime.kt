@@ -25,7 +25,7 @@ interface StreamingTextRuntime : ModelRuntime {
      * generation. The concatenation of every chunk is exactly what the non-streaming call
      * would have returned.
      *
-     * @throws UnsupportedOperationException if the backend cannot handle a part it was given.
+     * Backends fail on a part they cannot send rather than dropping it.
      */
     fun streamResponse(
         prompt: List<PromptPart>,

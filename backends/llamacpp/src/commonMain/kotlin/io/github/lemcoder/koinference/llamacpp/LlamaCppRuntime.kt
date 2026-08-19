@@ -5,7 +5,6 @@ import io.github.lemcoder.koinference.GenerationParameters
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeGuard
 import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.textOnly
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
@@ -61,10 +60,9 @@ class LlamaCppRuntime internal constructor(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
     ): String {
-        // The facade is text-only: llama.cpp has mtmd upstream, but koi_generate takes a single
-        // user string and nothing wires the multimodal projector. Rejected before the guard: a bad
-        // prompt is the caller's mistake and should not queue behind someone else's generation.
-        val text = prompt.textOnly("llama.cpp")
+        // Flattened before the guard, so a bad prompt does not queue behind someone else's
+        // generation.
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
 
         return guard.whileOpen {
             withContext(Dispatchers.Default) {
@@ -85,7 +83,7 @@ class LlamaCppRuntime internal constructor(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
     ): Flow<String> {
-        val text = prompt.textOnly("llama.cpp")
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         return guard.streamWhileOpen {
             val grammar = grammarFor(constraint)
             emitAll(currentSession().stream(systemPrompt, text, grammar))

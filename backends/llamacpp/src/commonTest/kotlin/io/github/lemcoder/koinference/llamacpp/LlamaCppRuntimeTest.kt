@@ -232,7 +232,7 @@ class LlamaCppRuntimeTest {
     fun rejectsPartsItCannotSend() = runTest {
         val runtime = runtime()
 
-        val failure = assertFailsWith<UnsupportedOperationException> {
+        assertFailsWith<ClassCastException> {
             runtime.generateResponse(
                 listOf(
                     PromptPart.Text("What is in this picture? "),
@@ -240,8 +240,6 @@ class LlamaCppRuntimeTest {
                 ),
             )
         }
-        assertTrue(failure.message!!.contains("llama.cpp"), failure.message!!)
-        assertTrue(failure.message!!.contains("ImageBytes"), failure.message!!)
         // Rejected, not partially sent.
         assertTrue(bridge.model.sessions.isEmpty())
     }

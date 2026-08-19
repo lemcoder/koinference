@@ -20,9 +20,8 @@ interface TextRuntime : ModelRuntime {
      * Generate a reply to a multimodal prompt.
      *
      * @param constraint restricts the output, e.g. to a JSON schema.
-     * @throws UnsupportedOperationException if the backend cannot handle a part it was given.
-     *         Backends reject rather than silently dropping parts — a prompt quietly missing
-     *         its image reads as a bad model, not a bad call.
+     * Backends fail on a part they cannot send rather than dropping it: a prompt quietly
+     * missing its image reads as a bad model rather than a bad call.
      */
     suspend fun generateResponse(
         prompt: List<PromptPart>,
