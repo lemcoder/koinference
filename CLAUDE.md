@@ -285,6 +285,32 @@ Gradle.
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
 
+## Performance on device
+
+`docs/performance.md` has the measurements. Two things that cost time to find:
+
+- **The thread default is not the core count, and not the big-core count either.** Decode is a
+  bandwidth-bound GEMV, so 2 threads saturate a Pixel 8a and 4 — exactly the size of its big
+  cluster — runs at *half* the speed of 2. `detect_decode_threads()` in the llama.cpp facade takes
+  half the largest cluster above the slowest frequency tier. The old
+  `hardware_concurrency() - 2` picked 7 and cost 2.6x.
+- **`GGML_NATIVE=OFF` leaves ggml at the NDK baseline**, which compiles the dot-product kernels
+  out of a Q4_0 build entirely. The arm64 preset sets `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod`. That
+  raises the device floor to roughly 2018 hardware — SIGILL below it, no fallback. `+i8mm`
+  measured inside the noise and is deliberately absent.
+
+**A device measurement is not trustworthy until the APK is checked.** `cmakeBuildKoinferenceAndroid`
+does not declare the facade sources as inputs, so an edited `.cpp` can rebuild while AGP's
+`mergeAndroidMainJniLibFolders` still packages its cached `.so`. Two experiments in a row measured
+the old binary. `strings` the `.so` out of the APK for something only the new code contains before
+believing any number, and delete `merged_jni_libs` / `merged_native_libs` / `stripped_native_libs`
+/ `outputs/apk` to force an honest repackage. This is the same missing-input bug the cinterop
+tasks had, in a different task.
+
+**Single device runs are noise.** The same configuration measured 8.5 and 2.3 tok/s minutes apart.
+Interleave configurations across several rounds and check both orderings; `batteryTemperaturePeakC`
+lags the SoC badly enough to read identical across a 2x swing.
+
 ## The benchmark harness
 
 - **cinterop does not track the headers behind its compiler options.** Editing a facade leaves

@@ -16,6 +16,16 @@ include(cmake/get_cpm.cmake)
 # Force-set before CPM includes llama.cpp so option() in its cmake picks up
 # these values from cache rather than re-defaulting to ON.
 set(GGML_NATIVE           OFF CACHE BOOL   "" FORCE)
+
+# GGML_NATIVE is off because these are cross-compiles, which leaves ggml at the toolchain's
+# baseline — plain armv8-a for the NDK. That compiles the dot-product kernels out entirely, and
+# they are what Q4_0 decoding runs on. The arm64 preset therefore sets GGML_CPU_ARM_ARCH to
+# armv8.2-a+dotprod; see docs/performance.md for the measurements and for why +i8mm is *not*
+# there.
+#
+# This is a floor, not a detection: a device older than dotprod (pre-2018, roughly Cortex-A53)
+# will take SIGILL rather than fall back. Shipping below that floor needs several variants and a
+# runtime pick, the way llama.rn does it — that work is not done here.
 # Defaults to LLAMA_STANDALONE, i.e. OFF under CPM — but the facade uses common_* helpers.
 set(LLAMA_BUILD_COMMON    ON  CACHE BOOL   "" FORCE)
 set(LLAMA_BUILD_TESTS     OFF CACHE BOOL   "" FORCE)

@@ -10,8 +10,10 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <exception>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,6 +24,71 @@ static constexpr float DEFAULT_TEMP      = 0.8f;
 static constexpr int   DEFAULT_TOP_K     = 40;
 static constexpr float DEFAULT_MIN_P     = 0.05f;
 static constexpr int   BATCH_SIZE        = 512;
+
+/** Ceiling on the auto-detected thread count; bandwidth, not cores, is the limit. */
+static constexpr int   MAX_DECODE_THREADS = 8;
+
+/**
+ * How many threads to decode with when the caller does not say.
+ *
+ * Decoding one token is a GEMV over the whole model: it reads every weight once and does almost
+ * no arithmetic per byte, so it is bound by memory bandwidth rather than by cores. A couple of
+ * threads already saturate a phone's DRAM, and past that point extra threads buy nothing while
+ * still paying ggml's per-node barrier and sharing the SoC's power budget, which clocks
+ * everything down.
+ *
+ * Measured on a Pixel 8a (4x A510 @ 1.70 GHz, 4x A715 @ 2.37 GHz, 1x X3 @ 2.91 GHz) on
+ * LFM2.5-1.2B-Instruct Q4_0, medians of interleaved runs in both orderings:
+ *
+ *     1 thread  10.6 tok/s     3 threads  12.3-14.6
+ *     2 threads 12.1-13.8      4 threads   5.3-6.2
+ *                              5 threads   2.5-2.7
+ *
+ * So the count is deliberately *not* the number of big cores. That would be 4 here, which is
+ * exactly where throughput falls off a cliff. Half the big cluster is the rule: it lands on the
+ * measured optimum on this device and still scales up on a machine whose big cluster is wider.
+ *
+ * The old default was hardware_concurrency() - 2, which picked 7 and ran at about half the speed
+ * of picking 2.
+ *
+ * A caller who knows better should pass n_threads: this is a default, not a policy, and the
+ * balance shifts with model size, quantization and how much bandwidth the rest of the device is
+ * using.
+ */
+static int detect_decode_threads() {
+    const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+
+    // Linux and Android expose the per-core ceiling here; other platforms do not, which is what
+    // the single-tier fallback below covers.
+    std::map<long, int> cores_per_frequency;
+    for (int cpu = 0; cpu < cores; ++cpu) {
+        char path[128];
+        std::snprintf(path, sizeof(path),
+                      "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
+        FILE* file = std::fopen(path, "r");
+        if (!file) continue;
+        long khz = 0;
+        const int read = std::fscanf(file, "%ld", &khz);
+        std::fclose(file);
+        if (read == 1 && khz > 0) cores_per_frequency[khz]++;
+    }
+
+    // Nothing readable, or one kind of core: there is no little cluster to avoid, so halve what
+    // the machine has.
+    if (cores_per_frequency.size() < 2) return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
+
+    // std::map is ordered, so begin() is the slowest tier — the one to leave alone. Among the
+    // rest, take the largest group: the biggest set of cores that finish a barrier together. The
+    // lone prime core is not it, and including it measured worse than leaving it out.
+    auto tier = cores_per_frequency.begin();
+    ++tier;
+    int big_cluster = 0;
+    for (; tier != cores_per_frequency.end(); ++tier) {
+        big_cluster = std::max(big_cluster, tier->second);
+    }
+
+    return std::max(2, std::min(big_cluster / 2, MAX_DECODE_THREADS));
+}
 
 struct KoiModel {
     llama_model* model;
@@ -95,9 +162,11 @@ KoiSessionParams koi_default_session_params(void) {
 KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     if (!model) return nullptr;
 
-    const int n_threads = (params.n_threads <= 0)
-        ? std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 2)
-        : params.n_threads;
+    // Computed once: reading sysfs per session would be wasted work, and the topology of a
+    // machine does not change while it is running.
+    static const int default_threads = detect_decode_threads();
+
+    const int n_threads = (params.n_threads <= 0) ? default_threads : params.n_threads;
 
     const int trained_ctx = llama_model_n_ctx_train(model->model);
 
