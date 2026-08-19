@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
@@ -78,7 +79,7 @@ class LlamaCppDeviceTest {
         // The bridge test below proves the .so runs; this proves the public API reaches it —
         // the loader owns backend init and session creation, which the bridge test does by hand.
         runBlocking {
-            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 16)
+            val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 16))
             val runtime = loader.load(modelPath)
             try {
                 assertIs<LlamaCppTextRuntime>(runtime)
@@ -103,7 +104,7 @@ class LlamaCppDeviceTest {
         if (skipReason() != null) return
 
         runBlocking {
-            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 24)
+            val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 24))
             val runtime = loader.load(modelPath)
             try {
                 // Greedy, so the two calls answer identically rather than by luck.

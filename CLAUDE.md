@@ -225,6 +225,21 @@ deliberate: an engine hands out conversations, so neither can be used without it
 assertion that a path ends in `.gguf`. **`docs/backends.md` is the reference for the seam**; read
 it before adding a backend or changing either one's shape.
 
+**Above that seam sits `Backend` / `BackendRegistry` / `ModelConfig` in `:core`.** A consumer
+never names a loader class: it registers the backends it links and asks for one by id or by model
+path. `id` is a `String` and the registry is consumer-assembled on purpose — `:core` cannot
+enumerate its own dependents, and an enum would make adding an engine a `:core` edit plus every
+exhaustive `when` over it.
+
+**`Accelerator` is CPU-or-GPU; `Backend` is llama.cpp-or-LiteRT-LM.** The enum used to be called
+`InferenceBackend`, so "backend" meant both things at once — including in `RuntimeSettings(backend
+= …)`, which was about neither engine.
+
+**`Backend.honours` is a claim, and nothing checks it at run time.** It says which
+`GenerationParameters` knobs the engine actually applies, and the benchmark reads it instead of
+hardcoding `seedApplied` per adapter. Get it wrong and a results file asserts a reproducibility
+the run never had — so it is asserted in each backend's `commonTest`.
+
 **`KOILM_VERSION` in `native/CMakeLists.txt` is the only place the runtime version is pinned.**
 It used to also be `litertlm` in the version catalog, back when Android took its runtime from
 Maven; that entry is gone, and so is the skew between targets it could produce.

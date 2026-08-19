@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.FakeLlamaCppBridge
 import kotlinx.coroutines.test.runTest
@@ -14,15 +15,7 @@ class LlamaCppModelLoaderTest {
 
     private val bridge = FakeLlamaCppBridge()
 
-    private fun loader() = LlamaCppModelLoader(
-        bridge = bridge,
-        systemPrompt = null,
-        settings = RuntimeSettings(),
-        parameters = GenerationParameters(),
-        nCtx = 0,
-        nThreads = 0,
-        nPredict = 0,
-    )
+    private fun loader() = LlamaCppModelLoader(bridge = bridge, config = ModelConfig())
 
     @Test
     fun `load rejects non gguf models`() = runTest {

@@ -25,13 +25,13 @@ data class GenerationParameters(
     val seed: Int? = null,
 )
 
-enum class InferenceBackend {
+enum class Accelerator {
     CPU,
     GPU,
 }
 
 data class RuntimeSettings(
-    val backend: InferenceBackend = InferenceBackend.CPU,
+    val accelerator: Accelerator = Accelerator.CPU,
 )
 
 sealed interface GenerationConstraint {

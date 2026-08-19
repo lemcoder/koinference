@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.litertlm
 
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.GenerationConstraint
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
@@ -112,12 +113,8 @@ class LiteRtLmDeviceTest {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(
-                cacheDir = cacheDir,
-                maxOutputTokens = 24,
-                // Greedy, so the two calls are answering identically rather than by luck.
-                parameters = GenerationParameters(temperature = 0.0, seed = 42),
-            )
+            val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir, maxOutputTokens = 24, // Greedy, so the two calls are answering identically rather than by luck.
+                parameters = GenerationParameters(temperature = 0.0, seed = 42)))
             val runtime = loader.load(modelPath)
             try {
                 val streamed = runtime.streamResponse("Say hello.").toList()
@@ -156,7 +153,7 @@ class LiteRtLmDeviceTest {
             // No system prompt: whether one is accepted is a property of the model's chat
                 // template — LFM2.5 rejects one, SmolLM2 takes it — and this test is about
                 // generation working on device at all.
-                val loader = LiteRtLmModelLoader(cacheDir = cacheDir)
+                val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir))
             val runtime = loader.load(modelPath)
             try {
                 val reply = runtime.generateResponse("Say hello.")
@@ -172,7 +169,7 @@ class LiteRtLmDeviceTest {
         if (!modelPresent()) return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(cacheDir = cacheDir)
+            val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir))
             val runtime = loader.load(modelPath)
             try {
                 val schema =

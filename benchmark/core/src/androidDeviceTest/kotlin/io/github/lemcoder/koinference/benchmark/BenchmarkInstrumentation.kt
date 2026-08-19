@@ -71,9 +71,15 @@ class BenchmarkInstrumentation {
             // tested there; this class supplies the two things only a device can — the Bundle and
             // a clock.
             val config = BenchmarkArguments.toConfig(
-                arguments = arguments.keySet().mapNotNull { key ->
-                    arguments.getString(key)?.let { key to it }
-                }.toMap(),
+                arguments = buildMap {
+                    arguments.keySet().forEach { key ->
+                        arguments.getString(key)?.let { put(key, it) }
+                    }
+                    // The app's own cache, unless the caller named one. /data/local/tmp is
+                    // shell's: a model can be read from there but a cache cannot be written
+                    // beside it, and the delegate then rebuilds its prefill signatures per load.
+                    putIfAbsent("cacheDir", context.cacheDir.absolutePath)
+                },
                 corpusPromptIds = corpus.prompts.map { it.id },
                 runIdFallback = "local-${System.currentTimeMillis()}",
             )

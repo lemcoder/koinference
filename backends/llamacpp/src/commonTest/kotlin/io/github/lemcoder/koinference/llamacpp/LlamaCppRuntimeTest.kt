@@ -2,7 +2,8 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.ModelConfig
+import io.github.lemcoder.koinference.Accelerator
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_MIN_P
@@ -43,12 +44,14 @@ class LlamaCppRuntimeTest {
         bridge: FakeLlamaCppBridge = this.bridge,
     ) = LlamaCppModelLoader(
         bridge = bridge,
-        systemPrompt = "You are terse.",
-        settings = settings,
-        parameters = parameters,
-        nCtx = 512,
-        nThreads = 2,
-        nPredict = 32,
+        config = ModelConfig(
+            systemPrompt = "You are terse.",
+            settings = settings,
+            parameters = parameters,
+            contextTokens = 512,
+            maxOutputTokens = 32,
+            threads = 2,
+        ),
     )
 
     @Test
@@ -170,16 +173,16 @@ class LlamaCppRuntimeTest {
         runtime.generateResponse("one")
         val cpuModel = bridge.model
 
-        runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.GPU))
+        runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
         runtime.generateResponse("two")
 
         assertTrue(cpuModel.closed, "the CPU model was leaked")
         assertEquals(2, bridge.models.size)
-        assertEquals(InferenceBackend.GPU, bridge.model.options.backend)
+        assertEquals(Accelerator.GPU, bridge.model.options.accelerator)
         assertEquals(MODEL, bridge.model.options.modelPath)
         // The reported setting follows the model rather than being a field that says GPU while
         // inference still runs on the CPU.
-        assertEquals(RuntimeSettings(InferenceBackend.GPU), runtime.runtimeSettings)
+        assertEquals(RuntimeSettings(Accelerator.GPU), runtime.runtimeSettings)
     }
 
     @Test
@@ -187,7 +190,7 @@ class LlamaCppRuntimeTest {
         val runtime = runtime()
         runtime.generateResponse("one")
 
-        runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.CPU))
+        runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.CPU))
 
         assertEquals(1, bridge.models.size)
         assertEquals(1, bridge.model.sessions.size)
@@ -195,12 +198,12 @@ class LlamaCppRuntimeTest {
 
     @Test
     fun aBackendThatCannotBeOpenedLeavesTheRuntimeUnloaded() = runTest {
-        val bridge = FakeLlamaCppBridge(unavailable = InferenceBackend.GPU)
+        val bridge = FakeLlamaCppBridge(unavailable = Accelerator.GPU)
         val runtime = runtime(bridge = bridge)
         runtime.generateResponse("one")
 
         val failure = assertFailsWith<IllegalStateException> {
-            runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.GPU))
+            runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
         }
         assertTrue(failure.message!!.contains("loaded again"), failure.message!!)
 
@@ -212,10 +215,10 @@ class LlamaCppRuntimeTest {
 
     @Test
     fun startsOnTheBackendTheLoaderWasConfiguredWith() = runTest {
-        val runtime = runtime(settings = RuntimeSettings(InferenceBackend.GPU))
+        val runtime = runtime(settings = RuntimeSettings(Accelerator.GPU))
 
-        assertEquals(RuntimeSettings(InferenceBackend.GPU), runtime.runtimeSettings)
-        assertEquals(InferenceBackend.GPU, bridge.models.single().options.backend)
+        assertEquals(RuntimeSettings(Accelerator.GPU), runtime.runtimeSettings)
+        assertEquals(Accelerator.GPU, bridge.models.single().options.accelerator)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.GenerationConstraint
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKString
@@ -38,7 +39,7 @@ class LlamaCppGenerationTest {
     fun generatesFromARealModel() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 16, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 16, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
@@ -53,7 +54,7 @@ class LlamaCppGenerationTest {
     fun honoursAJsonSchemaConstraint() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 64, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 64, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {

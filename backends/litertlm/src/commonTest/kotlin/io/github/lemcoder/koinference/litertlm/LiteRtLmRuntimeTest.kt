@@ -2,7 +2,8 @@ package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.ModelConfig
+import io.github.lemcoder.koinference.Accelerator
 import io.github.lemcoder.koinference.PromptPart
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.litertlm.internal.DEFAULT_TEMPERATURE
@@ -32,13 +33,11 @@ class LiteRtLmRuntimeTest {
         bridge: FakeLiteRtLmBridge = this.bridge,
     ): LiteRtLmTextRuntime = LiteRtLmModelLoader(
         bridge = bridge,
-        cacheDir = null,
-        systemPrompt = "You are terse.",
-        settings = settings,
-        parameters = parameters,
-        nThreads = 0,
-        maxTokens = 0,
-        maxOutputTokens = 0,
+        config = ModelConfig(
+            systemPrompt = "You are terse.",
+            settings = settings,
+            parameters = parameters,
+        ),
     ).load(MODEL)
 
     @Test
@@ -144,16 +143,16 @@ class LiteRtLmRuntimeTest {
         runtime.generateResponse("one")
         val cpuEngine = bridge.engine
 
-        runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.GPU))
+        runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
         runtime.generateResponse("two")
 
         assertTrue(cpuEngine.closed, "the CPU engine was leaked")
         assertEquals(2, bridge.engines.size)
-        assertEquals(InferenceBackend.GPU, bridge.engine.options.backend)
+        assertEquals(Accelerator.GPU, bridge.engine.options.accelerator)
         assertEquals(MODEL, bridge.engine.options.modelPath)
         // The reported setting follows the engine rather than being a field that says GPU
         // while inference still runs on the CPU.
-        assertEquals(RuntimeSettings(InferenceBackend.GPU), runtime.runtimeSettings)
+        assertEquals(RuntimeSettings(Accelerator.GPU), runtime.runtimeSettings)
     }
 
     @Test
@@ -161,7 +160,7 @@ class LiteRtLmRuntimeTest {
         val runtime = runtime()
         runtime.generateResponse("one")
 
-        runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.CPU))
+        runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.CPU))
 
         assertEquals(1, bridge.engines.size)
         assertEquals(1, bridge.engine.conversations.size)
@@ -169,12 +168,12 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun aBackendThatCannotBeOpenedLeavesTheRuntimeUnloaded() = runTest {
-        val bridge = FakeLiteRtLmBridge(unavailable = InferenceBackend.GPU)
+        val bridge = FakeLiteRtLmBridge(unavailable = Accelerator.GPU)
         val runtime = runtime(bridge = bridge)
         runtime.generateResponse("one")
 
         val failure = assertFailsWith<IllegalStateException> {
-            runtime.updateRuntimeSettings(RuntimeSettings(InferenceBackend.GPU))
+            runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
         }
         assertTrue(failure.message!!.contains("loaded again"), failure.message!!)
 
@@ -186,16 +185,7 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun generatingAfterUnloadFails() = runTest {
-        val loader = LiteRtLmModelLoader(
-            bridge = bridge,
-            cacheDir = null,
-            systemPrompt = null,
-            settings = RuntimeSettings(),
-            parameters = GenerationParameters(),
-            nThreads = 0,
-            maxTokens = 0,
-            maxOutputTokens = 0,
-        )
+        val loader = LiteRtLmModelLoader(bridge = bridge, config = ModelConfig())
         val runtime = loader.load(MODEL)
         loader.unload(MODEL)
 
@@ -221,16 +211,7 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun unloadWaitsForAnInFlightGeneration() = runTest {
-        val loader = LiteRtLmModelLoader(
-            bridge = bridge,
-            cacheDir = null,
-            systemPrompt = null,
-            settings = RuntimeSettings(),
-            parameters = GenerationParameters(),
-            nThreads = 0,
-            maxTokens = 0,
-            maxOutputTokens = 0,
-        )
+        val loader = LiteRtLmModelLoader(bridge = bridge, config = ModelConfig())
         val runtime = loader.load(MODEL)
         // First turn opens the conversation, so the fake below is installed on a real one.
         runtime.generateResponse("warm up")
@@ -261,9 +242,9 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun startsOnTheBackendTheLoaderWasConfiguredWith() = runTest {
-        val runtime = runtime(settings = RuntimeSettings(InferenceBackend.GPU))
+        val runtime = runtime(settings = RuntimeSettings(Accelerator.GPU))
 
-        assertEquals(RuntimeSettings(InferenceBackend.GPU), runtime.runtimeSettings)
-        assertEquals(InferenceBackend.GPU, bridge.engines.single().options.backend)
+        assertEquals(RuntimeSettings(Accelerator.GPU), runtime.runtimeSettings)
+        assertEquals(Accelerator.GPU, bridge.engines.single().options.accelerator)
     }
 }

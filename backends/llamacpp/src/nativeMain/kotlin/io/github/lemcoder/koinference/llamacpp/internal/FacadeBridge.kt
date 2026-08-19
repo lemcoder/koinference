@@ -4,7 +4,7 @@ package io.github.lemcoder.koinference.llamacpp.internal
 
 import cnames.structs.KoiModel
 import cnames.structs.KoiSession
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import koinference.KoiSessionParams
 import koinference.koi_backend_init
 import koinference.koi_generate
@@ -50,9 +50,9 @@ private object FacadeBridge : LlamaCppBridge {
         backendInit
         val handle = koi_model_load(
             options.modelPath,
-            when (options.backend) {
-                InferenceBackend.CPU -> 0
-                InferenceBackend.GPU -> ALL_GPU_LAYERS
+            when (options.accelerator) {
+                Accelerator.CPU -> 0
+                Accelerator.GPU -> ALL_GPU_LAYERS
             },
         )
         checkNotNull(handle) { "llama.cpp could not load ${options.modelPath}" }

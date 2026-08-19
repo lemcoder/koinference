@@ -1,8 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.ModelLoader
-import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
@@ -14,32 +13,15 @@ import kotlinx.coroutines.withContext
 /**
  * Loads GGUF models through llama.cpp.
  *
- * @param systemPrompt Applied to every generation this loader's runtimes perform.
- * @param settings     Backend the models start on; changeable per runtime afterwards, at the cost
- *                     of a reload.
- * @param parameters   Sampling defaults for the runtimes this loader returns.
- * @param nCtx         Context size in tokens; 0 uses the model's trained size.
- * @param nThreads     CPU threads; 0 lets the facade pick.
- * @param nPredict     Maximum tokens to generate; 0 uses the facade's default.
+ * [ModelConfig.cacheDir] is ignored: llama.cpp memory-maps the weights and keeps no prepared copy
+ * beside them.
  */
 class LlamaCppModelLoader internal constructor(
     private val bridge: LlamaCppBridge,
-    private val systemPrompt: String?,
-    private val settings: RuntimeSettings,
-    private val parameters: GenerationParameters,
-    private val nCtx: Int,
-    private val nThreads: Int,
-    private val nPredict: Int,
+    private val config: ModelConfig,
 ) : ModelLoader {
 
-    constructor(
-        systemPrompt: String? = null,
-        settings: RuntimeSettings = RuntimeSettings(),
-        parameters: GenerationParameters = GenerationParameters(),
-        nCtx: Int = 0,
-        nThreads: Int = 0,
-        nPredict: Int = 0,
-    ) : this(platformBridge(), systemPrompt, settings, parameters, nCtx, nThreads, nPredict)
+    constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
     private val runtimes = mutableMapOf<String, LlamaCppRuntime>()
 
@@ -71,18 +53,18 @@ class LlamaCppModelLoader internal constructor(
     }
 
     private suspend fun newRuntime(modelPath: String): LlamaCppRuntime {
-        val options = ModelOptions(modelPath = modelPath, backend = settings.backend)
+        val options = ModelOptions(modelPath = modelPath, accelerator = config.settings.accelerator)
         // mmap or not, loading touches the file and can take seconds on a large model.
         val model = withContext(Dispatchers.Default) { bridge.openModel(options) }
         return LlamaCppRuntime(
             bridge = bridge,
             modelOptions = options,
-            systemPrompt = systemPrompt,
+            systemPrompt = config.systemPrompt,
             model = model,
-            nCtx = nCtx,
-            nThreads = nThreads,
-            nPredict = nPredict,
-            parameters = parameters,
+            nCtx = config.contextTokens,
+            nThreads = config.threads,
+            nPredict = config.maxOutputTokens,
+            parameters = config.parameters,
         )
     }
 }

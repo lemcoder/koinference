@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4
@@ -47,9 +47,9 @@ private object JniBridge : LlamaCppBridge {
         backendInit
         val handle = kniBridge3(
             options.modelPath,
-            when (options.backend) {
-                InferenceBackend.CPU -> 0
-                InferenceBackend.GPU -> ALL_GPU_LAYERS
+            when (options.accelerator) {
+                Accelerator.CPU -> 0
+                Accelerator.GPU -> ALL_GPU_LAYERS
             },
         )
         check(handle != 0L) { "llama.cpp could not load ${options.modelPath}" }

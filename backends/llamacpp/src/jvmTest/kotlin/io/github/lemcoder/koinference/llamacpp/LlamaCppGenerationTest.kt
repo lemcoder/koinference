@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
 import kotlinx.coroutines.test.runTest
@@ -47,7 +48,7 @@ class LlamaCppGenerationTest {
     fun `generates from a real model`() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 16, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 16, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
@@ -62,7 +63,7 @@ class LlamaCppGenerationTest {
     fun `honours a json schema constraint`() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 64, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 64, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
@@ -101,7 +102,7 @@ class LlamaCppGenerationTest {
     fun `changing generation parameters rebuilds the session`() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 8, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 8, contextTokens = 256))
         val runtime = loader.load(path) as LlamaCppRuntime
         try {
             runtime.generateResponse("Once upon a time")

@@ -66,6 +66,7 @@ object BenchmarkArguments {
                 quantization = arguments["quantization"] ?: quantizationOf(modelPath),
                 sha256 = arguments["modelSha256"],
                 maxContextTokens = arguments["maxContextTokens"]?.toIntOrNull() ?: 0,
+                cacheDir = arguments["cacheDir"],
                 threads = arguments["threads"]?.toIntOrNull() ?: 0,
                 useGpu = arguments["gpu"]?.toBooleanStrictOrNull() ?: false,
             ),

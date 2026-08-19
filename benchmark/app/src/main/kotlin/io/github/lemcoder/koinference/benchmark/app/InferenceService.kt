@@ -69,6 +69,10 @@ class InferenceService : Service() {
                     threads = intent.getIntExtra(EXTRA_THREADS, 0),
                     contextTokens = intent.getIntExtra(EXTRA_CONTEXT_TOKENS, 0),
                     useGpu = intent.getBooleanExtra(EXTRA_GPU, false),
+                    // This process's own cache. A model may live on /data/local/tmp, which is
+                    // readable; the weight cache may not, and without a writable one a large
+                    // model rebuilds its prefill signatures on every load.
+                    cacheDir = intent.getStringExtra(EXTRA_CACHE_DIR) ?: cacheDir.absolutePath,
                 )
                 model = loaded
                 log("loaded ${loaded.modelId} on ${loaded.engineId} in ${loaded.modelLoadMs} ms")
@@ -131,6 +135,7 @@ class InferenceService : Service() {
         const val EXTRA_THREADS = "threads"
         const val EXTRA_CONTEXT_TOKENS = "contextTokens"
         const val EXTRA_GPU = "gpu"
+        const val EXTRA_CACHE_DIR = "cacheDir"
 
         const val DEFAULT_PORT = 8080
 

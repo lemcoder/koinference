@@ -49,7 +49,7 @@ class LiteRtLmRuntime internal constructor(
     // Derived rather than stored: the backend is a property of the engine, and a second copy
     // of it is a second thing that can be true while the engine says otherwise.
     override val runtimeSettings: RuntimeSettings
-        get() = RuntimeSettings(engineOptions.backend)
+        get() = RuntimeSettings(engineOptions.accelerator)
 
     // Conversations carry prefilled state, so one is opened per runtime and reused across
     // turns. Reopening it is how a parameter change takes effect, since the sampler is fixed
@@ -131,10 +131,10 @@ class LiteRtLmRuntime internal constructor(
      */
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
         guard.whileOpen {
-            if (settings.backend == engineOptions.backend) return@whileOpen
+            if (settings.accelerator == engineOptions.accelerator) return@whileOpen
 
             releaseConversation()
-            val reopened = engineOptions.copy(backend = settings.backend)
+            val reopened = engineOptions.copy(accelerator = settings.accelerator)
             withContext(Dispatchers.Default) {
                 engine.close()
                 try {
@@ -143,7 +143,7 @@ class LiteRtLmRuntime internal constructor(
                 } catch (failure: Throwable) {
                     guard.markClosed()
                     throw IllegalStateException(
-                        "Could not reopen ${reopened.modelPath} on ${settings.backend}; " +
+                        "Could not reopen ${reopened.modelPath} on ${settings.accelerator}; " +
                             "the runtime is unloaded and has to be loaded again",
                         failure,
                     )

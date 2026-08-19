@@ -1,21 +1,25 @@
 package io.github.lemcoder.koinference.benchmark.app
 
 import android.os.SystemClock
+import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.BackendRegistry
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.ModelLoader
+import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.StreamingTextRuntime
-import io.github.lemcoder.koinference.litertlm.LiteRtLmModelLoader
-import io.github.lemcoder.koinference.llamacpp.LlamaCppModelLoader
+import io.github.lemcoder.koinference.litertlm.LiteRtLm
+import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import kotlinx.coroutines.flow.Flow
 import java.io.File
 
 /**
  * One model, loaded, with the engine that loaded it.
  *
- * The whole integration with the library is this file, and that is the point: pick a loader by
- * file extension, call `load`, call `streamResponse`. The server does not know what llama.cpp or
- * LiteRT-LM are, and adding a third engine means adding a branch to [loaderFor].
+ * The whole integration with the library is this file, and that is the point: let the registry
+ * pick the backend for the model, call `load`, call `streamResponse`. The server does not know
+ * what llama.cpp or LiteRT-LM are, and adding a third engine means adding it to [backends].
  */
 class LoadedModel private constructor(
     val engineId: String,
@@ -34,6 +38,10 @@ class LoadedModel private constructor(
     suspend fun unload() = loader.unload(modelPath)
 
     companion object {
+
+        /** The engines this app links. Adding one is adding it here. */
+        val backends = BackendRegistry(LlamaCpp, LiteRtLm)
+
         /**
          * @param maxNewTokens fixed for the life of the model, because both backends decide it
          *        when the model is loaded rather than per request. A request asking for a
@@ -46,61 +54,31 @@ class LoadedModel private constructor(
             threads: Int,
             contextTokens: Int,
             useGpu: Boolean,
+            cacheDir: String?,
         ): LoadedModel {
             require(File(modelPath).isFile) { "No model file at $modelPath" }
 
-            val (engineId, loader) = loaderFor(
-                modelPath = modelPath,
-                maxNewTokens = maxNewTokens,
-                parameters = parameters,
-                threads = threads,
-                contextTokens = contextTokens,
-                useGpu = useGpu,
+            // Which engine reads this container is the backend's own answer, not a branch here.
+            val backend = backends.requireForModel(modelPath)
+            val loader = backend.loader(
+                ModelConfig(
+                    settings = RuntimeSettings(
+                        accelerator = if (useGpu) Accelerator.GPU else Accelerator.CPU,
+                    ),
+                    parameters = parameters,
+                    contextTokens = contextTokens,
+                    maxOutputTokens = maxNewTokens,
+                    threads = threads,
+                    cacheDir = cacheDir,
+                ),
             )
 
             val start = SystemClock.elapsedRealtimeNanos()
             val runtime = loader.load(modelPath) as StreamingTextRuntime
             val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
 
-            return LoadedModel(engineId, modelPath, loadMs, loader, runtime)
+            return LoadedModel(backend.id, modelPath, loadMs, loader, runtime)
         }
 
-        private fun loaderFor(
-            modelPath: String,
-            maxNewTokens: Int,
-            parameters: GenerationParameters,
-            threads: Int,
-            contextTokens: Int,
-            useGpu: Boolean,
-        ): Pair<String, ModelLoader> = when {
-            modelPath.endsWith(".gguf") -> "llama.cpp" to LlamaCppModelLoader(
-                settings = runtimeSettings(useGpu),
-                nCtx = contextTokens,
-                nThreads = threads,
-                nPredict = maxNewTokens,
-            )
-
-            modelPath.endsWith(".litertlm") || modelPath.endsWith(".task") ->
-                "litert-lm" to LiteRtLmModelLoader(
-                    settings = runtimeSettings(useGpu),
-                    parameters = parameters,
-                    nThreads = threads,
-                    maxTokens = contextTokens,
-                    maxOutputTokens = maxNewTokens,
-                )
-
-            else -> throw IllegalArgumentException(
-                "No engine for $modelPath — expected .gguf, .litertlm or .task",
-            )
-        }
-
-        private fun runtimeSettings(useGpu: Boolean) =
-            io.github.lemcoder.koinference.RuntimeSettings(
-                backend = if (useGpu) {
-                    io.github.lemcoder.koinference.InferenceBackend.GPU
-                } else {
-                    io.github.lemcoder.koinference.InferenceBackend.CPU
-                },
-            )
     }
 }

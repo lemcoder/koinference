@@ -7,6 +7,6 @@ class ModelRuntimeConfigTest {
 
     @Test
     fun `runtime settings default to cpu backend`() {
-        assertEquals(InferenceBackend.CPU, RuntimeSettings().backend)
+        assertEquals(Accelerator.CPU, RuntimeSettings().accelerator)
     }
 }

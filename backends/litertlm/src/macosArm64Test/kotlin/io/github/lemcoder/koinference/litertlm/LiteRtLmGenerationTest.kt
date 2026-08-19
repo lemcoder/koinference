@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.litertlm
 
+import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.GenerationConstraint
 import io.github.lemcoder.koinference.GenerationParameters
 import kotlinx.cinterop.ExperimentalForeignApi
@@ -88,9 +89,7 @@ class LiteRtLmGenerationTest {
             // Greedy would prove nothing about the seed, so temperature stays high enough for
             // the sampler to have a choice to make.
             val replies = (1..2).map {
-                val loader = LiteRtLmModelLoader(
-                    parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40),
-                )
+                val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40)))
                 try {
                     loader.load(path).generateResponse("Name a colour.")
                 } finally {
@@ -115,9 +114,7 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(
-                parameters = GenerationParameters(temperature = 0.0),
-            )
+            val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0)))
             try {
                 val reply = loader.load(path).generateResponse("Name a colour.")
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
@@ -145,10 +142,7 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(
-                parameters = GenerationParameters(temperature = 0.0),
-                nThreads = 1,
-            )
+            val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0), threads = 1))
             try {
                 val runtime = loader.load(path)
                 // Discarded: the first generation on a fresh engine is the odd one out.
@@ -180,7 +174,7 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(systemPrompt = "You are terse.")
+            val loader = LiteRtLmModelLoader(ModelConfig(systemPrompt = "You are terse."))
             try {
                 val outcome = runCatching { loader.load(path).generateResponse("Say hello.") }
                 outcome.onSuccess { reply ->

@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.flow
  */
 internal class FakeLiteRtLmBridge(
     /** Opening an engine on this backend throws, standing in for a device without a GPU. */
-    private val unavailable: InferenceBackend? = null,
+    private val unavailable: Accelerator? = null,
 ) : LiteRtLmBridge {
 
     val engines = mutableListOf<FakeEngine>()
@@ -22,7 +22,7 @@ internal class FakeLiteRtLmBridge(
     val engine: FakeEngine get() = engines.last()
 
     override fun openEngine(options: EngineOptions): LiteRtLmEngine {
-        if (options.backend == unavailable) error("no ${options.backend} on this device")
+        if (options.accelerator == unavailable) error("no ${options.accelerator} on this device")
         return FakeEngine(options).also { engines += it }
     }
 }

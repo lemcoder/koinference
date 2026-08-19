@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
 import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -76,7 +76,7 @@ internal data class ModelOptions(
      * loaded model. A build with no GPU backend compiled in ignores the request rather than
      * failing, so GPU on such a target is CPU inference and not an error.
      */
-    val backend: InferenceBackend = InferenceBackend.CPU,
+    val accelerator: Accelerator = Accelerator.CPU,
 )
 
 internal data class SessionOptions(

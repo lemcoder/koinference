@@ -5,6 +5,8 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 ## Modules
 
 - `:core` — high-level common interfaces:
+  - `Backend` / `BackendRegistry` / `ModelConfig` — pick an engine and configure it without naming
+    its classes
   - `ModelLoader` (`load` / `unload` / `unloadAll`)
   - `TextRuntime` / `StreamingTextRuntime` / `TokenCounting` (generation, streaming, tokenizing)
   - `RuntimeGuard`, the locking and use-after-unload scaffolding every backend shares
@@ -12,8 +14,21 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
 
-Adding a third backend is documented in [docs/backends.md](docs/backends.md); both existing ones
-have the same shape on purpose.
+Backends are interchangeable by design — a consumer registers the ones it links and asks the
+registry, rather than naming an engine's classes:
+
+```kotlin
+val backends = BackendRegistry(LlamaCpp, LiteRtLm)
+
+val backend = backends.requireForModel(path)
+val runtime = backend.loader(ModelConfig(contextTokens = 512, maxOutputTokens = 128))
+    .load(path) as StreamingTextRuntime
+
+runtime.streamResponse("Once upon a time").collect(::print)
+```
+
+Adding a third backend is documented in [docs/backends.md](docs/backends.md); all of them have the
+same shape on purpose, and adding one touches no file in `:core`.
 
 Published to Maven Central as `io.github.lemcoder:koinference-core`, `…:koinference-llamacpp` and
 `…:koinference-litertlm`. Each backend depends on `:core` with `api`, so adding a backend is

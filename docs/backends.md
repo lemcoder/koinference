@@ -8,6 +8,30 @@ It is also where the *reasons* live. They used to sit in KDoc on the interfaces 
 is how the LiteRT-LM bridge spent a release telling readers that Android could not bind the C API
 months after it did.
 
+## Two seams, not one
+
+There is the seam a **consumer** sees — `Backend`, `ModelConfig`, `BackendRegistry` in `:core` —
+and the seam a **backend implementor** sees, below. A caller never names `LlamaCppModelLoader`:
+
+```kotlin
+val backends = BackendRegistry(LlamaCpp, LiteRtLm)
+
+val backend = backends.requireForModel(path)      // or requireById("llama.cpp")
+val runtime = backend.loader(ModelConfig(contextTokens = 512, maxOutputTokens = 128))
+    .load(path) as StreamingTextRuntime
+```
+
+`ModelConfig` is one vocabulary for knobs the engines spell differently — llama.cpp's
+`nCtx`/`nPredict` are LiteRT-LM's `maxTokens`/`maxOutputTokens`. A knob an engine has no
+equivalent for is **ignored, never approximated**, and `Backend.honours` states which ones those
+are so a caller can tell whether the seed it set was applied rather than finding out from an
+irreproducible run.
+
+`:core` does not enumerate backends and cannot: every backend depends on it. The registry is
+assembled by the consumer, which is the only place that knows which modules were linked. That is
+also why `id` is a `String` and not an enum — an enum would mean a new engine could not be added
+without editing `:core` and every exhaustive `when` over it, which is the opposite of the goal.
+
 ## The seam
 
 Three interfaces per backend, nested to match the lifetime nesting of what they wrap, plus one
@@ -101,8 +125,13 @@ generated functions is the cheaper trade.
 2. A `FacadeBridge.kt` and/or `JniBridge.kt` per leg.
 3. A runtime in `commonMain` that owns a `RuntimeGuard` and holds no platform types.
 4. A loader in `commonMain` with an `internal constructor` taking the bridge, and a public one
-   defaulting to `platformBridge()`. That constructor pair is what lets tests inject a fake.
-5. `FakeXBridge` in `commonTest`, and the runtime tests that go with it.
-6. If it should be benchmarkable: a `BenchmarkInferenceEngine` in `:benchmark:core`'s `Engines.kt`
-   and an entry in `availableEngines()`. Implement `applyWorkload` — both current engines fix
-   their output limit and sampler at load time, so the runner sets them before `initialize`.
+   taking a `ModelConfig` and defaulting to `platformBridge()`. That constructor pair is what lets
+   tests inject a fake. Map `ModelConfig`'s fields onto the engine's own names here — this is the
+   only place that should know both vocabularies.
+5. An `object X : Backend` — id, `handles`, `honours`, `loader`. Ten lines, and the only thing a
+   consumer needs to see.
+6. `FakeXBridge` in `commonTest`, and the runtime tests that go with it. Assert `honours` against
+   what the binding actually passes down; that set is a claim, and a wrong one is invisible at
+   run time.
+7. If it should be benchmarkable: add it to `benchmarkBackends` in `:benchmark:core`'s
+   `Engines.kt`. **No adapter to write** — `BackendEngine` adapts any `Backend`.

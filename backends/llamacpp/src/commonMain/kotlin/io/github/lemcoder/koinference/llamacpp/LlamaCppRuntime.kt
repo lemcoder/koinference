@@ -47,7 +47,7 @@ class LlamaCppRuntime internal constructor(
     // Derived rather than stored: where the model runs is a property of the loaded model, and a
     // second copy of it is a second thing that can be true while the model says otherwise.
     override val runtimeSettings: RuntimeSettings
-        get() = RuntimeSettings(modelOptions.backend)
+        get() = RuntimeSettings(modelOptions.accelerator)
 
     // The session owns the KV cache, the batch and the sampler, so it is opened once and reused.
     // Rebuilding it is how a parameter change takes effect, since the sampler is fixed when the
@@ -123,10 +123,10 @@ class LlamaCppRuntime internal constructor(
      */
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
         guard.whileOpen {
-            if (settings.backend == modelOptions.backend) return@whileOpen
+            if (settings.accelerator == modelOptions.accelerator) return@whileOpen
 
             releaseSession()
-            val reloaded = modelOptions.copy(backend = settings.backend)
+            val reloaded = modelOptions.copy(accelerator = settings.accelerator)
             withContext(Dispatchers.Default) {
                 model.close()
                 try {
@@ -135,7 +135,7 @@ class LlamaCppRuntime internal constructor(
                 } catch (failure: Throwable) {
                     guard.markClosed()
                     throw IllegalStateException(
-                        "Could not reload ${reloaded.modelPath} on ${settings.backend}; " +
+                        "Could not reload ${reloaded.modelPath} on ${settings.accelerator}; " +
                             "the runtime is unloaded and has to be loaded again",
                         failure,
                     )

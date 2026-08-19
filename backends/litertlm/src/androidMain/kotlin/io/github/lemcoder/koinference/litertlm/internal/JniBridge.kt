@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge10
@@ -49,11 +49,11 @@ private object JniBridge : LiteRtLmBridge {
         val handle = kniBridge1(
             options.modelPath,
             options.cacheDir,
-            when (options.backend) {
+            when (options.accelerator) {
                 // The cinterop leg imports these from the generated bindings; the JNI leg has no
                 // such bindings, so BackendId mirrors the header. BackendIdTest fails if they drift.
-                InferenceBackend.GPU -> BackendId.GPU
-                InferenceBackend.CPU -> BackendId.CPU
+                Accelerator.GPU -> BackendId.GPU
+                Accelerator.CPU -> BackendId.CPU
             },
             options.nThreads,
             options.maxTokens,

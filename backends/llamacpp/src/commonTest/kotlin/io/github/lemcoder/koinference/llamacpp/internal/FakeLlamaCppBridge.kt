@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.flow
  */
 internal class FakeLlamaCppBridge(
     /** Loading a model on this backend throws, standing in for a device without a GPU. */
-    private val unavailable: InferenceBackend? = null,
+    private val unavailable: Accelerator? = null,
 ) : LlamaCppBridge {
 
     val models = mutableListOf<FakeModel>()
@@ -32,7 +32,7 @@ internal class FakeLlamaCppBridge(
     var reply: (String) -> String = { "reply to $it" }
 
     override fun openModel(options: ModelOptions): LlamaCppModel {
-        if (options.backend == unavailable) error("no ${options.backend} on this device")
+        if (options.accelerator == unavailable) error("no ${options.accelerator} on this device")
         return FakeModel(options, reply).also { models += it }
     }
 

@@ -4,7 +4,7 @@ package io.github.lemcoder.koinference.litertlm.internal
 
 import cnames.structs.KoiLmConversation
 import cnames.structs.KoiLmEngine
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.Accelerator
 // The cinterop package is named after the .def file, not the interop, so it is
 // koinference_litertlm rather than koinferenceLiteRtLm.
 import koinference_litertlm.KOILM_BACKEND_CPU
@@ -51,9 +51,9 @@ private object FacadeBridge : LiteRtLmBridge {
             options.cacheDir,
             // toInt: cinterop gives an anonymous C enum's constants as UInt, and the
             // parameter they are for is a plain int.
-            when (options.backend) {
-                InferenceBackend.CPU -> KOILM_BACKEND_CPU
-                InferenceBackend.GPU -> KOILM_BACKEND_GPU
+            when (options.accelerator) {
+                Accelerator.CPU -> KOILM_BACKEND_CPU
+                Accelerator.GPU -> KOILM_BACKEND_GPU
             }.toInt(),
             options.nThreads,
             options.maxTokens,
