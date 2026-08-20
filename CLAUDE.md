@@ -6,6 +6,12 @@ is not visible from the code.
 
 ## Three rules, learned the hard way in one session
 
+Rules 1 and 3 are enforced by Konsist in `core/src/jvmTest/.../architecture/`, and so is the
+checkable half of rule 2 — prose alone did not stop this session breaking all three. The tests were
+verified by breaking each rule on purpose and watching them fail, because an architecture test that
+cannot fail is decoration. What Konsist cannot see is C, so the rest of rule 2 stays a judgement
+call.
+
 **Do not create source sets to share code.** Not `jvmSharedMain`, not an `appleMain` that exists
 only so two legs can avoid duplicating a file. `JniBridge.kt` is byte-identical in `jvmMain` and
 `androidMain` and stays that way; so does `CpuPlacement*.kt`. Duplication is the cheaper trade here,
@@ -17,7 +23,10 @@ sets the KMP default hierarchy already provides — `macosMain`, `iosMain`, `lin
 `jvmMain` — are there to be used when platforms genuinely differ, which is the next rule. Adding one
 to deduplicate is what is banned.
 
-**If it can be Kotlin, it is Kotlin.** C is for reaching the engine, not for logic. The CPU
+**If it can be Kotlin, it is Kotlin.** C is for reaching the engine, not for logic. `NativeSeamTest`
+enforces the half of this that is mechanical: `koi_*`, `koilm_*` and `kniBridge*` may be named only
+by the binding files, plus the two tests that exist to compare the two sides of the boundary. Once a
+native symbol appears in a runtime, logic and marshalling have begun to mix. The CPU
 placement heuristic lived in the facade for a while and the only way to learn what it had decided
 was to infer it from throughput; moved to `CpuPlacementPolicy` it gained eleven tests against
 topologies nobody here owns. Where a platform API is needed, reach it from Kotlin —

@@ -27,5 +27,11 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
+        // Konsist is JVM-only and scans the whole repository from here. It is a test dependency, so
+        // it does not reach the published artifact; :core is simply the module with a jvm target and
+        // no native prerequisites, which makes `:core:jvmTest` the cheapest place to run it.
+        jvmTest.dependencies {
+            implementation(libs.konsist)
+        }
     }
 }
