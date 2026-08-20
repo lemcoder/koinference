@@ -129,11 +129,26 @@ So the native leg's policy is "do not pin, run `cores - 2` workers", which is 8 
 145 as the default. It is deliberately *not* the Android answer, and the two should not be made to
 match.
 
-**Both halves of the decision live in the platform leg**, which is the point: the mask and the
-worker count are one choice, and it differs per platform. `platformCpuPlacement()` returns both, and
-the runtime opens the session with the count it was given. The facade keeps a `cores - 2` fallback
-only for a caller reaching the C API directly — the Kotlin bindings never rely on it, so there is no
-second rule in C to drift from the tested one.
+**Every platform has its own policy**, as an actual of one `expect` in commonMain. Both halves of
+the decision — the mask and the worker count — travel together because they are one choice:
+
+| leg | pins | workers | measured on |
+|---|---|---|---|
+| `androidMain` | the big cluster | one per pinned core | Pixel 8a, 5.8 → 38 tok/s |
+| `macosMain` | no, Darwin ignores affinity | `cores - 2` | M4, 120 → 144 tok/s |
+| `iosMain` | no, same as macOS | `cores - 2` | **nothing** — see below |
+| `linuxMain` | the big cluster, same rule as Android | one per pinned core | **nothing** |
+| `jvmMain` | the big cluster when the files are there | one per pinned core | — |
+
+The two unmeasured legs are marked as such in their own source. `iosMain` is deliberately not shared
+with `macosMain` through `appleMain`: an iPhone's split is narrower (2 performance cores against 4
+efficiency, where the M4 has 4 against 6), so `cores - 2` may not hold, and keeping the file separate
+means it can change without touching a platform where the number is known. `linuxMain` reuses the
+Android rule rather than inventing one, and self-disables on a machine with one kind of core.
+
+`sysconf` is called from Kotlin through `platform.posix`; none of this is our C. The facade keeps a
+`cores - 2` fallback purely for a caller reaching the C API directly — every Kotlin binding supplies
+a count, so there is no second rule in C to drift from the tested one.
 
 `KOI_BENCH_THREADS` sweeps it: `KOI_TEST_GGUF=… KOI_BENCH_THREADS=8 ./gradlew
 :benchmark:core:macosArm64Test --rerun-tasks`.

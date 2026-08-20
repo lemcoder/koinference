@@ -61,15 +61,12 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * using.
  */
 /**
- * Last-resort worker count, for a caller that reaches this facade directly.
+ * Worker count when the caller passes none.
  *
- * The Kotlin bindings never rely on it: each platform's `platformCpuPlacement()` decides the count
- * along with the mask and passes it in, because the two are one decision and it differs per
- * platform — one worker per big core on Android, `cores - 2` on Darwin, measured on both. Keeping a
- * rule here as well would mean two implementations drifting.
- *
- * `cores - 2` because that is the better of the two when nothing is pinned, which is the situation
- * a direct C caller is most likely in.
+ * Every Kotlin binding supplies one — each platform's `platformCpuPlacement()` decides it along
+ * with the mask, because the two are one choice and it differs per platform. This exists only for a
+ * caller reaching the C API directly, and is deliberately the dumbest thing that works rather than
+ * a second copy of a rule that is tested elsewhere.
  */
 static int detect_decode_threads() {
     const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
