@@ -17,19 +17,26 @@ import kotlin.test.assertTrue
 class NativeSeamTest {
 
     /**
-     * Files allowed to name native symbols.
-     *
-     * The bindings, and the tests whose entire purpose is to compare the two sides of the boundary:
-     * `SessionDefaultsTest` checks the hand-written Kotlin sampler defaults against
+     * Two tests are allowed to name native symbols because comparing the two sides is their whole
+     * purpose: `SessionDefaultsTest` checks the hand-written Kotlin sampler defaults against
      * `koilm_default_session_params()`, and `BackendIdTest` checks the hand-written backend ids
-     * against the generated enum. Those exist because the values are duplicated on purpose — only
+     * against the generated enum. Both exist because those values are duplicated on purpose — only
      * the cinterop leg gets generated constants — and they are what stops the copies drifting.
      */
-    private val bindingFiles = setOf(
-        "LlamaCppBridge.jvm.kt", "LlamaCppBridge.android.kt", "LlamaCppBridge.native.kt",
-        "LiteRtLmBridge.android.kt", "LiteRtLmBridge.native.kt",
+    private val boundaryTests = setOf(
         "LlamaCppBridgeJvmSmokeTest.kt", "SessionDefaultsTest.kt", "BackendIdTest.kt",
     )
+
+    /**
+     * A binding file, by name rather than by an exhaustive list.
+     *
+     * `Jni*`/`Facade*` are the per-leg implementations and `*Bridge.<platform>.kt` are the actuals
+     * that hand them out. A list of exact names had to be edited every time a binding was split
+     * into another file, which is churn that says nothing — the invariant is that native symbols
+     * stay inside the bindings, not that there are exactly eleven of them.
+     */
+    private fun isBinding(name: String) =
+        name.startsWith("Jni") || name.startsWith("Facade") || Regex("""Bridge\.\w+\.kt$""").containsMatchIn(name)
 
     @Test
     fun `native symbols are named only by the binding files`() {
@@ -42,7 +49,7 @@ class NativeSeamTest {
                         import.name.contains(".kniCString")
                 }
             }
-            .filterNot { it.basename() in bindingFiles }
+            .filterNot { isBinding(it.basename()) || it.basename() in boundaryTests }
             .map { "${it.name} (${it.sourceSetName})" }
 
         assertTrue(

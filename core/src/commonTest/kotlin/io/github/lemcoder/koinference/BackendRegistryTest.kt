@@ -6,15 +6,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private class FakeBackend(
-    override val id: String,
-    private val extensions: List<String>,
-    override val honours: Set<SamplingKnob> = emptySet(),
-) : Backend {
-    override fun handles(modelPath: String) = extensions.any { modelPath.endsWith(it) }
-    override fun loader(config: ModelConfig): ModelLoader = error("not needed")
-}
-
 class BackendRegistryTest {
 
     private val gguf = FakeBackend("llama.cpp", listOf(".gguf"))
@@ -62,23 +53,5 @@ class BackendRegistryTest {
         // `engine=all` runs them in this order, and a benchmark's first engine is the only one
         // that sees an untouched process.
         assertEquals(listOf("llama.cpp", "litert-lm"), registry.ids)
-    }
-}
-
-class ModelConfigTest {
-
-    @Test
-    fun defaultsLeaveEveryEngineChoiceAlone() {
-        // 0 and null mean "the engine's own", so an unset field never imposes a value that
-        // happens to be this library's opinion.
-        val config = ModelConfig()
-
-        assertEquals(0, config.contextTokens)
-        assertEquals(0, config.maxOutputTokens)
-        assertEquals(0, config.threads)
-        assertNull(config.systemPrompt)
-        assertNull(config.cacheDir)
-        assertEquals(Accelerator.CPU, config.settings.accelerator)
-        assertEquals(GenerationParameters(), config.parameters)
     }
 }

@@ -25,30 +25,5 @@ import platform.posix.fopen
  * new guess, and it self-disables where there is no split to act on.
  */
 internal actual fun platformCpuPlacement(): CpuPlacementSource = CpuPlacementPolicy(PosixSystemFiles)
-
-private object PosixSystemFiles : SystemFiles {
-
-    /**
-     * Read a whole small text file.
-     *
-     * Line by line rather than seeking to the end for a length: /proc and /sys report a size of
-     * zero, so anything that trusts the file length reads nothing. These files are a few hundred
-     * bytes.
-     */
-    override fun read(path: String): String? = memScoped {
-        val file = fopen(path, "r") ?: return null
-        try {
-            val buffer = allocArray<ByteVar>(LINE_BYTES)
-            val text = StringBuilder()
-            while (fgets(buffer, LINE_BYTES, file) != null) {
-                text.append(buffer.toKString())
-            }
-            text.toString()
-        } finally {
-            fclose(file)
-        }
-    }
-}
-
 /** /proc/cpuinfo has the longest lines here, well inside this. */
-private const val LINE_BYTES = 512
+internal const val LINE_BYTES = 512

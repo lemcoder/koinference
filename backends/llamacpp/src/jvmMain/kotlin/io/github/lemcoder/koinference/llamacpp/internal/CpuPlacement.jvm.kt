@@ -14,9 +14,3 @@ import java.io.File
  * `expect` it answers and for which platform, which `ActualFileNamingTest` enforces.
  */
 internal actual fun platformCpuPlacement(): CpuPlacementSource = CpuPlacementPolicy(JvmSystemFiles)
-
-private object JvmSystemFiles : SystemFiles {
-    // readText, not readBytes: /proc and /sys report a size of zero, so anything that trusts the
-    // file length reads nothing.
-    override fun read(path: String): String? = runCatching { File(path).readText() }.getOrNull()
-}

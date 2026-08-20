@@ -23,11 +23,9 @@ internal fun firstParty(): List<KoFileDeclaration> = Konsist.scopeFromProject()
  */
 internal fun KoFileDeclaration.declarationsWithActual(): List<Pair<String, String>> =
     named { it.hasActualModifier }
-
 internal fun KoFileDeclaration.declarationsWithExpect(): List<Pair<String, String>> =
     named { it.hasExpectModifier }
-
-private fun KoFileDeclaration.named(
+internal fun KoFileDeclaration.named(
     predicate: (Modifiers) -> Boolean,
 ): List<Pair<String, String>> {
     val functions = functions().filter { predicate(Modifiers(it.hasActualModifier, it.hasExpectModifier)) }
@@ -38,12 +36,15 @@ private fun KoFileDeclaration.named(
         .map { it.name to sourceSetName }
     return functions + classes + properties
 }
-
-/** The two modifiers this file cares about, so one predicate can serve all three declaration kinds. */
-internal data class Modifiers(val hasActualModifier: Boolean, val hasExpectModifier: Boolean)
-
+/**
+ * Names of the top-level classes, interfaces, objects and enums a file declares.
+ *
+ * Top level only: nested types belong to their parent, and a companion object is part of its class,
+ * so neither counts against the one-type-per-file rule.
+ */
+internal fun KoFileDeclaration.topLevelTypeNames(): List<String> =
+    (classes() + interfaces() + objects()).filter { it.isTopLevel }.mapNotNull { it.name }
 /** The file name, without its directories. */
 internal fun KoFileDeclaration.basename(): String =
     path.replace('\\', '/').substringAfterLast('/')
-
-private val VENDORED = listOf("/.cpm/", "/build/", "/.prebuilt/", "/.gradle/", "/.codegraph/")
+internal val VENDORED = listOf("/.cpm/", "/build/", "/.prebuilt/", "/.gradle/", "/.codegraph/")

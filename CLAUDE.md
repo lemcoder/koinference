@@ -290,6 +290,13 @@ paragraph used to say the opposite — that the AAR carried no `.so` and the run
 transitively from `api(libs.litertlm.android)` — which was true of the SDK leg and survived its
 deletion by two releases. There is no Maven runtime dependency now.
 
+**One top-level class, interface, object or enum per file, named after it.** `OneTypePerFileTest`
+enforces both halves. `BenchmarkResult.kt` used to hold thirteen types and `OpenAiApi.kt` twelve, so
+finding `ThermalSample` meant knowing which grab-bag it lived in; twenty-three files were like that.
+Nested declarations are untouched — `PromptPart.Text` belongs inside its sealed parent — and
+top-level functions may sit alongside a type, which is what lets `CpuPlacement.kt` hold both the
+type and the `expect fun` the naming rule below requires to be there.
+
 **A file holding actuals is named `<Expect>.<platform>.kt`** — `CpuPlacement.kt` in commonMain is
 answered by `CpuPlacement.android.kt`, `CpuPlacement.macos.kt` and so on. `ActualFileNamingTest`
 enforces it, including that a commonMain file of that name exists.
