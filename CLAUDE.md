@@ -4,6 +4,38 @@ Things that cost time to discover. The README covers layout and commands, `docs/
 covers the shape both backends share and what a third one has to fill in; this is the stuff that
 is not visible from the code.
 
+## Three rules, learned the hard way in one session
+
+**Do not create source sets to share code.** Not `jvmSharedMain`, not an `appleMain` that exists
+only so two legs can avoid duplicating a file. `JniBridge.kt` is byte-identical in `jvmMain` and
+`androidMain` and stays that way; so does `CpuPlacement*.kt`. Duplication is the cheaper trade here,
+and for the JNI bridges an intermediate source set cannot even work — the generated `…jni` functions
+land in each target's own source set, so a shared parent would not see them.
+
+This is about *purpose*, not about which directories exist. The per-target and per-family source
+sets the KMP default hierarchy already provides — `macosMain`, `iosMain`, `linuxMain`, `androidMain`,
+`jvmMain` — are there to be used when platforms genuinely differ, which is the next rule. Adding one
+to deduplicate is what is banned.
+
+**If it can be Kotlin, it is Kotlin.** C is for reaching the engine, not for logic. The CPU
+placement heuristic lived in the facade for a while and the only way to learn what it had decided
+was to infer it from throughput; moved to `CpuPlacementPolicy` it gained eleven tests against
+topologies nobody here owns. Where a platform API is needed, reach it from Kotlin —
+`sysconf(_SC_NPROCESSORS_ONLN)` is in `platform.posix`, `/proc` and `/sys` are `File.readText()`.
+Every rule that ends up in C is a rule that has to be kept in step with the Kotlin one, and they
+drift: `detect_decode_threads` and the Kotlin policy disagreed for most of a session, which cost
+macOS 20% silently.
+
+**If it is not identical on every platform, it is `expect`/`actual` — per platform, not per family.**
+Splitting four ways where three would compile is correct when the fourth is genuinely different, and
+"mac and iOS are both Apple" is not a reason to share. CPU placement is five actuals: Android pins
+its big cluster, macOS cannot pin at all and wants `cores - 2`, iOS cannot pin either but its 2/4
+core split is nothing like an M4's 4/6 so the number is not known to transfer, Linux *can* pin and
+was silently getting the Darwin answer while it sat in a shared `nativeMain`, and the JVM cannot know
+at compile time which of the two it is running on. A shared implementation hid a real bug in one of
+those five. When a leg is unmeasured, say so in that leg's own source rather than letting it inherit
+a comment about hardware it has never run on.
+
 ## The native seam
 
 CMake owns the native build. The Konan plugin only *generates* the JNI bindings and the `.c` stub —
@@ -255,12 +287,6 @@ across source sets while that seam was expect/actual functions — and stopped w
 became interfaces. Adding one `const` to the common bridge produced `Duplicate JVM class name …
 LiteRtLmBridgeKt`. Hence platform files are named after their binding — `FacadeBridge.kt`,
 `JniBridge.kt` — and never after the common file they implement. Both backends follow this now.
-
-**Do not add a shared jvm/android source set.** `JniBridge.kt` is byte-identical in `jvmMain` and
-`androidMain`, and so is `GgufFileSource.kt`, and that duplication stays. The generated
-`…jni` bridges are produced per compilation into each target's own source set, so an intermediate
-source set holding the hand-written actual would not see them. Two copies of a file that only
-calls generated functions is cheaper than a source-set layout that fights the generator.
 
 **The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
 follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer

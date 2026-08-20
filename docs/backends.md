@@ -107,7 +107,7 @@ A commonMain file with any top-level declaration collides with a same-named plat
 which is why a shared name worked while the seam was expect/actual functions and stopped working
 the moment the seam became interfaces.
 
-## No shared jvm/android source set
+## No source sets for sharing; per-platform source sets for differences
 
 `JniBridge.kt` is byte-identical in `jvmMain` and `androidMain`, and `GgufFileSource.kt` is
 byte-identical too. **Keep both copies. Do not add an intermediate source set for them.**
@@ -117,6 +117,11 @@ JVM target, the Android interop for each ABI — into each target's own source s
 `jvmSharedMain` holding the hand-written actual would not see them, so the dedup that looks free
 costs a source-set layout that fights the generator. Two copies of a file that only calls
 generated functions is the cheaper trade.
+
+The reverse is also a rule: where platforms genuinely differ, use a source set *per platform* rather
+than per family. `platformCpuPlacement()` has five actuals — `androidMain`, `jvmMain`, `macosMain`,
+`iosMain`, `linuxMain` — because all five want different answers, and a shared `nativeMain`
+implementation was silently giving Linux the Darwin one. See the rules at the top of `CLAUDE.md`.
 
 ## Checklist
 
