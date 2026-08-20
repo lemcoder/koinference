@@ -290,6 +290,14 @@ paragraph used to say the opposite — that the AAR carried no `.so` and the run
 transitively from `api(libs.litertlm.android)` — which was true of the SDK leg and survived its
 deletion by two releases. There is no Maven runtime dependency now.
 
+**Types are grouped into sub-packages, and a package is not a pile.** `:core` is `backend` /
+`runtime` / `prompt`; `:benchmark:core` is `config` / `result` / `engine` / `platform` / `prompts` /
+`runner`; the app's OpenAI DTOs are `app.api`. `PackageLayoutTest` checks that a package matches its
+directory and that no single directory holds more than twenty files — a loose cap, there to catch
+the next dumping ground rather than to force a split at a number. It counts by package *and* source
+set, since that pair is what a directory is: `llamacpp.internal` spans seven source sets and looks
+like 39 files if you count it as one.
+
 **One top-level class, interface, object or enum per file, named after it.** `OneTypePerFileTest`
 enforces both halves. `BenchmarkResult.kt` used to hold thirteen types and `OpenAiApi.kt` twelve, so
 finding `ThermalSample` meant knowing which grab-bag it lived in; twenty-three files were like that.

@@ -1,12 +1,13 @@
 package io.github.lemcoder.koinference.benchmark
 
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.runTest
+import io.github.lemcoder.koinference.benchmark.runner.measureGeneration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 
 /**
  * The one function every reported number comes out of, tested directly.

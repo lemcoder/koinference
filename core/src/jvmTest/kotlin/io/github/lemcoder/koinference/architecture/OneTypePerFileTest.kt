@@ -1,5 +1,7 @@
 package io.github.lemcoder.koinference.architecture
 
+import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import kotlin.test.Test
 import kotlin.test.assertTrue
 

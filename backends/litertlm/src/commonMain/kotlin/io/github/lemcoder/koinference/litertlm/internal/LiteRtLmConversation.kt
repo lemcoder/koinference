@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.Accelerator
 import kotlinx.coroutines.flow.Flow
 
 /** One conversation over an engine, carrying its own prefilled state. */

@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
-import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.runtime.Accelerator
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge10

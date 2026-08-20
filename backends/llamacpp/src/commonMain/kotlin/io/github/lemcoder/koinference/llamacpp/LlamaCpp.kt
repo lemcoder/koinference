@@ -1,9 +1,10 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.Backend
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.ModelLoader
-import io.github.lemcoder.koinference.SamplingKnob
+import io.github.lemcoder.koinference.backend.Backend
+import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.backend.SamplingKnob
 
 /**
  * llama.cpp, as something a [io.github.lemcoder.koinference.BackendRegistry] can hold.

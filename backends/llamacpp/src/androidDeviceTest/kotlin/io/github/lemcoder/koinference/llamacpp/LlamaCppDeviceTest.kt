@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.runtime.GenerationParameters
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals

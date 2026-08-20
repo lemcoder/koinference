@@ -1,11 +1,11 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.Accelerator
-import io.github.lemcoder.koinference.PromptPart
-import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_MIN_P
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TEMPERATURE
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TOP_K

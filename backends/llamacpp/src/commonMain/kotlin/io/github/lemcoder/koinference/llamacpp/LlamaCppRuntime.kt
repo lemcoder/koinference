@@ -1,10 +1,10 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.PromptPart
-import io.github.lemcoder.koinference.RuntimeGuard
-import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.RuntimeGuard
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes

@@ -1,5 +1,10 @@
 package io.github.lemcoder.koinference.benchmark
 
+import io.github.lemcoder.koinference.benchmark.config.BenchmarkModelConfig
+import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
+import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
+import io.github.lemcoder.koinference.benchmark.engine.availableEngines
+import io.github.lemcoder.koinference.benchmark.engine.benchmarkBackends
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

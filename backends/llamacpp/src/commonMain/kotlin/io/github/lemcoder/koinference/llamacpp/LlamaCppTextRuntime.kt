@@ -1,11 +1,11 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.ModelRuntime
-import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.StreamingTextRuntime
-import io.github.lemcoder.koinference.TextRuntime
-import io.github.lemcoder.koinference.TokenCounting
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.ModelRuntime
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
+import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
+import io.github.lemcoder.koinference.runtime.TextRuntime
+import io.github.lemcoder.koinference.runtime.TokenCounting
 
 /**
  * What a loaded GGUF model can do.

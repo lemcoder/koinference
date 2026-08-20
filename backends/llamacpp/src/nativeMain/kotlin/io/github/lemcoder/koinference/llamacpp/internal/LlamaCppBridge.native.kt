@@ -4,7 +4,7 @@ package io.github.lemcoder.koinference.llamacpp.internal
 
 import cnames.structs.KoiModel
 import cnames.structs.KoiSession
-import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.runtime.Accelerator
 import koinference.KoiSessionParams
 import koinference.koi_backend_init
 import koinference.koi_generate

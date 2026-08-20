@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.GenerationConstraint
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKString
 import kotlinx.coroutines.test.runTest

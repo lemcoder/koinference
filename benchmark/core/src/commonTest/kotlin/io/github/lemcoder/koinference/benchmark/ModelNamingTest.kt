@@ -1,5 +1,7 @@
 package io.github.lemcoder.koinference.benchmark
 
+import io.github.lemcoder.koinference.benchmark.runner.modelIdOf
+import io.github.lemcoder.koinference.benchmark.runner.quantizationOf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

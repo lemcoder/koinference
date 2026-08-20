@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.litertlm.internal.FakeLiteRtLmBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async

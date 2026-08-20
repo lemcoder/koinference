@@ -4,7 +4,7 @@ package io.github.lemcoder.koinference.litertlm.internal
 
 import cnames.structs.KoiLmConversation
 import cnames.structs.KoiLmEngine
-import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.runtime.Accelerator
 // The cinterop package is named after the .def file, not the interop, so it is
 // koinference_litertlm rather than koinferenceLiteRtLm.
 import koinference_litertlm.KOILM_BACKEND_CPU

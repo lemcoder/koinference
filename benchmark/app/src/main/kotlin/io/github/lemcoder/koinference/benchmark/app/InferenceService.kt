@@ -9,7 +9,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.benchmark.platform.BenchmarkContext
+import io.github.lemcoder.koinference.runtime.GenerationParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,7 +51,7 @@ class InferenceService : Service() {
 
         // The harness's Android probe reads device facts through this; without it the
         // /koinference/device endpoint would report a device with every field null.
-        io.github.lemcoder.koinference.benchmark.BenchmarkContext.applicationContext = applicationContext
+        io.github.lemcoder.koinference.benchmark.platform.BenchmarkContext.applicationContext = applicationContext
 
         val port = intent.getIntExtra(EXTRA_PORT, DEFAULT_PORT)
         val bind = intent.getStringExtra(EXTRA_BIND) ?: DEFAULT_BIND

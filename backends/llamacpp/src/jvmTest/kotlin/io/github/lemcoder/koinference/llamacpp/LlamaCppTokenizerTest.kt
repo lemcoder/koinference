@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelConfig
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals

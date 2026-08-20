@@ -1,8 +1,8 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.FakeLlamaCppBridge
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test

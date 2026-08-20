@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.SamplingKnob
+import io.github.lemcoder.koinference.backend.SamplingKnob
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

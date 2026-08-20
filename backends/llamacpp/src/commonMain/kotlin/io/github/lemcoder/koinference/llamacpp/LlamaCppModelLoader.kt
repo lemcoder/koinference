@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.ModelLoader
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementSource
 import io.github.lemcoder.koinference.llamacpp.internal.platformCpuPlacement
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge

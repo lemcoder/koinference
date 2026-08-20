@@ -1,5 +1,9 @@
 package io.github.lemcoder.koinference
 
+import io.github.lemcoder.koinference.backend.Backend
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.backend.SamplingKnob
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

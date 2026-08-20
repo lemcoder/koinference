@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.ModelLoader
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
 import io.github.lemcoder.koinference.litertlm.internal.platformBridge

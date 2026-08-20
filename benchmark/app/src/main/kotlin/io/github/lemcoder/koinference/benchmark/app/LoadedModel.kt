@@ -1,14 +1,14 @@
 package io.github.lemcoder.koinference.benchmark.app
 
 import android.os.SystemClock
-import io.github.lemcoder.koinference.Accelerator
-import io.github.lemcoder.koinference.BackendRegistry
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.ModelConfig
-import io.github.lemcoder.koinference.ModelLoader
-import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.StreamingTextRuntime
+import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
+import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import kotlinx.coroutines.flow.Flow

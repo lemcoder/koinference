@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.benchmark
 
+import io.github.lemcoder.koinference.benchmark.config.BenchmarkArguments
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

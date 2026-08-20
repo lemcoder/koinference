@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference
 
+import io.github.lemcoder.koinference.backend.BackendRegistry
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

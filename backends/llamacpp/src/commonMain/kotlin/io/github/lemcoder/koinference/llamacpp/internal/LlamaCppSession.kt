@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.Accelerator
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.Accelerator
 import kotlinx.coroutines.flow.Flow
 
 /** One session over a model, owning the KV cache, the batch and the sampler. */
