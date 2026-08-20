@@ -9,7 +9,9 @@ import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_MIN_P
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TEMPERATURE
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TOP_K
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
 import io.github.lemcoder.koinference.llamacpp.internal.FakeLlamaCppBridge
+import io.github.lemcoder.koinference.llamacpp.internal.MutableMachine
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -42,8 +44,10 @@ class LlamaCppRuntimeTest {
         parameters: GenerationParameters = GenerationParameters(),
         settings: RuntimeSettings = RuntimeSettings(),
         bridge: FakeLlamaCppBridge = this.bridge,
+        placementPolicy: CpuPlacementPolicy = CpuPlacementPolicy(MutableMachine()),
     ) = LlamaCppModelLoader(
         bridge = bridge,
+        placementPolicy = placementPolicy,
         config = ModelConfig(
             systemPrompt = "You are terse.",
             settings = settings,
@@ -323,42 +327,43 @@ class LlamaCppRuntimeTest {
     }
 
     @Test
-    fun reportsThePlacementTheSessionActuallyHas() = runTest {
+    fun placesTheThreadsBeforeDecodingAndOnlyOnce() = runTest {
         val runtime = runtime()
 
-        // Read through to the session rather than echoing a request: the facade narrows the mask
-        // by the cpuset this process is in, which Kotlin cannot see.
-        assertEquals(listOf(4, 5, 6, 7), runtime.pinnedCpus())
+        runtime.generateResponse("one")
+        runtime.generateResponse("two")
+
+        // Chosen before the first decode, and not re-applied when the machine has not changed.
+        assertEquals(listOf(listOf(4, 5, 6, 7)), bridge.model.session.maskHistory)
     }
 
     @Test
-    fun repinningReachesTheSession() = runTest {
-        val runtime = runtime()
-        runtime.generateResponse("warm up")
+    fun repinsWhenTheUsableCpusChange() = runTest {
+        // A backgrounded app is confined to the little cluster, so a mask over the big one names
+        // cores it may no longer touch.
+        val machine = MutableMachine()
+        val runtime = loader(placementPolicy = CpuPlacementPolicy(machine)).load(MODEL)
 
-        runtime.pinToCpus(listOf(6, 7))
+        runtime.generateResponse("foreground")
+        machine.permitted = "0-3"
+        runtime.generateResponse("background")
 
-        assertEquals(listOf(listOf(6, 7)), bridge.model.session.maskHistory)
-        assertEquals(listOf(6, 7), runtime.pinnedCpus())
+        assertEquals(
+            listOf(listOf(4, 5, 6, 7), emptyList()),
+            bridge.model.session.maskHistory,
+        )
     }
 
     @Test
-    fun anEmptyMaskRestoresDefaultPlacement() = runTest {
+    fun aNewSessionIsPlacedAgain() = runTest {
         val runtime = runtime()
+        runtime.generateResponse("one")
 
-        runtime.pinToCpus(emptyList())
+        // The parameter change rebuilds the session, and a fresh pool starts unplaced.
+        runtime.updateGenerationParameters(GenerationParameters(topK = 1))
+        runtime.generateResponse("two")
 
-        assertEquals(emptyList(), runtime.pinnedCpus())
-    }
-
-    @Test
-    fun repinningAfterUnloadFails() = runTest {
-        val loader = loader()
-        val runtime = loader.load(MODEL)
-        loader.unload(MODEL)
-
-        // The session is freed; rebuilding a pool against it would be a use-after-free.
-        assertFailsWith<IllegalStateException> { runtime.pinToCpus(listOf(4, 5)) }
-        assertFailsWith<IllegalStateException> { runtime.pinnedCpus() }
+        assertEquals(listOf(listOf(4, 5, 6, 7)), bridge.model.session.maskHistory)
     }
 }
+

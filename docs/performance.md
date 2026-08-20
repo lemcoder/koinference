@@ -39,9 +39,15 @@ lone prime core is still excluded: one core 23% faster than four others waits at
 core of the mask, so the surplus goes unplaced — 6 threads against this phone's 4 big cores
 measured **0.6 tok/s**. The facade clamps `n_threads` to the mask size for that reason.
 
-### The mask is narrowed by what the app may use, and it is reported
+### The heuristic is Kotlin, tested, and re-decided per decode
 
-Two things a mask built from SoC topology cannot know, both handled in `detect_big_cores()`:
+`CpuPlacementPolicy` owns the whole rule. It reads the same files C used to, through an injectable
+`SystemFiles`, which is what lets it be tested against topologies nobody here owns — a three-cluster
+SoC, a machine whose cores all clock the same, an app confined to the little cluster. The facade is
+mechanism only now (`koi_session_set_cpu_mask`); it holds no second copy of the heuristic to drift
+from this one.
+
+Two things a mask built from SoC topology cannot know, both handled by the policy:
 
 - **Which cpuset the app is in.** On this phone `foreground` is `0-7` and `background` is `0-3`, so
   a mask naming cpu4-7 is entirely outside the permitted set for a backgrounded app — and
@@ -51,20 +57,28 @@ Two things a mask built from SoC topology cannot know, both handled in `detect_b
   offline under thermal pressure.
 
 If either leaves nothing, the session runs unpinned rather than pinned to cores it cannot have.
+
+**The decision is re-made immediately before every decode**, not once at load, because it expires:
+an app moved to the background is confined to the little cluster, and a mask chosen in the
+foreground then names cores it is forbidden from touching. Choosing costs a handful of small file
+reads and re-pinning only happens when the answer actually changed, so the steady state costs the
+reads and nothing else. A decode boundary is also the only safe moment — the pool is in use during
+one.
+
+Placement is not on the public API. Nothing outside `:backends:llamacpp` selects or reports it:
+LiteRT-LM manages its own threads and has no counterpart, so there is nothing to abstract over,
+and the benchmark does not need to know that llama.cpp pins anything.
 Frequency is also not always enough to separate clusters — some SoCs clock a big and a little core
 to the same ceiling — so a single frequency tier falls back to grouping by the `CPU part` id from
 `/proc/cpuinfo` (this device: `0xd46` A510, `0xd4d` A715, `0xd4e` X3).
 
-**The placement is in the results.** `engineMetadata.pinnedCpus` records what the facade actually
-did — `4,5,6,7` here — or `default` when unpinned, and is absent for an engine that exposes no
-placement. Those are three different answers and the schema keeps them apart. It matters because
-every heuristic above is validated on exactly one device; a results file from an unfamiliar
-topology now says which cores it ran on instead of leaving it to be inferred from timings.
-
-`LlamaCppTextRuntime` also lets a caller re-pin at run time — `pinToCpus` rebuilds the pool between
-decodes, under the runtime's guard. It sits on the backend rather than in `:core` because only this
-backend can answer it: LiteRT-LM manages its own threads and exposes no placement control, and
-`:core` holds what every backend does identically. There is **no evidence yet** that reacting to anything
+**`CpuPlacementDeviceTest` runs the policy on a real device.** The unit tests cover the branches
+against fake files; what they cannot check is whether those files exist and mean what the rule
+assumes on actual hardware — whether an app sandbox can read `/proc/self/status`, whether every core
+reports `cpuinfo_max_freq`, whether the numbers separate the clusters at all. The instrumented test
+asserts the properties that must hold on any device rather than a specific core list: every chosen
+core is in the cpuset and online, none is at the slowest frequency tier, and they all run at the
+same speed. There is **no evidence yet** that reacting to anything
 beats picking once at load; the mechanism exists so that question can be measured.
 
 ## KleidiAI: no effect on decode

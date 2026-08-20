@@ -15,7 +15,6 @@
 #include <cstring>
 #include <exception>
 #include <map>
-#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -62,157 +61,16 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * using.
  */
 /**
- * CPUs this process may run on that are also online.
+ * Fallback worker count when the caller does not say.
  *
- * Both halves matter. Android moves an app between cpusets — on a Pixel 8a `foreground` is 0-7 and
- * `background` is 0-3 — so a mask derived from the SoC's topology can name cores this process is
- * not allowed to touch, and pinning to one of those fails rather than degrading. Cores also go
- * offline under thermal pressure. Empty means "do not pin".
+ * Deliberately dumb. Choosing well needs the CPU topology intersected with the cpuset this process
+ * is in, and that heuristic lives in Kotlin — `CpuPlacementPolicy` — where it is one
+ * implementation and can be tested against topologies nobody here owns. This is only what happens
+ * when nothing above has an opinion.
  */
-static std::set<int> usable_cpus(int cores) {
-    std::set<int> usable;
-
-#if defined(__linux__)
-    cpu_set_t permitted;
-    CPU_ZERO(&permitted);
-    if (sched_getaffinity(0, sizeof(permitted), &permitted) == 0) {
-        for (int cpu = 0; cpu < cores && cpu < CPU_SETSIZE; ++cpu) {
-            if (CPU_ISSET(cpu, &permitted)) usable.insert(cpu);
-        }
-    }
-#endif
-
-    // No affinity information: assume every core and let the online check narrow it.
-    if (usable.empty()) {
-        for (int cpu = 0; cpu < cores; ++cpu) usable.insert(cpu);
-    }
-
-    FILE* online = std::fopen("/sys/devices/system/cpu/online", "r");
-    if (!online) return usable;
-    char spec[128] = {0};
-    const bool read = std::fgets(spec, sizeof(spec), online) != nullptr;
-    std::fclose(online);
-    if (!read) return usable;
-
-    // "0-3,5" — ranges and singletons, comma separated.
-    std::set<int> up;
-    const char* cursor = spec;
-    while (*cursor) {
-        char* mark = nullptr;
-        const long first = std::strtol(cursor, &mark, 10);
-        if (mark == cursor) break;
-        long last = first;
-        if (*mark == '-') {
-            cursor = mark + 1;
-            last = std::strtol(cursor, &mark, 10);
-        }
-        for (long cpu = first; cpu <= last; ++cpu) up.insert(static_cast<int>(cpu));
-        if (*mark != ',') break;
-        cursor = mark + 1;
-    }
-    if (up.empty()) return usable;
-
-    std::set<int> both;
-    for (int cpu : usable) {
-        if (up.count(cpu)) both.insert(cpu);
-    }
-    return both;
-}
-
-/** The `CPU part` field of /proc/cpuinfo per CPU — a core's microarchitecture id. */
-static std::map<int, std::string> cpu_parts(int cores) {
-    std::map<int, std::string> parts;
-    FILE* info = std::fopen("/proc/cpuinfo", "r");
-    if (!info) return parts;
-
-    char line[256];
-    int current = -1;
-    while (std::fgets(line, sizeof(line), info)) {
-        if (std::strncmp(line, "processor", 9) == 0) {
-            const char* colon = std::strchr(line, ':');
-            if (colon) current = std::atoi(colon + 1);
-        } else if (std::strncmp(line, "CPU part", 8) == 0 && current >= 0 && current < cores) {
-            const char* colon = std::strchr(line, ':');
-            if (colon) {
-                std::string id(colon + 1);
-                id.erase(0, id.find_first_not_of(" \t"));
-                id.erase(id.find_last_not_of(" \t\r\n") + 1);
-                parts[current] = id;
-            }
-        }
-    }
-    std::fclose(info);
-    return parts;
-}
-
-/**
- * The largest group of equally-capable cores this process may use, excluding the slowest group.
- *
- * Peak frequency is the primary signal, and not always sufficient — some SoCs clock a big and a
- * little core to the same ceiling — so a single frequency group falls back to microarchitecture.
- * Either way the first group is dropped and the largest of the rest wins: the biggest set of cores
- * that reach a barrier together, which is what ggml rewards. The lone prime core is deliberately
- * not it; one core 23% faster than four others still waits at the same barrier, and including it
- * measured worse.
- */
-static std::vector<int> detect_big_cores() {
-    const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
-    const std::set<int> usable = usable_cpus(cores);
-    if (usable.size() < 2) return {};
-
-    std::map<long, std::vector<int>> by_frequency;
-    for (int cpu : usable) {
-        char path[128];
-        std::snprintf(path, sizeof(path),
-                      "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
-        FILE* file = std::fopen(path, "r");
-        if (!file) continue;
-        long khz = 0;
-        const int read = std::fscanf(file, "%ld", &khz);
-        std::fclose(file);
-        if (read == 1 && khz > 0) by_frequency[khz].push_back(cpu);
-    }
-
-    std::map<std::string, std::vector<int>> by_part;
-    if (by_frequency.size() < 2) {
-        const std::map<int, std::string> parts = cpu_parts(cores);
-        for (int cpu : usable) {
-            const auto found = parts.find(cpu);
-            if (found != parts.end()) by_part[found->second].push_back(cpu);
-        }
-    }
-
-    // Neither signal separates the cores: one kind of core, nothing to avoid.
-    if (by_frequency.size() < 2 && by_part.size() < 2) return {};
-
-    const std::vector<int>* best = nullptr;
-    if (by_frequency.size() >= 2) {
-        auto tier = by_frequency.begin();
-        ++tier;  // std::map is ordered, so begin() is the slowest tier.
-        for (; tier != by_frequency.end(); ++tier) {
-            if (!best || tier->second.size() > best->size()) best = &tier->second;
-        }
-    } else {
-        auto tier = by_part.begin();
-        ++tier;
-        for (; tier != by_part.end(); ++tier) {
-            if (!best || tier->second.size() > best->size()) best = &tier->second;
-        }
-    }
-    return best ? *best : std::vector<int>{};
-}
-
 static int detect_decode_threads() {
-    const std::vector<int> big = detect_big_cores();
-    if (big.empty()) {
-        const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
-        return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
-    }
-    // The whole cluster, now that the workers are pinned to it. This used to be half of it, which
-    // was compensating for thread migration rather than for bandwidth: unpinned, 4 threads ran at
-    // 5-6 tok/s because one worker would land on a little core and every barrier waited for it.
-    // Pinned, the same 4 threads run at 30-40 and 2 run at 27.
-    return std::max(2, std::min(static_cast<int>(big.size()), MAX_DECODE_THREADS));
+    const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+    return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
 }
 
 struct KoiModel {
@@ -360,8 +218,6 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     session->batch           = llama_batch_init(BATCH_SIZE, 0, 1);
     session->chat_templates  = common_chat_templates_init(model->model, "");
     session->params          = params;
-
-    apply_cpu_mask(session, detect_big_cores(), n_threads);
 
     return session;
 }
@@ -617,16 +473,10 @@ int koi_session_set_cpu_mask(KoiSession* session, const int* cpus, int count) {
     if (!session || count < 0) return -1;
     if (count > 0 && !cpus) return -1;
 
-    // Only cores this process may actually use: a caller reading the SoC's topology cannot know
-    // which cpuset the app is in, and pinning outside it fails rather than degrading.
-    std::vector<int> requested;
-    if (count > 0) {
-        const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
-        const std::set<int> usable = usable_cpus(cores);
-        for (int i = 0; i < count; ++i) {
-            if (usable.count(cpus[i])) requested.push_back(cpus[i]);
-        }
-    }
+    // Taken as given. The caller chose these against /proc and /sys itself — see
+    // CpuPlacementPolicy — and re-deriving the same intersection here would be a second copy of a
+    // heuristic that has to agree with the first.
+    const std::vector<int> requested(cpus, cpus + count);
 
     // What the session was created with is the ceiling; the mask narrows it further.
     const int requested_threads = session->params.n_threads > 0

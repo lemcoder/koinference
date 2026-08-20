@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.ModelLoader
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
@@ -19,6 +20,7 @@ import kotlinx.coroutines.withContext
 class LlamaCppModelLoader internal constructor(
     private val bridge: LlamaCppBridge,
     private val config: ModelConfig,
+    private val placementPolicy: CpuPlacementPolicy = CpuPlacementPolicy(),
 ) : ModelLoader {
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
@@ -65,6 +67,7 @@ class LlamaCppModelLoader internal constructor(
             nThreads = config.threads,
             nPredict = config.maxOutputTokens,
             parameters = config.parameters,
+            placementPolicy = placementPolicy,
         )
     }
 }

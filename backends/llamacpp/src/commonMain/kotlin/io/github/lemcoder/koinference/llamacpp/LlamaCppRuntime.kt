@@ -8,6 +8,8 @@ import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacement
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppModel
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppSession
@@ -37,6 +39,7 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     parameters: GenerationParameters = GenerationParameters(),
+    private val placementPolicy: CpuPlacementPolicy = CpuPlacementPolicy(),
 ) : LlamaCppTextRuntime {
 
     private var modelOptions: ModelOptions = modelOptions
@@ -56,6 +59,10 @@ class LlamaCppRuntime internal constructor(
 
     private val guard = RuntimeGuard { modelOptions.modelPath }
 
+    // What the session is currently pinned to, so a re-evaluation that changes nothing costs
+    // nothing. Null until the first decode has placed the threads.
+    private var placement: CpuPlacement? = null
+
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
@@ -67,7 +74,9 @@ class LlamaCppRuntime internal constructor(
         return guard.whileOpen {
             withContext(Dispatchers.Default) {
                 val grammar = grammarFor(constraint)
-                currentSession().generate(systemPrompt, text, grammar)
+                val session = currentSession()
+                placeThreads(session)
+                session.generate(systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for ${modelOptions.modelPath}") }
             }
         }
@@ -86,7 +95,9 @@ class LlamaCppRuntime internal constructor(
         val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         return guard.streamWhileOpen {
             val grammar = grammarFor(constraint)
-            emitAll(currentSession().stream(systemPrompt, text, grammar))
+            val session = currentSession()
+            placeThreads(session)
+            emitAll(session.stream(systemPrompt, text, grammar))
         }
     }
 
@@ -144,29 +155,6 @@ class LlamaCppRuntime internal constructor(
         }
     }
 
-    /**
-     * CPUs the decode threads are pinned to.
-     *
-     * Reads through to the session, so it reports what the facade actually did rather than what
-     * was asked for — the placement is narrowed by the cpuset this process is in, which Kotlin
-     * cannot see.
-     */
-    override suspend fun pinnedCpus(): List<Int> = guard.whileOpen {
-        withContext(Dispatchers.Default) { currentSession().cpuMask() }
-    }
-
-    /**
-     * Re-pins the decode threads, under the guard.
-     *
-     * The guard is the point: rebuilding the pool while a generation is decoding into it would
-     * pull the workers out from beneath it, so this waits for the turn to finish instead.
-     */
-    override suspend fun pinToCpus(cpus: List<Int>) {
-        guard.whileOpen {
-            withContext(Dispatchers.Default) { currentSession().setCpuMask(cpus) }
-        }
-    }
-
     suspend fun readGgufMetadata(): GgufMetadata =
         GgufParser.parse(readFileBytes(modelOptions.modelPath))
 
@@ -188,7 +176,30 @@ class LlamaCppRuntime internal constructor(
     private fun currentSession(): LlamaCppSession =
         session ?: model
             .openSession(generationParameters.toSessionOptions(nCtx, nThreads, nPredict))
-            .also { session = it }
+            .also {
+                session = it
+                placement = null
+            }
+
+    /**
+     * Place the decode threads, re-deciding if the machine has changed underneath us.
+     *
+     * Called immediately before every decode rather than once at load, because the answer expires:
+     * Android moves an app between cpusets, so a mask chosen while in the foreground names cores
+     * the process is forbidden from touching once it is backgrounded — `foreground` is typically
+     * every core but the prime one, `background` the little cluster. Pinning to a forbidden core
+     * fails rather than degrading, so the pin has to be refreshed, and a decode boundary is the
+     * only safe moment: the pool is in use during one.
+     *
+     * Choosing is a handful of small file reads, and re-pinning only happens when the decision
+     * actually changed, so the steady state costs those reads and nothing else.
+     */
+    private fun placeThreads(session: LlamaCppSession) {
+        val chosen = placementPolicy.choose()
+        if (chosen == placement) return
+        session.setCpuMask(chosen.cpus)
+        placement = chosen
+    }
 
     private fun releaseSession() {
         session?.close()

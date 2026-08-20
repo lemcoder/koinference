@@ -34,26 +34,4 @@ interface LlamaCppTextRuntime : ModelRuntime, TextRuntime, StreamingTextRuntime,
 
     suspend fun updateRuntimeSettings(settings: RuntimeSettings)
 
-    /**
-     * CPUs the decode threads are pinned to, ascending; empty for the platform's default
-     * placement.
-     *
-     * Here rather than in `:core` because only this backend can answer it. LiteRT-LM manages its
-     * own threads and exposes no control over where they run, so an interface in `:core` would
-     * describe one implementer — and `:core` holds what every backend does identically. If a
-     * second engine ever gains placement control, that is the moment to promote this.
-     *
-     * Placement is not a detail on a big.LITTLE phone: a decode thread scheduled onto a little
-     * core makes every barrier wait for it, and one misplaced worker can halve throughput.
-     */
-    suspend fun pinnedCpus(): List<Int>
-
-    /**
-     * Pin the decode threads to [cpus], or pass an empty list for default placement.
-     *
-     * Suspends because it rebuilds the thread pool, and doing that under a running generation
-     * would pull the workers out from beneath it. CPUs this process may not use are dropped rather
-     * than honoured — an app's cpuset is not the SoC's topology.
-     */
-    suspend fun pinToCpus(cpus: List<Int>)
 }
