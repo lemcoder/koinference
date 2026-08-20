@@ -122,8 +122,17 @@ if (KOI_OPENCL)
                     "BUILD_TESTING OFF"
     )
 
+    # Out of the JNI output directory, which the Konan plugin points at jniLibs: built there it
+    # would be packaged into the AAR and shadow the vendor driver at run time. It is a link
+    # target, nothing more.
+    set_target_properties(OpenCL PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/opencl-link"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/opencl-link")
+
     set(OpenCL_INCLUDE_DIR "${OpenCL-Headers_SOURCE_DIR}" CACHE PATH "" FORCE)
-    set(OpenCL_LIBRARY     "$<TARGET_FILE:OpenCL>"        CACHE FILEPATH "" FORCE)
+    # The target name rather than its path: ggml links whatever this holds, and a bare target
+    # name gives CMake the dependency edge that a path string does not.
+    set(OpenCL_LIBRARY     OpenCL                         CACHE STRING "" FORCE)
 
     set(GGML_OPENCL ON CACHE BOOL "" FORCE)
     # Mali here, not Adreno. The Adreno kernels are the upstream default and are wrong for

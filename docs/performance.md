@@ -75,11 +75,19 @@ Measured on the Pixel 8a (Mali-G715), LFM2.5-1.2B Q4_0:
 
 | | tok/s | peak PSS |
 |---|---|---|
-| CPU, 2 threads | 15.2 | 733 MB |
+| CPU-only build, 2 threads | 15.2 | 733 MB |
 | Vulkan offload | 17.9 | 1,224 MB |
+| OpenCL offload | 18.6 | 1,386 MB |
 
-Modest, and that is the expected shape: decode is bandwidth-bound and the GPU shares the same
-DRAM. The memory cost is real.
+**Treat the ordering as unproven.** Interleaving CPU against OpenCL on the same binary inverted it
+— 16.9 CPU against 15.2 GPU, individual runs spanning 14.7 to 21.4 — so all three sit inside each
+other's noise on this device. That is the expected shape for a bandwidth-bound GEMV: the GPU
+shares the same DRAM as the CPU, so offload moves the work without widening the pipe. The memory
+cost, unlike the speed, is unambiguous.
+
+A further wrinkle: peak PSS was the same ~1,384 MB in *both* modes of the OpenCL build. The
+backend initialises and allocates even at `n_gpu_layers = 0`, so compiling OpenCL in costs about
+650 MB whether or not anything is offloaded.
 
 ### OpenCL needs a manifest declaration
 
