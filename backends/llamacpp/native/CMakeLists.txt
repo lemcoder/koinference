@@ -31,12 +31,9 @@ set(GGML_NATIVE           OFF CACHE BOOL   "" FORCE)
 # backend calls Vulkan 1.1 entry points (vkGetPhysicalDeviceFeatures2), and the NDK only exports
 # those from API 28, while this module's minSdk is 24.
 #
-# Vulkan and not OpenCL. The device has both, and llama.cpp has both backends, but an app cannot
-# reach OpenCL: `libOpenCL.so` sits in /vendor and, even though it is on the vendor
-# public-libraries allowlist, an app's classloader namespace cannot resolve it as a DT_NEEDED —
-# `dlopen failed: library "libOpenCL.so" not found ... in namespace clns-9`. libvulkan.so is a
-# public NDK library and links normally. Measured on a Pixel 8a (Mali-G715), Vulkan offload runs
-# LFM2.5-1.2B Q4_0 at ~17.9 tok/s against ~15.2 on CPU; see docs/performance.md.
+# Vulkan is the measured path: on a Pixel 8a (Mali-G715) it runs LFM2.5-1.2B Q4_0 at ~17.9 tok/s
+# against ~15.2 on CPU. KOI_OPENCL below builds the other one; it needs a manifest declaration to
+# load and has not been measured. See docs/performance.md.
 #
 # Selecting it at run time is the existing RuntimeSettings(accelerator = Accelerator.GPU), which
 # the facade already maps onto llama_model_params.n_gpu_layers. A build without this option
@@ -92,6 +89,46 @@ if (KOI_VULKAN)
     endif()
 
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+endif()
+
+# ── GPU offload (OpenCL) ─────────────────────────────────────────────────────
+# Also off by default, and less proven than KOI_VULKAN — see docs/performance.md.
+#
+# Reaching OpenCL from an app needs two things beyond the backend compiling. The manifest has to
+# declare <uses-native-library android:name="libOpenCL.so">, which is mandatory from API 31 for a
+# vendor library even when it is already on the vendor public-libraries allowlist; that
+# declaration lives in src/androidMain/AndroidManifest.xml and merges into consumers. And the link
+# needs a libOpenCL.so to resolve against, which the NDK does not ship.
+#
+# The ICD loader supplies that: it is built from source purely as a link target, and its SONAME is
+# libOpenCL.so, so at run time the loader resolves the *vendor* driver of that name rather than
+# this copy. It is deliberately not packaged into jniLibs — packaging it would shadow the driver
+# with a loader that has no ICD to enumerate on devices that register none.
+option(KOI_OPENCL "Build the llama.cpp OpenCL backend for GPU offload" OFF)
+
+if (KOI_OPENCL)
+    CPMAddPackage(
+        NAME        OpenCL-Headers
+        GITHUB_REPOSITORY KhronosGroup/OpenCL-Headers
+        GIT_TAG     v2026.05.29
+        EXCLUDE_FROM_ALL TRUE
+    )
+    CPMAddPackage(
+        NAME        OpenCL-ICD-Loader
+        GITHUB_REPOSITORY KhronosGroup/OpenCL-ICD-Loader
+        GIT_TAG     v2026.05.29
+        EXCLUDE_FROM_ALL TRUE
+        OPTIONS     "OPENCL_ICD_LOADER_HEADERS_DIR ${OpenCL-Headers_SOURCE_DIR}"
+                    "BUILD_TESTING OFF"
+    )
+
+    set(OpenCL_INCLUDE_DIR "${OpenCL-Headers_SOURCE_DIR}" CACHE PATH "" FORCE)
+    set(OpenCL_LIBRARY     "$<TARGET_FILE:OpenCL>"        CACHE FILEPATH "" FORCE)
+
+    set(GGML_OPENCL ON CACHE BOOL "" FORCE)
+    # Mali here, not Adreno. The Adreno kernels are the upstream default and are wrong for
+    # anything else.
+    set(GGML_OPENCL_USE_ADRENO_KERNELS OFF CACHE BOOL "" FORCE)
 endif()
 
 # Defaults to LLAMA_STANDALONE, i.e. OFF under CPM — but the facade uses common_* helpers.

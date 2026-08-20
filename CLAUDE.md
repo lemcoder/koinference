@@ -301,11 +301,17 @@ so generation tests are env-gated rather than run in CI.
 
 - **GPU offload is Vulkan, opt-in at build time via `KOI_VULKAN`.** The run-time half was already
   there — `Accelerator.GPU` maps onto `n_gpu_layers` — but a build with no GPU backend ignores it
-  and runs on the CPU. Not OpenCL: an app cannot resolve `/vendor/lib64/libOpenCL.so` as a
-  `DT_NEEDED` even though it is on the vendor public-libraries allowlist, and the device registers
-  no ICD for the Khronos loader to find. `libvulkan.so` is a public NDK library. Enabling it moves
-  the floor to API 28 (`vkGetPhysicalDeviceFeatures2` is Vulkan 1.1), which is why the default AAR
-  keeps `KOI_VULKAN=OFF` and its API 24 floor. Worth ~15% on a Pixel 8a for ~500 MB more PSS.
+  and runs on the CPU. Enabling it moves the floor to API 28 (`vkGetPhysicalDeviceFeatures2` is
+  Vulkan 1.1), which is why the default AAR keeps `KOI_VULKAN=OFF` and its API 24 floor. Worth
+  ~15% on a Pixel 8a for ~500 MB more PSS.
+- **A vendor native library needs `<uses-native-library>` from API 31**, even when it is already on
+  the vendor public-libraries allowlist. Without it `dlopen` reports `library "libOpenCL.so" not
+  found ... in namespace clns-<n>`, which reads like the file is missing rather than undeclared —
+  it cost a wrong conclusion here that OpenCL was simply unreachable from an app. The declaration
+  is in `:backends:llamacpp`'s `androidMain/AndroidManifest.xml` so it merges into consumers, and
+  `KOI_OPENCL` builds the ICD loader as a *link target only*: its SONAME is `libOpenCL.so`, so the
+  vendor driver resolves at run time, and packaging it would shadow that driver with a loader this
+  device has no ICD for. Unmeasured — it landed after the test device went away.
 
 **A device measurement is not trustworthy until the APK is checked.** `cmakeBuildKoinferenceAndroid`
 does not declare the facade sources as inputs, so an edited `.cpp` can rebuild while AGP's

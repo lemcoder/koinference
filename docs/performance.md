@@ -81,19 +81,35 @@ Measured on the Pixel 8a (Mali-G715), LFM2.5-1.2B Q4_0:
 Modest, and that is the expected shape: decode is bandwidth-bound and the GPU shares the same
 DRAM. The memory cost is real.
 
-**Vulkan and not OpenCL, for a reason that is not about speed.** The device has both, and
-llama.cpp has both backends, but an app cannot reach OpenCL. `libOpenCL.so` lives in `/vendor` and
-*is* on the vendor public-libraries allowlist, yet an app's classloader namespace still refuses it
-as a `DT_NEEDED`:
+### OpenCL needs a manifest declaration
+
+`KOI_OPENCL=ON` builds the other backend. Loading it takes one more thing, and missing it produces
+an error that reads like a missing file:
 
 ```
 dlopen failed: library "libOpenCL.so" not found: needed by
   .../libiogithublemcoderkoinferencellamacppjnistubs.so in namespace clns-9
 ```
 
-The Khronos ICD loader is no help either — this device registers no vendor ICD at all
-(`/vendor/etc/OpenCL/vendors/` does not exist), so the loader would enumerate zero platforms.
-`libvulkan.so` is a public NDK library and links normally.
+The library is present, in `/vendor/lib64`, and on the vendor public-libraries allowlist. From
+**API 31** an app must additionally declare it:
+
+```xml
+<uses-native-library android:name="libOpenCL.so" android:required="false" />
+```
+
+That lives in `:backends:llamacpp`'s `src/androidMain/AndroidManifest.xml` and merges into
+consumers, so an app gets it by depending on the module.
+
+Linking needs a `libOpenCL.so` too, which the NDK does not ship. `KOI_OPENCL` builds the Khronos
+ICD loader from source purely as a **link target** — its SONAME is `libOpenCL.so`, so at run time
+the vendor driver of that name resolves instead. It is deliberately not packaged into `jniLibs`:
+this device registers no ICD (`/vendor/etc/OpenCL/vendors/` does not exist), so a packaged loader
+would shadow the real driver with one that enumerates zero platforms.
+
+**Unmeasured.** The manifest declaration and the build both landed after the test device was
+disconnected, so the OpenCL path is verified to configure and compile, and not verified to run.
+Vulkan is the path with numbers behind it.
 
 **Enabling it raises the floor to API 28.** ggml-vulkan calls Vulkan 1.1 entry points
 (`vkGetPhysicalDeviceFeatures2`), which the NDK stub only exports from 28; this module's `minSdk`

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!--
+          Required from API 31 to reach a vendor native library, even one already on the vendor
+          public-libraries allowlist. Without it the linker refuses the DT_NEEDED with
+          `dlopen failed: library "libOpenCL.so" not found ... in namespace clns-<n>`, which reads
+          like a missing file rather than a missing declaration.
+
+          required="false" so a device with no OpenCL driver still installs; the OpenCL backend is
+          off unless the native build was configured with KOI_OPENCL, and llama.cpp falls back to
+          the CPU when a backend is absent.
+
+          Declared here rather than in each app: this is the module that links it, and manifest
+          merge carries it into whatever consumes the AAR.
+        -->
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+    </application>
+
+</manifest>
