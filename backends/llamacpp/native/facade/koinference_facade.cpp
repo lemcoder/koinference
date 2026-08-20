@@ -55,12 +55,12 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * balance shifts with model size, quantization and how much bandwidth the rest of the device is
  * using.
  */
-static int detect_decode_threads() {
+static std::vector<int> detect_big_cores() {
     const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
 
     // Linux and Android expose the per-core ceiling here; other platforms do not, which is what
-    // the single-tier fallback below covers.
-    std::map<long, int> cores_per_frequency;
+    // the empty-result fallback covers.
+    std::map<long, std::vector<int>> cores_by_frequency;
     for (int cpu = 0; cpu < cores; ++cpu) {
         char path[128];
         std::snprintf(path, sizeof(path),
@@ -70,24 +70,35 @@ static int detect_decode_threads() {
         long khz = 0;
         const int read = std::fscanf(file, "%ld", &khz);
         std::fclose(file);
-        if (read == 1 && khz > 0) cores_per_frequency[khz]++;
+        if (read == 1 && khz > 0) cores_by_frequency[khz].push_back(cpu);
     }
 
-    // Nothing readable, or one kind of core: there is no little cluster to avoid, so halve what
-    // the machine has.
-    if (cores_per_frequency.size() < 2) return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
+    // Nothing readable, or one kind of core: no little cluster to avoid.
+    if (cores_by_frequency.size() < 2) return {};
 
     // std::map is ordered, so begin() is the slowest tier — the one to leave alone. Among the
-    // rest, take the largest group: the biggest set of cores that finish a barrier together. The
-    // lone prime core is not it, and including it measured worse than leaving it out.
-    auto tier = cores_per_frequency.begin();
+    // rest take the largest group: the biggest set of cores that finish a barrier together. The
+    // lone prime core is not it, and including it measured worse.
+    auto tier = cores_by_frequency.begin();
     ++tier;
-    int big_cluster = 0;
-    for (; tier != cores_per_frequency.end(); ++tier) {
-        big_cluster = std::max(big_cluster, tier->second);
+    const std::vector<int>* best = nullptr;
+    for (; tier != cores_by_frequency.end(); ++tier) {
+        if (!best || tier->second.size() > best->size()) best = &tier->second;
     }
+    return best ? *best : std::vector<int>{};
+}
 
-    return std::max(2, std::min(big_cluster / 2, MAX_DECODE_THREADS));
+static int detect_decode_threads() {
+    const std::vector<int> big = detect_big_cores();
+    if (big.empty()) {
+        const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+        return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
+    }
+    // The whole cluster, now that the workers are pinned to it. This used to be half of it, which
+    // was compensating for thread migration rather than for bandwidth: unpinned, 4 threads ran at
+    // 5-6 tok/s because one worker would land on a little core and every barrier waited for it.
+    // Pinned, the same 4 threads run at 30-40 and 2 run at 27.
+    return std::max(2, std::min(static_cast<int>(big.size()), MAX_DECODE_THREADS));
 }
 
 struct KoiModel {
@@ -112,6 +123,7 @@ struct KoiGeneration {
 struct KoiSession {
     llama_model*              model;   // non-owning; lifetime tied to KoiModel
     llama_context*            ctx;
+    ggml_threadpool*          threadpool = nullptr;
     llama_batch               batch;
     common_chat_templates_ptr chat_templates;
     KoiSessionParams          params;
@@ -186,6 +198,40 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     session->batch           = llama_batch_init(BATCH_SIZE, 0, 1);
     session->chat_templates  = common_chat_templates_init(model->model, "");
     session->params          = params;
+
+    // Pin the decode threads to the big cluster.
+    //
+    // Without a mask the scheduler is free to put a ggml worker on a little core, and since every
+    // node ends in a barrier the whole batch then runs at that core's pace. This is the suspected
+    // reason 4 threads measured *slower* than 2 on a Pixel 8a: not bandwidth, but one worker
+    // landing on an A510. strict_cpu pins worker i to the i-th core in the mask rather than
+    // letting it drift.
+    //
+    // Best effort: a platform that reports no topology gets the default placement, and a
+    // threadpool that cannot be created is not fatal — llama.cpp falls back to its own threads.
+    const std::vector<int> big_cores = detect_big_cores();
+    if (!big_cores.empty()) {
+        // Never more workers than cores in the mask. strict_cpu pins worker i to the i-th core in
+        // it, so asking for more leaves the surplus unplaced: 6 threads against this phone's 4
+        // big cores measured 0.6 tok/s, against 39.8 for 4.
+        const int pinned_threads =
+            std::min(n_threads, static_cast<int>(big_cores.size()));
+
+        ggml_threadpool_params tpp = ggml_threadpool_params_default(pinned_threads);
+        std::fill(std::begin(tpp.cpumask), std::end(tpp.cpumask), false);
+        for (int cpu : big_cores) {
+            if (cpu >= 0 && cpu < GGML_MAX_N_THREADS) tpp.cpumask[cpu] = true;
+        }
+        tpp.strict_cpu = true;
+
+        session->threadpool = ggml_threadpool_new(&tpp);
+        if (session->threadpool) {
+            llama_attach_threadpool(ctx, session->threadpool, nullptr);
+            // The context has to agree, or it dispatches more work than the pool has workers.
+            llama_set_n_threads(ctx, pinned_threads, pinned_threads);
+        }
+    }
+
     return session;
 }
 
@@ -194,7 +240,10 @@ void koi_session_free(KoiSession* session) {
     koi_generate_end(session);
     session->chat_templates.reset();
     llama_batch_free(session->batch);
+    // Before the context: it is attached to it, and freeing the pool out from under a context
+    // that still references it is a use-after-free.
     llama_free(session->ctx);
+    if (session->threadpool) ggml_threadpool_free(session->threadpool);
     delete session;
 }
 

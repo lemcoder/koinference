@@ -3,36 +3,48 @@
 Measured on a Pixel 8a (Tensor G3: 4x Cortex-A510 @ 1.70 GHz, 4x Cortex-A715 @ 2.37 GHz,
 1x Cortex-X3 @ 2.91 GHz) against `LFM2.5-1.2B-Instruct-Q4_0.gguf`, 32-token budget.
 
-**5.8 tok/s to 15.2 tok/s**, from two changes that are both defaults rather than code paths.
+**5.8 tok/s to ~38 tok/s.** All of it from defaults and build flags; no new code paths in the
+inference loop.
 
-## Threads: fewer than you would guess
+## Threads: pin them, then use the whole big cluster
 
-Decoding one token is a GEMV over the whole model. It reads every weight once and does almost no
-arithmetic per byte, so it is bound by **memory bandwidth, not by cores**. Two threads already
-saturate this phone's DRAM; past that, extra threads pay ggml's per-node barrier and share the
-SoC power budget, which clocks everything down.
+The thread count and thread *placement* are one question, and getting the placement wrong makes
+the count look like a bandwidth wall that isn't there.
 
-Medians of interleaved runs, both orderings:
+| threads | unpinned | pinned to the big cluster |
+|---|---|---|
+| 1 | 10.6 | — |
+| 2 | 12.1 – 15.3 | 27.3 |
+| 3 | 12.3 – 14.6 | 36.6 |
+| **4** | **5.3 – 6.2** | **34.6 – 39.8** |
+| 5 | 2.5 – 2.7 | 25.4 |
+| 6 | — | 0.6 |
+| 7 (the original default) | ~6 | — |
 
-| threads | tok/s |
-|---|---|
-| 1 | 10.6 |
-| **2** | **12.1 – 15.3** |
-| 3 | 12.3 – 14.6 |
-| 4 | 5.3 – 6.2 |
-| 5 | 2.5 – 2.7 |
-| 7 (the old default) | ~6 |
+Unpinned, throughput fell off a cliff at 4 threads and it was tempting to call that DRAM
+saturation. It was not. Android is free to schedule a ggml worker onto an A510 little core, and
+because every graph node ends in a barrier, the whole batch then runs at that core's pace. One
+misplaced worker halves the result.
 
-The old default was `hardware_concurrency() - 2`, which picked 7 here — about half speed.
+`koi_session_create` therefore builds a `ggml_threadpool` with a `cpumask` over the big cluster and
+`strict_cpu` set, so worker *i* is pinned to the *i*-th core in the mask instead of drifting. With
+that, 4 threads go from 5-6 tok/s to 34-40, and the run-to-run spread collapses too — consecutive
+runs land within 0.2 tok/s of each other where before they swung 3x.
 
-**The count is deliberately not the number of big cores.** That is 4 on this SoC, and 4 is exactly
-where throughput falls off a cliff. `detect_decode_threads()` takes *half* the largest cluster
-above the slowest frequency tier, floored at 2: it lands on the measured optimum here and still
-scales on a machine with a wider big cluster. The lone prime core is excluded — one core 23%
-faster than four others still waits at the same barrier.
+`detect_decode_threads()` then takes the **whole** largest cluster above the slowest frequency
+tier. It used to take half, which was compensating for migration rather than for bandwidth. The
+lone prime core is still excluded: one core 23% faster than four others waits at the same barrier.
 
-Pass `n_threads` explicitly when you know better. The balance moves with model size,
-quantization, and how much bandwidth the rest of the device is using.
+**Never ask for more workers than the mask holds.** `strict_cpu` places worker *i* on the *i*-th
+core of the mask, so the surplus goes unplaced — 6 threads against this phone's 4 big cores
+measured **0.6 tok/s**. The facade clamps `n_threads` to the mask size for that reason.
+
+## KleidiAI: no effect on decode
+
+`KOI_KLEIDIAI=ON` builds ggml's CPU backend with ARM's own quantized-matmul microkernels. Measured
+against the pinned baseline it is a wash — 37.8 tok/s against 37.9 — which is what it should be:
+decoding one token is a batch-1 GEMV, and KleidiAI's kernels are GEMM-shaped. Expect it to matter
+for prefill, not for tokens per second. Left in as an option, off by default.
 
 ## Arch flags: dotprod matters, i8mm does not
 

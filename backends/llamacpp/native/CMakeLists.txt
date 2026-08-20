@@ -104,6 +104,14 @@ endif()
 # libOpenCL.so, so at run time the loader resolves the *vendor* driver of that name rather than
 # this copy. It is deliberately not packaged into jniLibs — packaging it would shadow the driver
 # with a loader that has no ICD to enumerate on devices that register none.
+# ARM's own microkernels for quantized matmul. Off upstream, and worth a look on any ARMv8.2+
+# target: this is exactly the shape of work a bandwidth-bound Q4_0 decode does.
+option(KOI_KLEIDIAI "Build ggml's CPU backend with ARM KleidiAI kernels" OFF)
+
+if (KOI_KLEIDIAI)
+    set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+endif()
+
 option(KOI_OPENCL "Build the llama.cpp OpenCL backend for GPU offload" OFF)
 
 if (KOI_OPENCL)
