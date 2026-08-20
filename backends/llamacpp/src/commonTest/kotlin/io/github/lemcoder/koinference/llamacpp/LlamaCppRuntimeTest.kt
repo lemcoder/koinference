@@ -10,6 +10,7 @@ import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_MIN_P
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TEMPERATURE
 import io.github.lemcoder.koinference.llamacpp.internal.DEFAULT_TOP_K
 import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementSource
 import io.github.lemcoder.koinference.llamacpp.internal.FakeLlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.MutableMachine
 import kotlinx.coroutines.CompletableDeferred
@@ -44,7 +45,7 @@ class LlamaCppRuntimeTest {
         parameters: GenerationParameters = GenerationParameters(),
         settings: RuntimeSettings = RuntimeSettings(),
         bridge: FakeLlamaCppBridge = this.bridge,
-        placementPolicy: CpuPlacementPolicy = CpuPlacementPolicy(MutableMachine()),
+        placementPolicy: CpuPlacementSource = CpuPlacementPolicy(MutableMachine()),
     ) = LlamaCppModelLoader(
         bridge = bridge,
         placementPolicy = placementPolicy,

@@ -9,7 +9,8 @@ import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
 import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacement
-import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementSource
+import io.github.lemcoder.koinference.llamacpp.internal.platformCpuPlacement
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppModel
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppSession
@@ -39,7 +40,7 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     parameters: GenerationParameters = GenerationParameters(),
-    private val placementPolicy: CpuPlacementPolicy = CpuPlacementPolicy(),
+    private val placementPolicy: CpuPlacementSource = platformCpuPlacement(),
 ) : LlamaCppTextRuntime {
 
     private var modelOptions: ModelOptions = modelOptions

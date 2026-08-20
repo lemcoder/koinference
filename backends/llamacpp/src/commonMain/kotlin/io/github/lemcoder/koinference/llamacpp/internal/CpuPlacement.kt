@@ -29,8 +29,25 @@ internal interface SystemFiles {
     fun read(path: String): String?
 }
 
-/** The files of the machine this is running on. */
-internal expect fun platformSystemFiles(): SystemFiles
+/**
+ * How this platform decides where to put decode threads.
+ *
+ * An `expect` rather than a shared default, because whether placement is a question at all is
+ * platform-specific. Android is where it matters — a decode thread landing on a little core makes
+ * every barrier wait for it — and the ART legs answer with [CpuPlacementPolicy]. The native targets
+ * answer that there is nothing to place: Darwin has no /proc or /sys to read a topology from and no
+ * equivalent of `sched_setaffinity`, and linuxX64 is a desktop target not fighting a little cluster.
+ *
+ * The rule itself stays in common code even though only one leg activates it: it is pure given
+ * [SystemFiles], and keeping it here is what lets its topology cases be tested everywhere rather
+ * than only where it runs.
+ */
+internal expect fun platformCpuPlacement(): CpuPlacementSource
+
+/** Chooses a placement. One call, so the platform legs stay as small as the decision they make. */
+internal fun interface CpuPlacementSource {
+    fun choose(): CpuPlacement
+}
 
 /**
  * Chooses the CPUs to pin decode threads to.
@@ -49,9 +66,9 @@ internal expect fun platformSystemFiles(): SystemFiles
  * for the threads drifting onto little cores, which pinning fixes properly. Pinned, 4 threads run
  * at 34-40 tok/s where unpinned they ran at 5-6.
  */
-internal class CpuPlacementPolicy(private val files: SystemFiles = platformSystemFiles()) {
+internal class CpuPlacementPolicy(private val files: SystemFiles) : CpuPlacementSource {
 
-    fun choose(): CpuPlacement {
+    override fun choose(): CpuPlacement {
         val usable = usableCpus()
         // One core, or nothing readable: there is no placement decision to make.
         if (usable.size < 2) return CpuPlacement.UNPINNED

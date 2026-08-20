@@ -47,6 +47,15 @@ SoC, a machine whose cores all clock the same, an app confined to the little clu
 mechanism only now (`koi_session_set_cpu_mask`); it holds no second copy of the heuristic to drift
 from this one.
 
+**Only the ART legs activate it.** `platformCpuPlacement()` is an `expect`: the JVM and Android
+actuals run the policy, and the native one answers that there is nothing to place. Darwin has no
+`/proc` or `/sys` to read and no equivalent of `sched_setaffinity` — `thread_policy_set` affinity
+tags are advisory and ignored on Apple silicon — and linuxX64 is a desktop target that is not
+fighting a little cluster. The rule stays in common code anyway, because it is pure given
+`SystemFiles` and that is what lets its topology cases be tested everywhere rather than only where
+it runs. `CpuPlacementAppleTest` holds the native leg to declining, so the heuristic cannot start
+half-working on a platform it was never meant for.
+
 Two things a mask built from SoC topology cannot know, both handled by the policy:
 
 - **Which cpuset the app is in.** On this phone `foreground` is `0-7` and `background` is `0-3`, so
