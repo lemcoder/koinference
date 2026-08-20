@@ -165,7 +165,7 @@ set(BUILD_SHARED_LIBS     OFF CACHE BOOL   "" FORCE)
 CPMAddPackage(
     NAME        llama_cpp
     GITHUB_REPOSITORY ggerganov/llama.cpp
-    GIT_TAG     b10472
+    GIT_TAG     b10516
     EXCLUDE_FROM_ALL TRUE
 )
 

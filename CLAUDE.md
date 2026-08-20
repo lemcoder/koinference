@@ -158,8 +158,8 @@ its first successful run, after every structural check had passed. Keep it.
 `LLAMA_BUILD_COMMON` defaults to `LLAMA_STANDALONE` — OFF under CPM — and the facade uses `common_*`
 helpers. `native/CMakeLists.txt` forces it on and links whichever common target exists.
 
-**The pin is b10472, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
-it, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
+**The pin is b10516, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
+b10472, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
 cost four breakages, all silent-ish:
 
 - **`common` was renamed `llama-common`.** Getting this wrong does not fail at configure time:
@@ -173,6 +173,12 @@ cost four breakages, all silent-ish:
 - **The common headers include `<nlohmann/json_fwd.hpp>`**, which lives in `vendor/`, and
   `json-schema-to-grammar.h` now only forward-declares the type — parsing needs
   `<nlohmann/json.hpp>` included explicitly.
+
+**b10472 → b10516 cost nothing and gained nothing.** No API moved, both legs compiled unchanged,
+and on an M4 with LFM2.5-1.2B Q4_0 the two are indistinguishable: medians 138.8 against 138.5 tok/s
+over three interleaved rounds each, TTFT 63.0 against 62.5 ms. Worth knowing before spending an
+afternoon on the next bump hoping for free throughput — the wins in this repo came from thread
+placement and build flags, not from upstream.
 
 `common` is also what makes `GenerationConstraint.JsonSchema` work: `json_schema_to_grammar` lives
 there, so the facade converts and the Kotlin side never sees GBNF. Both the parse and the
