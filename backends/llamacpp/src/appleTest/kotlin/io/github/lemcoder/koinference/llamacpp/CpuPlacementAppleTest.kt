@@ -1,6 +1,10 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.llamacpp.internal.platformCpuPlacement
+import platform.posix._SC_NPROCESSORS_ONLN
+import platform.posix.sysconf
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -17,11 +21,19 @@ import kotlin.test.assertFalse
 class CpuPlacementAppleTest {
 
     @Test
-    fun placementIsLeftToTheOs() {
+    fun pinningIsDeclined() {
         val placement = platformCpuPlacement().choose()
 
         assertFalse(placement.pinned, "expected no pinning on Darwin, got ${placement.cpus}")
-        // Zero, not a guess: the facade's own fallback decides the worker count.
-        assertEquals(0, placement.threads)
+    }
+
+    @Test
+    fun theWorkerCountIsCoresMinusTwo() {
+        val placement = platformCpuPlacement().choose()
+
+        // The count is this leg's whole contribution, since it cannot pin. Measured on an M4:
+        // 8 threads gave 144 tok/s against 120 for 5 and 135 for 9.
+        val cores = sysconf(_SC_NPROCESSORS_ONLN).toInt()
+        assertEquals((cores - 2).coerceIn(2, 8), placement.threads)
     }
 }

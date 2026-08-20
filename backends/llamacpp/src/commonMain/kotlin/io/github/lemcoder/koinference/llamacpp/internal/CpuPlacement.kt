@@ -3,9 +3,15 @@ package io.github.lemcoder.koinference.llamacpp.internal
 /**
  * Which CPUs to decode on, and how many workers to run.
  *
- * [cpus] empty means "do not pin" — the platform exposed nothing to act on, or nothing survived
- * the intersection with what this process may use. [threads] is 0 in that case, meaning the facade
- * picks.
+ * Both halves are one decision and both are platform-specific, which is why they travel together.
+ * [cpus] empty means "do not pin" — either the platform cannot (Darwin ignores affinity outright)
+ * or nothing survived the intersection with what this process may use. A [threads] of 0 means even
+ * the count is left to the facade, which is a last resort rather than a normal answer.
+ *
+ * The two platforms want opposite counts, measured: Android wants one worker per big core (4 on a
+ * Pixel 8a, where 8 ran at half the speed) and macOS wants `cores - 2` (8 on an M4, where 4 ran at
+ * 70%). Nothing here reconciles them because there is nothing to reconcile — a pinned big cluster
+ * and an unpinned heterogeneous machine are different problems.
  */
 internal data class CpuPlacement(
     val cpus: List<Int> = emptyList(),
@@ -14,7 +20,11 @@ internal data class CpuPlacement(
     val pinned: Boolean get() = cpus.isNotEmpty()
 
     companion object {
+        /** No pinning and no opinion on the count. */
         val UNPINNED = CpuPlacement()
+
+        /** No pinning, but a measured worker count — the shape every non-Linux platform gives. */
+        fun unpinned(threads: Int) = CpuPlacement(cpus = emptyList(), threads = threads)
     }
 }
 

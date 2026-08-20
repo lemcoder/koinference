@@ -125,9 +125,15 @@ Darwin's scheduler places heterogeneous cores well on its own, so the efficiency
 instead of stalling a barrier — which is precisely what the little cluster did on Android until the
 threads were pinned to the big one.
 
-So the facade's unpinned fallback is `cores - 2`, which is 8 here and measures 143.6 as the
-default. It is deliberately *not* the Android answer, and the two should not be made to match. Where
-pinning works the mask decides the count; this is for where it does not.
+So the native leg's policy is "do not pin, run `cores - 2` workers", which is 8 here and measures
+145 as the default. It is deliberately *not* the Android answer, and the two should not be made to
+match.
+
+**Both halves of the decision live in the platform leg**, which is the point: the mask and the
+worker count are one choice, and it differs per platform. `platformCpuPlacement()` returns both, and
+the runtime opens the session with the count it was given. The facade keeps a `cores - 2` fallback
+only for a caller reaching the C API directly — the Kotlin bindings never rely on it, so there is no
+second rule in C to drift from the tested one.
 
 `KOI_BENCH_THREADS` sweeps it: `KOI_TEST_GGUF=… KOI_BENCH_THREADS=8 ./gradlew
 :benchmark:core:macosArm64Test --rerun-tasks`.

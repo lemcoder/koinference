@@ -61,20 +61,15 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * using.
  */
 /**
- * Fallback worker count when the caller does not say and the threads are not pinned.
+ * Last-resort worker count, for a caller that reaches this facade directly.
  *
- * `cores - 2`, measured. On an M4 (4 performance + 6 efficiency cores) running LFM2.5-1.2B Q4_0:
- * 5 threads gave 120 tok/s, 7 gave 139, 8 gave 144, 9 gave 135. Eight is cores - 2.
+ * The Kotlin bindings never rely on it: each platform's `platformCpuPlacement()` decides the count
+ * along with the mask and passes it in, because the two are one decision and it differs per
+ * platform — one worker per big core on Android, `cores - 2` on Darwin, measured on both. Keeping a
+ * rule here as well would mean two implementations drifting.
  *
- * Note how unlike Android that is, where 4 threads beat 8 by a wide margin. The difference is
- * pinning: Darwin ignores CPU affinity entirely — ggml's `ggml_thread_apply_affinity` is a
- * documented no-op there — but its scheduler places heterogeneous cores well on its own, so the
- * efficiency cores contribute instead of stalling a barrier. On Android the same spread of threads
- * across a little cluster is what made 4 threads run at half the speed of 2 until they were pinned.
- *
- * So this is not the Android answer and should not be made to match it. Where pinning works, the
- * mask decides the count; this is for where it does not. Choosing under pinning is
- * `CpuPlacementPolicy`'s job, in Kotlin, where it is one tested implementation.
+ * `cores - 2` because that is the better of the two when nothing is pinned, which is the situation
+ * a direct C caller is most likely in.
  */
 static int detect_decode_threads() {
     const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));

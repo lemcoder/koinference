@@ -175,12 +175,26 @@ class LlamaCppRuntime internal constructor(
     }
 
     private fun currentSession(): LlamaCppSession =
-        session ?: model
-            .openSession(generationParameters.toSessionOptions(nCtx, nThreads, nPredict))
-            .also {
-                session = it
-                placement = null
-            }
+        session ?: openSession().also {
+            session = it
+            placement = null
+        }
+
+    /**
+     * Opens a session with the worker count this platform's placement asks for.
+     *
+     * The count comes from the same decision as the mask, because on an unpinned platform it *is*
+     * the whole decision — Darwin cannot pin, so `cores - 2` is all its policy has to say. Letting
+     * the facade choose instead would put that rule in C, next to a different one for Android, and
+     * the two would drift.
+     *
+     * An explicit `nThreads` from the caller still wins: someone who measured their own workload
+     * should not be overridden by a default.
+     */
+    private fun openSession(): LlamaCppSession {
+        val threads = if (nThreads > 0) nThreads else placementPolicy.choose().threads
+        return model.openSession(generationParameters.toSessionOptions(nCtx, threads, nPredict))
+    }
 
     /**
      * Place the decode threads, re-deciding if the machine has changed underneath us.
