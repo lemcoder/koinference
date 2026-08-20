@@ -299,6 +299,14 @@ so generation tests are env-gated rather than run in CI.
   raises the device floor to roughly 2018 hardware — SIGILL below it, no fallback. `+i8mm`
   measured inside the noise and is deliberately absent.
 
+- **GPU offload is Vulkan, opt-in at build time via `KOI_VULKAN`.** The run-time half was already
+  there — `Accelerator.GPU` maps onto `n_gpu_layers` — but a build with no GPU backend ignores it
+  and runs on the CPU. Not OpenCL: an app cannot resolve `/vendor/lib64/libOpenCL.so` as a
+  `DT_NEEDED` even though it is on the vendor public-libraries allowlist, and the device registers
+  no ICD for the Khronos loader to find. `libvulkan.so` is a public NDK library. Enabling it moves
+  the floor to API 28 (`vkGetPhysicalDeviceFeatures2` is Vulkan 1.1), which is why the default AAR
+  keeps `KOI_VULKAN=OFF` and its API 24 floor. Worth ~15% on a Pixel 8a for ~500 MB more PSS.
+
 **A device measurement is not trustworthy until the APK is checked.** `cmakeBuildKoinferenceAndroid`
 does not declare the facade sources as inputs, so an edited `.cpp` can rebuild while AGP's
 `mergeAndroidMainJniLibFolders` still packages its cached `.so`. Two experiments in a row measured
@@ -306,6 +314,10 @@ the old binary. `strings` the `.so` out of the APK for something only the new co
 believing any number, and delete `merged_jni_libs` / `merged_native_libs` / `stripped_native_libs`
 / `outputs/apk` to force an honest repackage. This is the same missing-input bug the cinterop
 tasks had, in a different task.
+
+**A pulled results file can be stale too.** `adb pull` of `benchmark-results.json` returns the
+previous run's file when the run wrote none — `adb shell rm -f` it first. An A/B here reported four
+identical rows because `timeout` is not installed on macOS, so `am instrument` never ran at all.
 
 **Single device runs are noise.** The same configuration measured 8.5 and 2.3 tok/s minutes apart.
 Interleave configurations across several rounds and check both orderings; `batteryTemperaturePeakC`

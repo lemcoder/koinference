@@ -26,6 +26,74 @@ set(GGML_NATIVE           OFF CACHE BOOL   "" FORCE)
 # This is a floor, not a detection: a device older than dotprod (pre-2018, roughly Cortex-A53)
 # will take SIGILL rather than fall back. Shipping below that floor needs several variants and a
 # runtime pick, the way llama.rn does it — that work is not done here.
+# ── GPU offload (Vulkan) ─────────────────────────────────────────────────────
+# Off by default, and opt-in rather than automatic, because turning it on moves the floor: the
+# backend calls Vulkan 1.1 entry points (vkGetPhysicalDeviceFeatures2), and the NDK only exports
+# those from API 28, while this module's minSdk is 24.
+#
+# Vulkan and not OpenCL. The device has both, and llama.cpp has both backends, but an app cannot
+# reach OpenCL: `libOpenCL.so` sits in /vendor and, even though it is on the vendor
+# public-libraries allowlist, an app's classloader namespace cannot resolve it as a DT_NEEDED —
+# `dlopen failed: library "libOpenCL.so" not found ... in namespace clns-9`. libvulkan.so is a
+# public NDK library and links normally. Measured on a Pixel 8a (Mali-G715), Vulkan offload runs
+# LFM2.5-1.2B Q4_0 at ~17.9 tok/s against ~15.2 on CPU; see docs/performance.md.
+#
+# Selecting it at run time is the existing RuntimeSettings(accelerator = Accelerator.GPU), which
+# the facade already maps onto llama_model_params.n_gpu_layers. A build without this option
+# ignores that request and runs on the CPU rather than failing, which is llama.cpp's own
+# behaviour for a backend that was never compiled in.
+option(KOI_VULKAN "Build the llama.cpp Vulkan backend for GPU offload" OFF)
+
+if (KOI_VULKAN)
+    # ggml-vulkan needs the C++ bindings (vulkan.hpp) and the SPIR-V headers. The NDK sysroot
+    # ships neither — only the C headers and the loader stub — so they come through CPM, pinned
+    # like everything else here.
+    CPMAddPackage(
+        NAME        Vulkan-Headers
+        GITHUB_REPOSITORY KhronosGroup/Vulkan-Headers
+        GIT_TAG     v1.4.360
+        EXCLUDE_FROM_ALL TRUE
+    )
+    CPMAddPackage(
+        NAME        SPIRV-Headers
+        GITHUB_REPOSITORY KhronosGroup/SPIRV-Headers
+        GIT_TAG     v2026.08.0
+        EXCLUDE_FROM_ALL TRUE
+    )
+
+    # ggml-vulkan does find_package(SPIRV-Headers), which the Android toolchain confines to the
+    # sysroot unless told otherwise.
+    set(SPIRV-Headers_DIR "${SPIRV-Headers_SOURCE_DIR}" CACHE PATH "" FORCE)
+    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+    include_directories(${SPIRV-Headers_SOURCE_DIR}/include)
+
+    set(Vulkan_INCLUDE_DIR "${Vulkan-Headers_SOURCE_DIR}/include" CACHE PATH "" FORCE)
+
+    if (ANDROID)
+        # The shader compiler ships with the NDK but is not on PATH, and the loader stub has to
+        # come from an API level that actually exports the 1.1 entry points.
+        if (NOT DEFINED KOI_VULKAN_API)
+            set(KOI_VULKAN_API 28)
+        endif()
+        file(GLOB _koi_ndk_glslc "${CMAKE_ANDROID_NDK}/shader-tools/*/glslc")
+        list(GET _koi_ndk_glslc 0 _koi_glslc)
+        set(Vulkan_GLSLC_EXECUTABLE "${_koi_glslc}" CACHE FILEPATH "" FORCE)
+        # Globbed rather than composed from a triple variable: which one the toolchain file sets
+        # has moved between NDK and CMake versions, and there is exactly one match per ABI.
+        file(GLOB _koi_vulkan_lib
+             "${CMAKE_SYSROOT}/usr/lib/*/${KOI_VULKAN_API}/libvulkan.so")
+        list(LENGTH _koi_vulkan_lib _koi_vulkan_lib_count)
+        if (_koi_vulkan_lib_count EQUAL 0)
+            message(FATAL_ERROR
+                "KOI_VULKAN is on but no libvulkan.so for API ${KOI_VULKAN_API} in ${CMAKE_SYSROOT}")
+        endif()
+        list(GET _koi_vulkan_lib 0 _koi_vulkan_lib_first)
+        set(Vulkan_LIBRARY "${_koi_vulkan_lib_first}" CACHE FILEPATH "" FORCE)
+    endif()
+
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+endif()
+
 # Defaults to LLAMA_STANDALONE, i.e. OFF under CPM — but the facade uses common_* helpers.
 set(LLAMA_BUILD_COMMON    ON  CACHE BOOL   "" FORCE)
 set(LLAMA_BUILD_TESTS     OFF CACHE BOOL   "" FORCE)

@@ -54,6 +54,56 @@ building several variants and picking at runtime, the way
 [llama.rn](https://github.com/mybigday/llama.rn) does — five arm64 variants from `armv8-a` up to
 `armv8.2-a+dotprod+i8mm`. That work is not done here.
 
+## GPU offload
+
+Off by default. Turn it on at build time and select it at run time:
+
+```bash
+cmake --preset androidNativeArm64 -DKOI_VULKAN=ON -DANDROID_PLATFORM=android-28
+```
+
+```kotlin
+backend.loader(ModelConfig(settings = RuntimeSettings(accelerator = Accelerator.GPU)))
+```
+
+The run-time half is the same `Accelerator` LiteRT-LM uses — the facade already mapped it onto
+`llama_model_params.n_gpu_layers`. What was missing was a build that had a GPU backend in it at
+all: without one, `Accelerator.GPU` silently runs on the CPU, which is llama.cpp's own behaviour
+for a backend that was never compiled in.
+
+Measured on the Pixel 8a (Mali-G715), LFM2.5-1.2B Q4_0:
+
+| | tok/s | peak PSS |
+|---|---|---|
+| CPU, 2 threads | 15.2 | 733 MB |
+| Vulkan offload | 17.9 | 1,224 MB |
+
+Modest, and that is the expected shape: decode is bandwidth-bound and the GPU shares the same
+DRAM. The memory cost is real.
+
+**Vulkan and not OpenCL, for a reason that is not about speed.** The device has both, and
+llama.cpp has both backends, but an app cannot reach OpenCL. `libOpenCL.so` lives in `/vendor` and
+*is* on the vendor public-libraries allowlist, yet an app's classloader namespace still refuses it
+as a `DT_NEEDED`:
+
+```
+dlopen failed: library "libOpenCL.so" not found: needed by
+  .../libiogithublemcoderkoinferencellamacppjnistubs.so in namespace clns-9
+```
+
+The Khronos ICD loader is no help either — this device registers no vendor ICD at all
+(`/vendor/etc/OpenCL/vendors/` does not exist), so the loader would enumerate zero platforms.
+`libvulkan.so` is a public NDK library and links normally.
+
+**Enabling it raises the floor to API 28.** ggml-vulkan calls Vulkan 1.1 entry points
+(`vkGetPhysicalDeviceFeatures2`), which the NDK stub only exports from 28; this module's `minSdk`
+is 24. That is why `KOI_VULKAN` is opt-in rather than on by default — the shipped AAR keeps its
+API 24 floor and no `libvulkan.so` dependency.
+
+The Vulkan C++ bindings (`vulkan.hpp`) and the SPIR-V headers are not in the NDK sysroot, so
+`KOI_VULKAN=ON` pulls both through CPM, pinned like llama.cpp itself. `glslc` is found inside the
+NDK's `shader-tools`.
+
 ## Measuring without fooling yourself
 
 Two traps cost real time on this hardware.
@@ -71,6 +121,12 @@ unzip -p benchmark/core/build/outputs/apk/androidTest/core-androidTest.apk \
 
 Deleting `*/intermediates/merged_jni_libs`, `merged_native_libs`, `stripped_native_libs` and the
 `outputs/apk` directory forces an honest repackage.
+
+**The results file is pulled, not produced — so it can be stale too.** `adb pull` of
+`benchmark-results.json` happily returns the previous run's file when the run did not write one.
+`adb shell rm -f` it before every run. One A/B in this session reported four identical rows
+because `timeout` is not installed on macOS, so `am instrument` never ran and every pull returned
+the same old file.
 
 **Single runs are worthless here.** The same configuration measured 8.5 and 2.3 tok/s minutes
 apart. Run configurations interleaved, several rounds, and check the ordering both ways — a sweep
