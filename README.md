@@ -47,6 +47,12 @@ compile time, two consumers in one process would fight over one registry, and te
 reset it. An application that wants one instance everywhere can hold this in its own object.
 `CallerExampleTest` compiles and runs the snippet above, so it cannot drift.
 
+On Android, `:backends:llamacpp` declares `minSdk 31` and refuses hardware without the ARM
+dot-product extension: ggml picks its kernels at compile time, so such a CPU would take SIGILL
+mid-decode rather than run slowly. `Koinference.load` throws `BackendUnsupportedException` before
+reading any weights, and `koi.unsupported` answers the same question at startup. `:core` and
+`:backends:litertlm` stay at `minSdk 24`.
+
 Adding a third backend is documented in [docs/backends.md](docs/backends.md); all of them have the
 same shape on purpose, and adding one touches no file in `:core`.
 

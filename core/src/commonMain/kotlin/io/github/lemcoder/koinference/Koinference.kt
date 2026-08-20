@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.backend.Backend
+import io.github.lemcoder.koinference.backend.BackendUnsupportedException
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.runtime.ModelRuntime
@@ -48,6 +49,20 @@ class Koinference(
     /** Ids of the registered backends, in the order they were given. */
     val backendIds: List<String> get() = backends.map { it.id }
 
+    /**
+     * Registered backends this device cannot run, by id, with the reason.
+     *
+     * Empty on a device that can run all of them. Read it at startup to hide a feature or warn once,
+     * rather than discovering the same thing from a [load] that throws — an application that
+     * registers two engines and only ever loads one container should not be stopped by the other
+     * being unrunnable, which is why the constructor accepts them and [load] is where it becomes
+     * an error.
+     */
+    val unsupported: Map<String, String>
+        get() = backends.mapNotNull { backend ->
+            backend.unsupportedReason()?.let { backend.id to it }
+        }.toMap()
+
     // One loader per backend, kept so that unload and unloadAll reach the same loader a load used —
     // a loader owns the runtimes it handed out, and a second one would not know about them.
     private val loaders = mutableMapOf<String, ModelLoader>()
@@ -70,10 +85,14 @@ class Koinference(
      * @throws IllegalStateException if no registered backend reads this container, or if a backend's
      *         loader returns something that does not generate. The first message names what is
      *         registered, because the usual cause is a missing module rather than a bad path.
+     * @throws BackendUnsupportedException if the backend that reads this container cannot run on
+     *         this device. Thrown before the weights are opened, and before anything native is
+     *         called — the failure it stands in for is a SIGILL that no `catch` would see.
      */
     suspend fun load(modelPath: String): GeneratingRuntime {
         val backend = backendFor(modelPath)
             ?: error("No registered backend reads $modelPath. Registered: $backendIds")
+        backend.unsupportedReason()?.let { throw BackendUnsupportedException(backend.id, it) }
         val runtime = loaderFor(modelPath).load(modelPath)
         return runtime as? GeneratingRuntime
             ?: error("${backend.id} returned ${runtime::class.simpleName}, which does not generate")

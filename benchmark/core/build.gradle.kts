@@ -14,7 +14,8 @@ kotlin {
     android {
         namespace = "io.github.lemcoder.koinference.benchmark"
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
-        minSdk = libs.versions.androidMinSdk.get().toInt()
+        // Links :backends:llamacpp, whose AAR declares 31; a lower value fails at manifest merge.
+        minSdk = libs.versions.androidMinSdkLlamaCpp.get().toInt()
 
         // The benchmark runs here, as a device test, because AGP 9 has no Kotlin-capable
         // application plugin in *this* build — see benchmark/app. AGP builds this into a self-instrumenting

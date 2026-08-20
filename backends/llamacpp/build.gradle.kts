@@ -48,7 +48,10 @@ kotlin {
     android {
         namespace = "io.github.lemcoder.koinference.llamacpp"
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
-        minSdk = libs.versions.androidMinSdk.get().toInt()
+        // Higher than the rest of the repo, on purpose: see androidMinSdkLlamaCpp in the catalog.
+        // A consumer with a lower minSdk fails at manifest merge, which is the intended answer —
+        // the alternative is an install that dies on SIGILL on hardware without dotprod.
+        minSdk = libs.versions.androidMinSdkLlamaCpp.get().toInt()
 
         // Instrumented tests are the only place ART actually loads the packaged .so; everything else
         // about Android is verified by inspecting the AAR.

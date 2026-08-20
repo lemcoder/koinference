@@ -22,7 +22,9 @@ android {
 
     defaultConfig {
         applicationId = "io.github.lemcoder.koinference.benchmark.app"
-        minSdk = 24
+        // 31 because :backends:llamacpp declares it: its ggml build requires ARM dotprod and has
+        // no run-time fallback.
+        minSdk = 31
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"

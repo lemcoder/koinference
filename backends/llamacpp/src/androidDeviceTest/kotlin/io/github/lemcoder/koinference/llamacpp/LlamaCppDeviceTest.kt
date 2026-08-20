@@ -14,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -46,6 +47,22 @@ class LlamaCppDeviceTest {
 
     private val modelPath: String =
         requestedModel ?: "/data/local/tmp/koinference/stories260K.gguf"
+
+    /**
+     * The support check answers on a real device, and answers correctly.
+     *
+     * Worth a device test rather than a unit one: the Android leg reads `/proc/cpuinfo`, and an
+     * emulator, a robolectric shadow or a JVM test would each be answering about a different
+     * machine. This device is a Pixel 8a — API 36, Cortex-A715, dotprod — so the expected answer is
+     * null, and every other test in this class would be crashing rather than failing if it were not.
+     */
+    @Test
+    fun theBackendAcceptsThisDevice() {
+        assertNull(
+            LlamaCpp.unsupportedReason(),
+            "this device runs the other tests in this class, so it must not be refused",
+        )
+    }
 
     /** Null when the test should run, or a reason to skip when no model was asked for. */
     private fun skipReason(): String? = when {
