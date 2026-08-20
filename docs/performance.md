@@ -153,32 +153,75 @@ a count, so there is no second rule in C to drift from the tested one.
 `KOI_BENCH_THREADS` sweeps it: `KOI_TEST_GGUF=… KOI_BENCH_THREADS=8 ./gradlew
 :benchmark:core:macosArm64Test --rerun-tasks`.
 
-## KleidiAI: no effect on decode
+## KleidiAI: unmeasured, and the old number was not a measurement
 
-`KOI_KLEIDIAI=ON` builds ggml's CPU backend with ARM's own quantized-matmul microkernels. Measured
-against the pinned baseline it is a wash — 37.8 tok/s against 37.9 — which is what it should be:
-decoding one token is a batch-1 GEMV, and KleidiAI's kernels are GEMM-shaped. Expect it to matter
-for prefill, not for tokens per second. Left in as an option, off by default.
+`KOI_KLEIDIAI=ON` builds ggml's CPU backend with ARM's own quantized-matmul microkernels. This
+section used to report a wash — 37.8 tok/s against 37.9 — and that comparison was not valid.
 
-## Arch flags: dotprod matters, i8mm does not
+`KOI_KLEIDIAI` only ever forced `GGML_CPU_KLEIDIAI` **on**. A build directory that had KleidiAI
+enabled once kept it in its CMake cache, so switching the flag off changed nothing and the "off"
+row was very likely a second KleidiAI build. The flag is forced both ways now, but the numbers were
+taken on a device configuration that no longer exists, so they are gone rather than restated.
+
+What surfaced the bug is worth remembering, because it did not look like a stale flag: changing
+`GGML_CPU_ARM_ARCH` to `armv8.6-a+i8mm` made ggml ask for kai kernels the cached KleidiAI build had
+never produced, and the link failed on two dozen undefined `kai_*` symbols. That reads like an i8mm
+problem. **A CMake cache that outlives an experiment is a measurement hazard and a build hazard at
+the same time.**
+
+The expectation is still that it does nothing for decode — KleidiAI's kernels are GEMM-shaped and
+decoding one token is a batch-1 GEMV — so if it matters anywhere it is prefill. Left in as an
+option, off by default, unmeasured.
+
+## Arch flags: dotprod matters, nothing above it does
 
 `GGML_NATIVE` is off because these are cross-compiles, which leaves ggml at the NDK's baseline —
 plain `armv8-a`. That compiles the dot-product kernels *out*, and they are what Q4_0 decoding
-runs on.
+runs on. Turning dotprod on is the whole win; every ISA level above it was measured and none of
+them can be told apart from the noise.
 
-| build | tok/s (median of 3) |
-|---|---|
-| `armv8.2-a+dotprod` | 14.8 |
-| `armv8.2-a+dotprod+i8mm` | 15.2 |
+Four builds, each verified distinct by disassembling the packaged `.so` rather than trusting the
+preset — dotprod-only has 0 `smmla`, the i8mm build 244, the SVE2 build 376 plus 12177 SVE ops.
+Three rounds, config order reversed every round, 75 s of cooldown before each run, one workload
+(`short_generation_v1`, 32 tokens), 3 iterations after a discarded warmup:
 
-i8mm is inside the noise, which is what a bandwidth-bound kernel should look like — so the preset
-carries **dotprod only**. i8mm is ARMv8.6 and would raise the device floor for nothing.
+| build | median tok/s | per round (1 / 2 / 3) |
+|---|---|---|
+| `armv8.2-a+dotprod` | 38.1 | 38.1 / 35.6 / 38.9 |
+| `armv8.2-a+dotprod+fp16` | 39.2 | 35.8 / 39.2 / 40.2 |
+| `armv8.6-a+i8mm+fp16` | 37.2 | 38.2 / 38.4 / 33.4 |
+| `armv9-a+i8mm+fp16+sve2` | 36.2 | 34.2 / 38.2 / 36.2 |
 
-**This is a floor, not a detection.** A device older than dotprod (pre-2018, roughly Cortex-A53)
-takes SIGILL rather than falling back, and `minSdk` is 24. Supporting below that floor means
-building several variants and picking at runtime, the way
-[llama.rn](https://github.com/mybigday/llama.rn) does — five arm64 variants from `armv8-a` up to
-`armv8.2-a+dotprod+i8mm`. That work is not done here.
+**No config wins twice in a row, and each one's own spread is wider than every gap between them.**
+The clearest evidence is the same SVE2 binary reading 34.2 tok/s running last in round 1 and 38.2
+running first in round 2: a 12% swing from position alone, larger than any difference the table
+claims. Reading a winner out of these numbers would be reading the thermal ramp.
+
+That is what a bandwidth-bound GEMV should look like. Decoding one token multiplies the weights by
+a vector; the arithmetic is not the bottleneck, so wider arithmetic buys nothing. i8mm and SVE2
+are GEMM instructions and belong to prefill, which this workload barely exercises.
+
+So the preset carries **dotprod only** — the lowest floor of the four, for the same throughput.
+
+**Enabling everything is not free, and not a feature list.** `GGML_CPU_ARM_ARCH` sets a compile-time
+baseline: the compiler may emit SVE2 anywhere in the CPU backend, so a device without it takes
+SIGILL rather than falling back. `armv9-a+i8mm+fp16+sve2` moves the floor from 2018 hardware to
+2022 hardware (Pixel 7 and up) for a difference this measurement cannot see.
+
+**Runtime dispatch is the only way to have both, and upstream now ships it.**
+`GGML_CPU_ALL_VARIANTS` builds a backend per ISA tier and picks at load — with Android-specific
+tiers, `android_armv8.0_1` through `android_armv9.2_2` — which is what
+[llama.rn](https://github.com/mybigday/llama.rn) does by hand. Two things block it here, both read
+out of the b10516 tree rather than guessed:
+
+- It `FATAL_ERROR`s without `GGML_BACKEND_DL`, which requires `BUILD_SHARED_LIBS`. This build forces
+  that off and links a static facade, so it is a link-model change, not a flag.
+- `ggml_backend_load_best` searches `get_executable_path()`, which on Android is `/proc/self/exe` —
+  `/system/bin/app_process64`, not the app's `lib/<abi>/`. Finding the variants would need
+  `GGML_BACKEND_PATH` set at run time from `ApplicationInfo.nativeLibraryDir`.
+
+Worth doing to *lower the floor* — an `armv8.0` tier would run on hardware that SIGILLs today. Not
+worth doing for speed: the table above is what the higher tiers are worth on this device.
 
 ## GPU offload
 
@@ -256,7 +299,7 @@ NDK's `shader-tools`.
 
 ## Measuring without fooling yourself
 
-Two traps cost real time on this hardware.
+Three traps cost real time on this hardware.
 
 **The APK can ship a stale `.so`.** `cmakeBuildKoinferenceAndroid` does not track the facade
 sources as inputs, so editing `koinference_facade.cpp`, rebuilding and running can measure the
@@ -270,7 +313,23 @@ unzip -p benchmark/core/build/outputs/apk/androidTest/core-androidTest.apk \
 ```
 
 Deleting `*/intermediates/merged_jni_libs`, `merged_native_libs`, `stripped_native_libs` and the
-`outputs/apk` directory forces an honest repackage.
+`outputs/apk` directory forces an honest repackage. The llama.cpp pin bump to b10516 was first
+"verified" against an APK still carrying the b10472 binary, which passed all nine device tests and
+proved nothing; `strings … | grep -oE 'b95502ba9|60eeeb608'` on the packaged `.so` is what caught
+it, ggml's commit being the one thing in there that differs between the two.
+
+For an ISA sweep the same check has to look at instructions rather than strings, since the source is
+identical and only codegen differs:
+
+```bash
+$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-objdump -d /tmp/v.so \
+  | grep -cE '\bsmmla\b'    # 0 for a dotprod-only build, 244 for +i8mm
+```
+
+**A CMake cache outlives the experiment that set it.** `GGML_CPU_KLEIDIAI` stayed on for a whole
+session of builds that asked for it off, because the option was forced one way only. See the
+KleidiAI section: it invalidated one published measurement and then broke two builds of an unrelated
+sweep. When an A/B changes a CMake variable, check `CMakeCache.txt` says what you think it says.
 
 **The results file is pulled, not produced — so it can be stale too.** `adb pull` of
 `benchmark-results.json` happily returns the previous run's file when the run did not write one.

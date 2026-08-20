@@ -357,8 +357,20 @@ so generation tests are env-gated rather than run in CI.
   `hardware_concurrency() - 2` picked 7 and cost 2.6x.
 - **`GGML_NATIVE=OFF` leaves ggml at the NDK baseline**, which compiles the dot-product kernels
   out of a Q4_0 build entirely. The arm64 preset sets `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod`. That
-  raises the device floor to roughly 2018 hardware — SIGILL below it, no fallback. `+i8mm`
-  measured inside the noise and is deliberately absent.
+  raises the device floor to roughly 2018 hardware — SIGILL below it, no fallback. **Everything
+  above dotprod is absent because it was measured, not assumed**: `+fp16`, `+i8mm` and
+  `armv9-a+…+sve2` all land inside the noise on a Pixel 8a, and the same SVE2 binary swings 34.2 to
+  38.2 tok/s on run order alone. `GGML_CPU_ARM_ARCH` is a compile-time *baseline*, so enabling all
+  of them moves the floor to 2022 hardware for nothing. Runtime dispatch
+  (`GGML_CPU_ALL_VARIANTS`, which has `android_*` tiers upstream) needs `GGML_BACKEND_DL` and so
+  shared libs, plus `GGML_BACKEND_PATH` at run time — `ggml_backend_load_best` looks in
+  `/proc/self/exe`'s directory, which on Android is `/system/bin/`, not the app's `lib/`.
+- **A CMake cache outlives the experiment that set it.** `KOI_KLEIDIAI` forced
+  `GGML_CPU_KLEIDIAI` on and never off, so once any build enabled it every later build in that
+  directory kept it — which invalidated the "KleidiAI is a wash" measurement in
+  `docs/performance.md` and then failed two builds of an ISA sweep on undefined `kai_*` symbols,
+  looking exactly like an i8mm problem. Fixed by forcing both ways. When an A/B moves a CMake
+  variable, read `CMakeCache.txt` back.
 
 - **GPU offload is Vulkan, opt-in at build time via `KOI_VULKAN`.** The run-time half was already
   there — `Accelerator.GPU` maps onto `n_gpu_layers` — but a build with no GPU backend ignores it
