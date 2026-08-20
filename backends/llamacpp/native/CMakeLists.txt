@@ -108,8 +108,14 @@ endif()
 # target: this is exactly the shape of work a bandwidth-bound Q4_0 decode does.
 option(KOI_KLEIDIAI "Build ggml's CPU backend with ARM KleidiAI kernels" OFF)
 
+# Forced both ways. Forcing only ON leaves a build directory that once had KleidiAI enabled with
+# GGML_CPU_KLEIDIAI=ON in its cache forever, so KOI_KLEIDIAI=OFF measures the ON build — and the
+# way that surfaced was not a wrong number but an undefined-symbol link failure, when a change of
+# GGML_CPU_ARM_ARCH made ggml ask for kai kernels the cached KleidiAI build had not produced.
 if (KOI_KLEIDIAI)
     set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+else()
+    set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
 endif()
 
 option(KOI_OPENCL "Build the llama.cpp OpenCL backend for GPU offload" OFF)
