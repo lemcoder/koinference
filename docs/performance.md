@@ -61,8 +61,10 @@ placement. Those are three different answers and the schema keeps them apart. It
 every heuristic above is validated on exactly one device; a results file from an unfamiliar
 topology now says which cores it ran on instead of leaving it to be inferred from timings.
 
-`ThreadPlacement` in `:core` also lets a caller re-pin at run time — `pinToCpus` rebuilds the pool
-between decodes, under the runtime's guard. There is **no evidence yet** that reacting to anything
+`LlamaCppTextRuntime` also lets a caller re-pin at run time — `pinToCpus` rebuilds the pool between
+decodes, under the runtime's guard. It sits on the backend rather than in `:core` because only this
+backend can answer it: LiteRT-LM manages its own threads and exposes no placement control, and
+`:core` holds what every backend does identically. There is **no evidence yet** that reacting to anything
 beats picking once at load; the mechanism exists so that question can be measured.
 
 ## KleidiAI: no effect on decode

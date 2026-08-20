@@ -8,10 +8,10 @@ import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.SamplingKnob
 import io.github.lemcoder.koinference.StreamingTextRuntime
-import io.github.lemcoder.koinference.ThreadPlacement
 import io.github.lemcoder.koinference.TokenCounting
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
+import io.github.lemcoder.koinference.llamacpp.LlamaCppTextRuntime
 
 /**
  * The backends this build links, in the order `engine=all` runs them.
@@ -89,7 +89,9 @@ private class BackendEngine(private val backend: Backend) : BenchmarkInferenceEn
         // Read once, after load, because it is what the engine actually did rather than what was
         // asked for: the facade narrows its mask by the cpuset this process is in. Recorded so a
         // results file from a device nobody has measured says which cores it ran on.
-        pinnedCpus = (runtime as? ThreadPlacement)?.pinnedCpus()
+        // Backend-specific, and this file is already the one place that names backends. Only
+        // llama.cpp exposes thread placement; anything else reports nothing rather than "default".
+        pinnedCpus = (runtime as? LlamaCppTextRuntime)?.pinnedCpus()
         return RuntimeSession(runtime) { loader.unload(config.modelPath) }
     }
 
