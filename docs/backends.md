@@ -97,15 +97,19 @@ every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` 
 calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
 afternoon. Same rule as ever: **append new functions at the end.**
 
-## Platform files are named after their binding
+## Platform files are named `<Expect>.<platform>.kt`
 
-`FacadeBridge.kt` for the cinterop leg, `JniBridge.kt` for the ART/JNI leg — never after the
-common file they implement.
+`LlamaCppBridge.kt` in commonMain is answered by `LlamaCppBridge.jvm.kt`,
+`LlamaCppBridge.android.kt` and `LlamaCppBridge.native.kt`; `CpuPlacement.kt` by
+`CpuPlacement.android.kt`, `CpuPlacement.macos.kt`, `CpuPlacement.ios.kt` and so on.
+`ActualFileNamingTest` enforces both halves — the suffix must match the source set, and a
+commonMain file of that name must exist.
 
-A commonMain file with any top-level declaration collides with a same-named platform file
-(`Duplicate JVM class name … LlamaCppBridgeKt`). `expect` declarations generate no JVM class,
-which is why a shared name worked while the seam was expect/actual functions and stopped working
-the moment the seam became interfaces.
+An earlier convention named these after the *binding* (`JniBridge.kt`, `FacadeBridge.kt`) to avoid
+`Duplicate JVM class name … LlamaCppBridgeKt`, which a commonMain file with real top-level
+declarations triggers against a same-named platform file. The dotted suffix avoids it too, since
+`CpuPlacement.android.kt` and `CpuPlacement.kt` produce different facade classes, so the name is
+free to say what it answers.
 
 ## No source sets for sharing; per-platform source sets for differences
 

@@ -27,7 +27,8 @@ import java.nio.ByteOrder
 // struct by value and gets no bridge; index 9 is koi_embed, which nothing calls (see
 // docs/backends.md on why it stays in the header).
 //
-// This file is duplicated verbatim in androidMain. That is deliberate — see docs/backends.md.
+// This file is duplicated verbatim in the other ART leg. That is deliberate — see
+// docs/backends.md.
 
 /** 1 MiB. A grammar from a nested schema outgrows anything smaller, and so does a long reply. */
 private const val LARGE_BUFFER_BYTES = 1 shl 20

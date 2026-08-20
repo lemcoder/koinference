@@ -290,12 +290,17 @@ paragraph used to say the opposite — that the AAR carried no `.so` and the run
 transitively from `api(libs.litertlm.android)` — which was true of the SDK leg and survived its
 deletion by two releases. There is no Maven runtime dependency now.
 
-**A commonMain file with any top-level declaration collides with a same-named platform file.**
-`expect` declarations generate no JVM class, which is why a shared `LlamaCppBridge.kt` worked
-across source sets while that seam was expect/actual functions — and stopped working the moment it
-became interfaces. Adding one `const` to the common bridge produced `Duplicate JVM class name …
-LiteRtLmBridgeKt`. Hence platform files are named after their binding — `FacadeBridge.kt`,
-`JniBridge.kt` — and never after the common file they implement. Both backends follow this now.
+**A file holding actuals is named `<Expect>.<platform>.kt`** — `CpuPlacement.kt` in commonMain is
+answered by `CpuPlacement.android.kt`, `CpuPlacement.macos.kt` and so on. `ActualFileNamingTest`
+enforces it, including that a commonMain file of that name exists.
+
+This replaces an earlier convention of naming platform files after their *binding*
+(`JniBridge.kt`, `FacadeBridge.kt`), which existed to dodge `Duplicate JVM class name …
+LiteRtLmBridgeKt`: a commonMain file with real top-level declarations collides with a same-named
+platform file, and `expect` declarations generate no JVM class, so a shared name worked right up
+until the seam became interfaces. The dotted suffix sidesteps that on its own —
+`CpuPlacement.android.kt` and `CpuPlacement.kt` produce different facade classes — so the
+workaround is gone and the name can say which `expect` it answers instead.
 
 **The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
 follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer

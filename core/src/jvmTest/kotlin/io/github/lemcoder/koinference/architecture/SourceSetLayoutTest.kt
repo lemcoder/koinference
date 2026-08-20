@@ -63,19 +63,23 @@ class SourceSetLayoutTest {
     }
 
     @Test
-    fun `the jvm and android JNI bridges stay duplicated rather than shared`() {
+    fun `the llama_cpp bridge has one actual per leg and no shared parent`() {
         // Not a style preference: an intermediate source set holding the hand-written actual could
         // not see the generated kniBridgeN functions, which are produced per compilation into each
         // target's own source set.
         val bridges = firstParty()
-            .filter { it.name == "JniBridge" }
+            .filter { it.basename().startsWith("LlamaCppBridge.") }
+            // commonMain's LlamaCppBridge.kt matches that prefix too; the actuals are what matter.
+            .filter { it.declarationsWithActual().isNotEmpty() }
             .map { it.sourceSetName }
             .toSet()
 
         assertEquals(
-            setOf("jvmMain", "androidMain"),
+            setOf("jvmMain", "androidMain", "nativeMain"),
             bridges,
-            "JniBridge must exist once per ART leg and nowhere else",
+            "LlamaCppBridge needs one actual file per leg. The two ART legs duplicate rather than " +
+                "share, because the generated kniBridgeN functions land per target and a shared " +
+                "parent cannot see them.",
         )
     }
 

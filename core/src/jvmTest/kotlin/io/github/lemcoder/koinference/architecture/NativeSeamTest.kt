@@ -25,9 +25,10 @@ class NativeSeamTest {
      * against the generated enum. Those exist because the values are duplicated on purpose — only
      * the cinterop leg gets generated constants — and they are what stops the copies drifting.
      */
-    private val bindings = setOf(
-        "FacadeBridge", "JniBridge",
-        "LlamaCppBridgeJvmSmokeTest", "SessionDefaultsTest", "BackendIdTest",
+    private val bindingFiles = setOf(
+        "LlamaCppBridge.jvm.kt", "LlamaCppBridge.android.kt", "LlamaCppBridge.native.kt",
+        "LiteRtLmBridge.android.kt", "LiteRtLmBridge.native.kt",
+        "LlamaCppBridgeJvmSmokeTest.kt", "SessionDefaultsTest.kt", "BackendIdTest.kt",
     )
 
     @Test
@@ -41,7 +42,7 @@ class NativeSeamTest {
                         import.name.contains(".kniCString")
                 }
             }
-            .filterNot { it.name in bindings }
+            .filterNot { it.basename() in bindingFiles }
             .map { "${it.name} (${it.sourceSetName})" }
 
         assertTrue(

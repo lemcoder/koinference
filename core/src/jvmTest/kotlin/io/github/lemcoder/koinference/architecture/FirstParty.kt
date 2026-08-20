@@ -42,4 +42,8 @@ private fun KoFileDeclaration.named(
 /** The two modifiers this file cares about, so one predicate can serve all three declaration kinds. */
 internal data class Modifiers(val hasActualModifier: Boolean, val hasExpectModifier: Boolean)
 
+/** The file name, without its directories. */
+internal fun KoFileDeclaration.basename(): String =
+    path.replace('\\', '/').substringAfterLast('/')
+
 private val VENDORED = listOf("/.cpm/", "/build/", "/.prebuilt/", "/.gradle/", "/.codegraph/")
