@@ -8,6 +8,7 @@ import io.github.lemcoder.koinference.ModelConfig
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.SamplingKnob
 import io.github.lemcoder.koinference.StreamingTextRuntime
+import io.github.lemcoder.koinference.ThreadPlacement
 import io.github.lemcoder.koinference.TokenCounting
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
@@ -35,6 +36,7 @@ private class BackendEngine(private val backend: Backend) : BenchmarkInferenceEn
 
     private var maxNewTokens: Int = 0
     private var sampling: SamplingConfig = SamplingConfig()
+    private var pinnedCpus: List<Int>? = null
 
     override fun applyWorkload(workload: WorkloadConfig, sampling: SamplingConfig) {
         maxNewTokens = workload.maxNewTokens
@@ -58,6 +60,9 @@ private class BackendEngine(private val backend: Backend) : BenchmarkInferenceEn
         SamplingKnob.entries.forEach { knob ->
             put("${knob.name.lowercase()}Applied", (knob in backend.honours).toString())
         }
+        // Absent when the engine does not expose placement; empty when it runs unpinned. Those
+        // are different answers and the schema keeps them apart.
+        pinnedCpus?.let { put("pinnedCpus", if (it.isEmpty()) "default" else it.joinToString(",")) }
     }
 
     override suspend fun initialize(config: BenchmarkModelConfig): BenchmarkInferenceEngine.EngineSession {
@@ -81,6 +86,10 @@ private class BackendEngine(private val backend: Backend) : BenchmarkInferenceEn
             ),
         )
         val runtime = loader.load(config.modelPath) as StreamingTextRuntime
+        // Read once, after load, because it is what the engine actually did rather than what was
+        // asked for: the facade narrows its mask by the cpuset this process is in. Recorded so a
+        // results file from a device nobody has measured says which cores it ran on.
+        pinnedCpus = (runtime as? ThreadPlacement)?.pinnedCpus()
         return RuntimeSession(runtime) { loader.unload(config.modelPath) }
     }
 

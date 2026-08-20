@@ -5,6 +5,7 @@ import io.github.lemcoder.koinference.ModelRuntime
 import io.github.lemcoder.koinference.RuntimeSettings
 import io.github.lemcoder.koinference.StreamingTextRuntime
 import io.github.lemcoder.koinference.TextRuntime
+import io.github.lemcoder.koinference.ThreadPlacement
 import io.github.lemcoder.koinference.TokenCounting
 
 /**
@@ -15,7 +16,8 @@ import io.github.lemcoder.koinference.TokenCounting
  * caller of [LlamaCppModelLoader.load] needed as a result. `koi_embed` is still in the facade —
  * see `docs/backends.md` for why a C function outlives its Kotlin surface.
  */
-interface LlamaCppTextRuntime : ModelRuntime, TextRuntime, StreamingTextRuntime, TokenCounting {
+interface LlamaCppTextRuntime :
+    ModelRuntime, TextRuntime, StreamingTextRuntime, TokenCounting, ThreadPlacement {
 
     /** What the next session will be created with. */
     val generationParameters: GenerationParameters

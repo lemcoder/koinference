@@ -39,6 +39,32 @@ lone prime core is still excluded: one core 23% faster than four others waits at
 core of the mask, so the surplus goes unplaced — 6 threads against this phone's 4 big cores
 measured **0.6 tok/s**. The facade clamps `n_threads` to the mask size for that reason.
 
+### The mask is narrowed by what the app may use, and it is reported
+
+Two things a mask built from SoC topology cannot know, both handled in `detect_big_cores()`:
+
+- **Which cpuset the app is in.** On this phone `foreground` is `0-7` and `background` is `0-3`, so
+  a mask naming cpu4-7 is entirely outside the permitted set for a backgrounded app — and
+  `sched_setaffinity` fails rather than degrading. The candidate set is intersected with
+  `sched_getaffinity`.
+- **Which cores are online.** `/sys/devices/system/cpu/online` is intersected too, since cores go
+  offline under thermal pressure.
+
+If either leaves nothing, the session runs unpinned rather than pinned to cores it cannot have.
+Frequency is also not always enough to separate clusters — some SoCs clock a big and a little core
+to the same ceiling — so a single frequency tier falls back to grouping by the `CPU part` id from
+`/proc/cpuinfo` (this device: `0xd46` A510, `0xd4d` A715, `0xd4e` X3).
+
+**The placement is in the results.** `engineMetadata.pinnedCpus` records what the facade actually
+did — `4,5,6,7` here — or `default` when unpinned, and is absent for an engine that exposes no
+placement. Those are three different answers and the schema keeps them apart. It matters because
+every heuristic above is validated on exactly one device; a results file from an unfamiliar
+topology now says which cores it ran on instead of leaving it to be inferred from timings.
+
+`ThreadPlacement` in `:core` also lets a caller re-pin at run time — `pinToCpus` rebuilds the pool
+between decodes, under the runtime's guard. There is **no evidence yet** that reacting to anything
+beats picking once at load; the mechanism exists so that question can be measured.
+
 ## KleidiAI: no effect on decode
 
 `KOI_KLEIDIAI=ON` builds ggml's CPU backend with ARM's own quantized-matmul microkernels. Measured

@@ -60,6 +60,17 @@ internal interface LlamaCppSession {
     /** Tokens in [text] by the model's own vocabulary. */
     fun tokenCount(text: String): Int
 
+    /** CPUs the decode threads are pinned to, ascending; empty for default placement. */
+    fun cpuMask(): List<Int>
+
+    /**
+     * Re-pin the decode threads. Empty restores default placement.
+     *
+     * Only safe between decodes — the pool is in use during one — which the runtime guarantees by
+     * holding its guard.
+     */
+    fun setCpuMask(cpus: List<Int>)
+
     fun close()
 }
 

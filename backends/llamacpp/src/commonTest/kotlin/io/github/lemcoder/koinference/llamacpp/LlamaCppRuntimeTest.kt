@@ -321,4 +321,44 @@ class LlamaCppRuntimeTest {
         assertTrue(bridge.model.closed)
         assertTrue(bridge.model.session.closed)
     }
+
+    @Test
+    fun reportsThePlacementTheSessionActuallyHas() = runTest {
+        val runtime = runtime()
+
+        // Read through to the session rather than echoing a request: the facade narrows the mask
+        // by the cpuset this process is in, which Kotlin cannot see.
+        assertEquals(listOf(4, 5, 6, 7), runtime.pinnedCpus())
+    }
+
+    @Test
+    fun repinningReachesTheSession() = runTest {
+        val runtime = runtime()
+        runtime.generateResponse("warm up")
+
+        runtime.pinToCpus(listOf(6, 7))
+
+        assertEquals(listOf(listOf(6, 7)), bridge.model.session.maskHistory)
+        assertEquals(listOf(6, 7), runtime.pinnedCpus())
+    }
+
+    @Test
+    fun anEmptyMaskRestoresDefaultPlacement() = runTest {
+        val runtime = runtime()
+
+        runtime.pinToCpus(emptyList())
+
+        assertEquals(emptyList(), runtime.pinnedCpus())
+    }
+
+    @Test
+    fun repinningAfterUnloadFails() = runTest {
+        val loader = loader()
+        val runtime = loader.load(MODEL)
+        loader.unload(MODEL)
+
+        // The session is freed; rebuilding a pool against it would be a use-after-free.
+        assertFailsWith<IllegalStateException> { runtime.pinToCpus(listOf(4, 5)) }
+        assertFailsWith<IllegalStateException> { runtime.pinnedCpus() }
+    }
 }

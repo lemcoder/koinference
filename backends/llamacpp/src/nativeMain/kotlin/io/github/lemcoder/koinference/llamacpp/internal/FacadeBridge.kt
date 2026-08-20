@@ -15,9 +15,14 @@ import koinference.koi_json_schema_to_grammar
 import koinference.koi_model_free
 import koinference.koi_model_load
 import koinference.koi_session_create
+import koinference.koi_session_cpu_mask
 import koinference.koi_session_free
+import koinference.koi_session_set_cpu_mask
 import koinference.koi_token_count
 import kotlinx.cinterop.ByteVar
+import kotlinx.cinterop.IntVar
+import kotlinx.cinterop.get
+import kotlinx.cinterop.set
 import kotlinx.cinterop.CPointer
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.cValue
@@ -33,6 +38,9 @@ private const val LARGE_BUFFER_BYTES = 1 shl 20
 
 /** One chunk is a single token; the facade errors rather than truncating past this. */
 private const val CHUNK_BYTES = 512
+
+/** More cores than any phone has, so the mask is never truncated on the way out. */
+private const val MAX_MASK_CPUS = 64
 
 internal actual fun platformBridge(): LlamaCppBridge = FacadeBridge
 
@@ -139,6 +147,20 @@ private class FacadeSession(private val handle: CPointer<KoiSession>) : LlamaCpp
         val count = koi_token_count(handle, text)
         check(count >= 0) { "llama.cpp could not tokenize" }
         return count
+    }
+
+    override fun cpuMask(): List<Int> = memScoped {
+        val buffer = allocArray<IntVar>(MAX_MASK_CPUS)
+        val count = koi_session_cpu_mask(handle, buffer, MAX_MASK_CPUS)
+        if (count <= 0) emptyList() else List(count) { buffer[it] }
+    }
+
+    override fun setCpuMask(cpus: List<Int>) = memScoped {
+        val requested = allocArray<IntVar>(maxOf(cpus.size, 1))
+        cpus.forEachIndexed { index, cpu -> requested[index] = cpu }
+        check(koi_session_set_cpu_mask(handle, requested, cpus.size) == 0) {
+            "llama.cpp could not pin the decode threads to $cpus"
+        }
     }
 
     override fun close() {

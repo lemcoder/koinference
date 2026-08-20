@@ -11,12 +11,18 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(__linux__)
+#include <sched.h>
+#endif
 
 static constexpr int   DEFAULT_N_CTX     = 4096;
 static constexpr int   DEFAULT_N_PREDICT = 512;
@@ -55,13 +61,107 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * balance shifts with model size, quantization and how much bandwidth the rest of the device is
  * using.
  */
+/**
+ * CPUs this process may run on that are also online.
+ *
+ * Both halves matter. Android moves an app between cpusets — on a Pixel 8a `foreground` is 0-7 and
+ * `background` is 0-3 — so a mask derived from the SoC's topology can name cores this process is
+ * not allowed to touch, and pinning to one of those fails rather than degrading. Cores also go
+ * offline under thermal pressure. Empty means "do not pin".
+ */
+static std::set<int> usable_cpus(int cores) {
+    std::set<int> usable;
+
+#if defined(__linux__)
+    cpu_set_t permitted;
+    CPU_ZERO(&permitted);
+    if (sched_getaffinity(0, sizeof(permitted), &permitted) == 0) {
+        for (int cpu = 0; cpu < cores && cpu < CPU_SETSIZE; ++cpu) {
+            if (CPU_ISSET(cpu, &permitted)) usable.insert(cpu);
+        }
+    }
+#endif
+
+    // No affinity information: assume every core and let the online check narrow it.
+    if (usable.empty()) {
+        for (int cpu = 0; cpu < cores; ++cpu) usable.insert(cpu);
+    }
+
+    FILE* online = std::fopen("/sys/devices/system/cpu/online", "r");
+    if (!online) return usable;
+    char spec[128] = {0};
+    const bool read = std::fgets(spec, sizeof(spec), online) != nullptr;
+    std::fclose(online);
+    if (!read) return usable;
+
+    // "0-3,5" — ranges and singletons, comma separated.
+    std::set<int> up;
+    const char* cursor = spec;
+    while (*cursor) {
+        char* mark = nullptr;
+        const long first = std::strtol(cursor, &mark, 10);
+        if (mark == cursor) break;
+        long last = first;
+        if (*mark == '-') {
+            cursor = mark + 1;
+            last = std::strtol(cursor, &mark, 10);
+        }
+        for (long cpu = first; cpu <= last; ++cpu) up.insert(static_cast<int>(cpu));
+        if (*mark != ',') break;
+        cursor = mark + 1;
+    }
+    if (up.empty()) return usable;
+
+    std::set<int> both;
+    for (int cpu : usable) {
+        if (up.count(cpu)) both.insert(cpu);
+    }
+    return both;
+}
+
+/** The `CPU part` field of /proc/cpuinfo per CPU — a core's microarchitecture id. */
+static std::map<int, std::string> cpu_parts(int cores) {
+    std::map<int, std::string> parts;
+    FILE* info = std::fopen("/proc/cpuinfo", "r");
+    if (!info) return parts;
+
+    char line[256];
+    int current = -1;
+    while (std::fgets(line, sizeof(line), info)) {
+        if (std::strncmp(line, "processor", 9) == 0) {
+            const char* colon = std::strchr(line, ':');
+            if (colon) current = std::atoi(colon + 1);
+        } else if (std::strncmp(line, "CPU part", 8) == 0 && current >= 0 && current < cores) {
+            const char* colon = std::strchr(line, ':');
+            if (colon) {
+                std::string id(colon + 1);
+                id.erase(0, id.find_first_not_of(" \t"));
+                id.erase(id.find_last_not_of(" \t\r\n") + 1);
+                parts[current] = id;
+            }
+        }
+    }
+    std::fclose(info);
+    return parts;
+}
+
+/**
+ * The largest group of equally-capable cores this process may use, excluding the slowest group.
+ *
+ * Peak frequency is the primary signal, and not always sufficient — some SoCs clock a big and a
+ * little core to the same ceiling — so a single frequency group falls back to microarchitecture.
+ * Either way the first group is dropped and the largest of the rest wins: the biggest set of cores
+ * that reach a barrier together, which is what ggml rewards. The lone prime core is deliberately
+ * not it; one core 23% faster than four others still waits at the same barrier, and including it
+ * measured worse.
+ */
 static std::vector<int> detect_big_cores() {
     const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+    const std::set<int> usable = usable_cpus(cores);
+    if (usable.size() < 2) return {};
 
-    // Linux and Android expose the per-core ceiling here; other platforms do not, which is what
-    // the empty-result fallback covers.
-    std::map<long, std::vector<int>> cores_by_frequency;
-    for (int cpu = 0; cpu < cores; ++cpu) {
+    std::map<long, std::vector<int>> by_frequency;
+    for (int cpu : usable) {
         char path[128];
         std::snprintf(path, sizeof(path),
                       "/sys/devices/system/cpu/cpu%d/cpufreq/cpuinfo_max_freq", cpu);
@@ -70,20 +170,34 @@ static std::vector<int> detect_big_cores() {
         long khz = 0;
         const int read = std::fscanf(file, "%ld", &khz);
         std::fclose(file);
-        if (read == 1 && khz > 0) cores_by_frequency[khz].push_back(cpu);
+        if (read == 1 && khz > 0) by_frequency[khz].push_back(cpu);
     }
 
-    // Nothing readable, or one kind of core: no little cluster to avoid.
-    if (cores_by_frequency.size() < 2) return {};
+    std::map<std::string, std::vector<int>> by_part;
+    if (by_frequency.size() < 2) {
+        const std::map<int, std::string> parts = cpu_parts(cores);
+        for (int cpu : usable) {
+            const auto found = parts.find(cpu);
+            if (found != parts.end()) by_part[found->second].push_back(cpu);
+        }
+    }
 
-    // std::map is ordered, so begin() is the slowest tier — the one to leave alone. Among the
-    // rest take the largest group: the biggest set of cores that finish a barrier together. The
-    // lone prime core is not it, and including it measured worse.
-    auto tier = cores_by_frequency.begin();
-    ++tier;
+    // Neither signal separates the cores: one kind of core, nothing to avoid.
+    if (by_frequency.size() < 2 && by_part.size() < 2) return {};
+
     const std::vector<int>* best = nullptr;
-    for (; tier != cores_by_frequency.end(); ++tier) {
-        if (!best || tier->second.size() > best->size()) best = &tier->second;
+    if (by_frequency.size() >= 2) {
+        auto tier = by_frequency.begin();
+        ++tier;  // std::map is ordered, so begin() is the slowest tier.
+        for (; tier != by_frequency.end(); ++tier) {
+            if (!best || tier->second.size() > best->size()) best = &tier->second;
+        }
+    } else {
+        auto tier = by_part.begin();
+        ++tier;
+        for (; tier != by_part.end(); ++tier) {
+            if (!best || tier->second.size() > best->size()) best = &tier->second;
+        }
     }
     return best ? *best : std::vector<int>{};
 }
@@ -124,6 +238,7 @@ struct KoiSession {
     llama_model*              model;   // non-owning; lifetime tied to KoiModel
     llama_context*            ctx;
     ggml_threadpool*          threadpool = nullptr;
+    std::vector<int>          pinned_cpus;   // empty when on default placement
     llama_batch               batch;
     common_chat_templates_ptr chat_templates;
     KoiSessionParams          params;
@@ -171,6 +286,53 @@ KoiSessionParams koi_default_session_params(void) {
     return {DEFAULT_N_CTX, auto_threads, DEFAULT_N_PREDICT, DEFAULT_TEMP, DEFAULT_TOP_K, DEFAULT_MIN_P};
 }
 
+/**
+ * Build a pinned threadpool over `cpus` and attach it, replacing whatever the session had.
+ *
+ * Shared by session creation and koi_session_set_cpu_mask. An empty mask, or a pool that cannot be
+ * created, leaves the session on llama.cpp's own placement — slower, but running.
+ *
+ * Without a mask the scheduler is free to put a ggml worker on a little core, and since every graph
+ * node ends in a barrier the whole batch then runs at that core's pace. That — not bandwidth — is
+ * why 4 threads measured slower than 2 on a Pixel 8a before pinning.
+ */
+static bool apply_cpu_mask(KoiSession* session, const std::vector<int>& cpus, int requested_threads) {
+    llama_detach_threadpool(session->ctx);
+    if (session->threadpool) {
+        ggml_threadpool_free(session->threadpool);
+        session->threadpool = nullptr;
+    }
+    session->pinned_cpus.clear();
+
+    if (cpus.empty()) return true;
+
+    // Never more workers than cores in the mask: strict placement puts worker i on the i-th core,
+    // so the surplus goes nowhere — 6 threads against this phone's 4 big cores measured 0.6 tok/s
+    // against 39.8 for 4.
+    const int threads = std::max(1, std::min(requested_threads, static_cast<int>(cpus.size())));
+
+    ggml_threadpool_params tpp = ggml_threadpool_params_default(threads);
+    std::fill(std::begin(tpp.cpumask), std::end(tpp.cpumask), false);
+    int masked = 0;
+    for (int cpu : cpus) {
+        if (cpu >= 0 && cpu < GGML_MAX_N_THREADS) {
+            tpp.cpumask[cpu] = true;
+            ++masked;
+        }
+    }
+    if (masked == 0) return true;
+    tpp.strict_cpu = true;
+
+    session->threadpool = ggml_threadpool_new(&tpp);
+    if (!session->threadpool) return false;
+
+    llama_attach_threadpool(session->ctx, session->threadpool, nullptr);
+    // The context has to agree, or it dispatches more work than the pool has workers.
+    llama_set_n_threads(session->ctx, threads, threads);
+    session->pinned_cpus = cpus;
+    return true;
+}
+
 KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     if (!model) return nullptr;
 
@@ -199,38 +361,7 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     session->chat_templates  = common_chat_templates_init(model->model, "");
     session->params          = params;
 
-    // Pin the decode threads to the big cluster.
-    //
-    // Without a mask the scheduler is free to put a ggml worker on a little core, and since every
-    // node ends in a barrier the whole batch then runs at that core's pace. This is the suspected
-    // reason 4 threads measured *slower* than 2 on a Pixel 8a: not bandwidth, but one worker
-    // landing on an A510. strict_cpu pins worker i to the i-th core in the mask rather than
-    // letting it drift.
-    //
-    // Best effort: a platform that reports no topology gets the default placement, and a
-    // threadpool that cannot be created is not fatal — llama.cpp falls back to its own threads.
-    const std::vector<int> big_cores = detect_big_cores();
-    if (!big_cores.empty()) {
-        // Never more workers than cores in the mask. strict_cpu pins worker i to the i-th core in
-        // it, so asking for more leaves the surplus unplaced: 6 threads against this phone's 4
-        // big cores measured 0.6 tok/s, against 39.8 for 4.
-        const int pinned_threads =
-            std::min(n_threads, static_cast<int>(big_cores.size()));
-
-        ggml_threadpool_params tpp = ggml_threadpool_params_default(pinned_threads);
-        std::fill(std::begin(tpp.cpumask), std::end(tpp.cpumask), false);
-        for (int cpu : big_cores) {
-            if (cpu >= 0 && cpu < GGML_MAX_N_THREADS) tpp.cpumask[cpu] = true;
-        }
-        tpp.strict_cpu = true;
-
-        session->threadpool = ggml_threadpool_new(&tpp);
-        if (session->threadpool) {
-            llama_attach_threadpool(ctx, session->threadpool, nullptr);
-            // The context has to agree, or it dispatches more work than the pool has workers.
-            llama_set_n_threads(ctx, pinned_threads, pinned_threads);
-        }
-    }
+    apply_cpu_mask(session, detect_big_cores(), n_threads);
 
     return session;
 }
@@ -473,3 +604,34 @@ int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size) 
     return static_cast<int>(grammar.size());
 }
 
+/* ── thread placement ─────────────────────────────────────────────────────── */
+
+int koi_session_cpu_mask(KoiSession* session, int* out_cpus, int max_cpus) {
+    if (!session || !out_cpus || max_cpus < 0) return -1;
+    const int count = std::min(static_cast<int>(session->pinned_cpus.size()), max_cpus);
+    for (int i = 0; i < count; ++i) out_cpus[i] = session->pinned_cpus[i];
+    return count;
+}
+
+int koi_session_set_cpu_mask(KoiSession* session, const int* cpus, int count) {
+    if (!session || count < 0) return -1;
+    if (count > 0 && !cpus) return -1;
+
+    // Only cores this process may actually use: a caller reading the SoC's topology cannot know
+    // which cpuset the app is in, and pinning outside it fails rather than degrading.
+    std::vector<int> requested;
+    if (count > 0) {
+        const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+        const std::set<int> usable = usable_cpus(cores);
+        for (int i = 0; i < count; ++i) {
+            if (usable.count(cpus[i])) requested.push_back(cpus[i]);
+        }
+    }
+
+    // What the session was created with is the ceiling; the mask narrows it further.
+    const int requested_threads = session->params.n_threads > 0
+        ? session->params.n_threads
+        : detect_decode_threads();
+
+    return apply_cpu_mask(session, requested, requested_threads) ? 0 : -1;
+}

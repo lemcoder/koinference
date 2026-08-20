@@ -12,6 +12,8 @@ import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
+import io.github.lemcoder.koinference.llamacpp.jni.kniBridge16
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -32,6 +34,9 @@ private const val LARGE_BUFFER_BYTES = 1 shl 20
 
 /** One chunk is a single token; the facade errors rather than truncating past this. */
 private const val CHUNK_BYTES = 512
+
+/** More cores than any phone has, so the mask is never truncated on the way out. */
+private const val MAX_MASK_CPUS = 64
 
 /** Layout of `KoiSessionParams`: six 4-byte fields, no padding. */
 private const val SESSION_PARAMS_SIZE = 24
@@ -130,6 +135,19 @@ private class JniSession(private val handle: Long) : LlamaCppSession {
         check(count >= 0) { "llama.cpp could not tokenize" }
         return count
     }
+
+    override fun cpuMask(): List<Int> {
+        val out = IntArray(MAX_MASK_CPUS)
+        val count = kniBridge15(handle, out, out.size)
+        return if (count <= 0) emptyList() else out.take(count)
+    }
+
+    override fun setCpuMask(cpus: List<Int>) {
+        check(kniBridge16(handle, cpus.toIntArray(), cpus.size) == 0) {
+            "llama.cpp could not pin the decode threads to $cpus"
+        }
+    }
+
 
     override fun close() = kniBridge7(handle)
 }

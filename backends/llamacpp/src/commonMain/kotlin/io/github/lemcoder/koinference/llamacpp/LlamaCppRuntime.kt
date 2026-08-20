@@ -144,6 +144,29 @@ class LlamaCppRuntime internal constructor(
         }
     }
 
+    /**
+     * CPUs the decode threads are pinned to.
+     *
+     * Reads through to the session, so it reports what the facade actually did rather than what
+     * was asked for — the placement is narrowed by the cpuset this process is in, which Kotlin
+     * cannot see.
+     */
+    override suspend fun pinnedCpus(): List<Int> = guard.whileOpen {
+        withContext(Dispatchers.Default) { currentSession().cpuMask() }
+    }
+
+    /**
+     * Re-pins the decode threads, under the guard.
+     *
+     * The guard is the point: rebuilding the pool while a generation is decoding into it would
+     * pull the workers out from beneath it, so this waits for the turn to finish instead.
+     */
+    override suspend fun pinToCpus(cpus: List<Int>) {
+        guard.whileOpen {
+            withContext(Dispatchers.Default) { currentSession().setCpuMask(cpus) }
+        }
+    }
+
     suspend fun readGgufMetadata(): GgufMetadata =
         GgufParser.parse(readFileBytes(modelOptions.modelPath))
 

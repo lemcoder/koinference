@@ -106,6 +106,19 @@ internal class FakeSession(
     /** Whitespace words, which is enough for a fake: tests assert plumbing, not tokenization. */
     override fun tokenCount(text: String): Int = text.split(" ").count { it.isNotBlank() }
 
+    /** Stands in for the big cluster the facade would find. */
+    var mask: List<Int> = listOf(4, 5, 6, 7)
+        private set
+
+    val maskHistory = mutableListOf<List<Int>>()
+
+    override fun cpuMask(): List<Int> = mask
+
+    override fun setCpuMask(cpus: List<Int>) {
+        mask = cpus
+        maskHistory += cpus
+    }
+
     override fun close() {
         closed = true
     }
