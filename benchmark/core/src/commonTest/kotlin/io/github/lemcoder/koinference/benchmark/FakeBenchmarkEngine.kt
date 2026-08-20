@@ -5,6 +5,7 @@ import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.benchmark.engine.BenchmarkInferenceEngine
 import io.github.lemcoder.koinference.benchmark.engine.GenerationRequest
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -55,12 +56,12 @@ internal class FakeBenchmarkEngine(
 
     private inner class Session : BenchmarkInferenceEngine.EngineSession {
 
-        override fun stream(request: GenerationRequest): Flow<String> = flow {
+        override fun stream(request: GenerationRequest): Flow<ResponsePart> = flow {
             generations++
             failOnGenerate?.let { throw it }
             chunks.forEach { chunk ->
                 probe.advance(nanosPerChunk)
-                emit(chunk)
+                emit(ResponsePart.Text(chunk))
             }
         }
 

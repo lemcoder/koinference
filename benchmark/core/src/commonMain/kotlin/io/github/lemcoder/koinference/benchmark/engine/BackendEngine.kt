@@ -10,9 +10,9 @@ import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
-import io.github.lemcoder.koinference.runtime.text.StreamingTextRuntime
 import io.github.lemcoder.koinference.runtime.text.TokenCounting
 
 /**
@@ -73,12 +73,12 @@ internal class BackendEngine(private val backend: Backend) : BenchmarkInferenceE
                 cacheDir = config.cacheDir,
             ),
         )
-        val runtime = loader.load(config.modelPath) as StreamingTextRuntime
+        val runtime = loader.load(config.modelPath) as GeneratingRuntime
         return RuntimeSession(runtime) { loader.unload(config.modelPath) }
     }
 
     private class RuntimeSession(
-        private val runtime: StreamingTextRuntime,
+        private val runtime: GeneratingRuntime,
         private val release: suspend () -> Unit,
     ) : BenchmarkInferenceEngine.EngineSession {
 

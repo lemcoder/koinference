@@ -117,9 +117,9 @@ class LiteRtLmDeviceTest {
                 parameters = GenerationParameters(temperature = 0.0, seed = 42)))
             val runtime = loader.load(modelPath)
             try {
-                val streamed = runtime.streamResponse("Say hello.").toList()
+                val streamed = runtime.streamResponse("Say hello.").toList().textParts()
                 runtime.resetConversation()
-                val blocking = runtime.generateResponse("Say hello.")
+                val blocking = runtime.generateResponse("Say hello.").text()
 
                 Log.i(
                     "koinference-benchmark",
@@ -156,7 +156,7 @@ class LiteRtLmDeviceTest {
                 val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir))
             val runtime = loader.load(modelPath)
             try {
-                val reply = runtime.generateResponse("Say hello.")
+                val reply = runtime.generateResponse("Say hello.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unload(modelPath)
@@ -177,7 +177,7 @@ class LiteRtLmDeviceTest {
                 val reply = runtime.generateResponse(
                     prompt = "Name a capital city.",
                     constraint = GenerationConstraint.JsonSchema(schema),
-                )
+                ).text()
                 // Proves llguidance is present in the AAR's runtime, not only in the Apple
                 // prebuilt — the two ship separately and could differ.
                 assertTrue(

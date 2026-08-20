@@ -43,7 +43,7 @@ class LlamaCppGenerationTest {
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
-            val reply = runtime.generateResponse("Once upon a time")
+            val reply = runtime.generateResponse("Once upon a time").text()
             assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
         } finally {
             loader.unload(path)
@@ -62,7 +62,7 @@ class LlamaCppGenerationTest {
             val reply = runtime.generateResponse(
                 prompt = "Name a capital city.",
                 constraint = GenerationConstraint.JsonSchema(schema),
-            )
+            ).text()
             assertTrue(reply.trimStart().startsWith("{"), "expected a JSON object, got: '$reply'")
             assertTrue(reply.contains("\"city\""), "expected the schema's field, got: '$reply'")
         } finally {

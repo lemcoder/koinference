@@ -6,7 +6,6 @@ import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.backend.SamplingKnob
-import io.github.lemcoder.koinference.runtime.text.StreamingTextRuntime
 import io.github.lemcoder.koinference.runtime.text.TokenCounting
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp

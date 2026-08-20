@@ -1,7 +1,8 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.runtime.ModelRuntime
-import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.text.TokenCounting
+
 
 /**
  * What a loaded LiteRT-LM model can do.
@@ -13,7 +14,7 @@ import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
  * tokenize, detokenize and scoring, but nothing that returns an embedding vector, so there is only
  * ever one kind of runtime here. An embedding backend would go through LiteRT core instead.
  */
-interface LiteRtLmTextRuntime : TextModelRuntime {
+interface LiteRtLmTextRuntime : GeneratingRuntime, TokenCounting {
 
     /**
      * Forget the conversation so far and start the next turn from the system prompt.

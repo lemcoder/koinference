@@ -83,7 +83,7 @@ class LlamaCppDeviceTest {
             val runtime = loader.load(modelPath)
             try {
                 assertIs<LlamaCppTextRuntime>(runtime)
-                val reply = runtime.generateResponse("Once upon a time")
+                val reply = runtime.generateResponse("Once upon a time").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unload(modelPath)
@@ -110,8 +110,8 @@ class LlamaCppDeviceTest {
                 // Greedy, so the two calls answer identically rather than by luck.
                 runtime.updateGenerationParameters(GenerationParameters(temperature = 0.0))
 
-                val streamed = runtime.streamResponse("Once upon a time").toList()
-                val blocking = runtime.generateResponse("Once upon a time")
+                val streamed = runtime.streamResponse("Once upon a time").toList().textParts()
+                val blocking = runtime.generateResponse("Once upon a time").text()
 
                 Log.i(
                     "koinference-benchmark",

@@ -63,8 +63,8 @@ class LlamaCppRuntimeTest {
     fun reusesOneSessionAcrossTurns() = runTest {
         val runtime = runtime()
 
-        runtime.generateResponse("one")
-        runtime.generateResponse("two")
+        runtime.generateResponse("one").text()
+        runtime.generateResponse("two").text()
 
         assertEquals(1, bridge.model.sessions.size)
         assertEquals(listOf("one", "two"), bridge.model.session.turns.map { it.prompt })
@@ -73,7 +73,7 @@ class LlamaCppRuntimeTest {
     @Test
     fun opensTheSessionWithTheParametersItWasGiven() = runTest {
         runtime(GenerationParameters(topK = 7, minP = 0.2, temperature = 0.1))
-            .generateResponse("hello")
+            .generateResponse("hello").text()
 
         val options = bridge.model.session.options
         assertEquals(7, options.topK)
@@ -86,7 +86,7 @@ class LlamaCppRuntimeTest {
 
     @Test
     fun unsetKnobsFallBackToTheFacadeDefaults() = runTest {
-        runtime().generateResponse("hello")
+        runtime().generateResponse("hello").text()
 
         val options = bridge.model.session.options
         assertEquals(DEFAULT_TOP_K, options.topK)
@@ -98,7 +98,7 @@ class LlamaCppRuntimeTest {
     fun topPIsNotPassedOffAsMinP() = runTest {
         // koi_session_create takes no top-p, so a caller asking for one is ignored rather than
         // surprised by min-p standing in for it.
-        runtime(GenerationParameters(topP = 0.5)).generateResponse("hello")
+        runtime(GenerationParameters(topP = 0.5)).generateResponse("hello").text()
 
         assertEquals(DEFAULT_MIN_P, bridge.model.session.options.minP)
     }
@@ -107,8 +107,8 @@ class LlamaCppRuntimeTest {
     fun sendsTheSystemPromptWithEveryTurn() = runTest {
         val runtime = runtime()
 
-        runtime.generateResponse("one")
-        runtime.generateResponse("two")
+        runtime.generateResponse("one").text()
+        runtime.generateResponse("two").text()
 
         assertTrue(bridge.model.session.turns.all { it.systemPrompt == "You are terse." })
     }
@@ -117,7 +117,7 @@ class LlamaCppRuntimeTest {
     fun convertsASchemaToAGrammarAndPassesItDown() = runTest {
         val schema = """{"type":"object"}"""
 
-        runtime().generateResponse("hello", GenerationConstraint.JsonSchema(schema))
+        runtime().generateResponse("hello", GenerationConstraint.JsonSchema(schema)).text()
 
         assertEquals("grammar for $schema", bridge.model.session.turns.single().grammar)
     }
@@ -128,7 +128,7 @@ class LlamaCppRuntimeTest {
         val runtime = runtime()
 
         assertFailsWith<IllegalArgumentException> {
-            runtime.generateResponse("hello", GenerationConstraint.JsonSchema("nonsense"))
+            runtime.generateResponse("hello", GenerationConstraint.JsonSchema("nonsense")).text()
         }
         // Nothing was generated: an unconstrained reply would look like a working schema.
         assertTrue(bridge.model.sessions.all { it.turns.isEmpty() })
@@ -141,18 +141,18 @@ class LlamaCppRuntimeTest {
         bridge.reply = { "" }
         val runtime = runtime()
 
-        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hello") }
+        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hello").text() }
         assertTrue(failure.message!!.contains(MODEL), failure.message!!)
     }
 
     @Test
     fun changingParametersRebuildsTheSessionButKeepsTheWeights() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
         val first = bridge.model.session
 
         runtime.updateGenerationParameters(GenerationParameters(topK = 1))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertTrue(first.closed, "the old session was leaked")
         assertEquals(2, bridge.model.sessions.size)
@@ -164,10 +164,10 @@ class LlamaCppRuntimeTest {
     @Test
     fun settingTheSameParametersKeepsTheSession() = runTest {
         val runtime = runtime(GenerationParameters(topK = 1))
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         runtime.updateGenerationParameters(GenerationParameters(topK = 1))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertEquals(1, bridge.model.sessions.size, "the KV cache was dropped for nothing")
     }
@@ -175,11 +175,11 @@ class LlamaCppRuntimeTest {
     @Test
     fun changingTheBackendReloadsTheModelOnIt() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
         val cpuModel = bridge.model
 
         runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertTrue(cpuModel.closed, "the CPU model was leaked")
         assertEquals(2, bridge.models.size)
@@ -193,7 +193,7 @@ class LlamaCppRuntimeTest {
     @Test
     fun settingTheSameBackendDoesNotReload() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.CPU))
 
@@ -205,7 +205,7 @@ class LlamaCppRuntimeTest {
     fun aBackendThatCannotBeOpenedLeavesTheRuntimeUnloaded() = runTest {
         val bridge = FakeLlamaCppBridge(unavailable = Accelerator.GPU)
         val runtime = runtime(bridge = bridge)
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         val failure = assertFailsWith<IllegalStateException> {
             runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
@@ -214,7 +214,7 @@ class LlamaCppRuntimeTest {
 
         // The CPU model is already gone, so the runtime says so instead of generating through a
         // freed handle.
-        assertFailsWith<IllegalStateException> { runtime.generateResponse("two") }
+        assertFailsWith<IllegalStateException> { runtime.generateResponse("two").text() }
         assertTrue(bridge.models.single().closed)
     }
 
@@ -232,7 +232,7 @@ class LlamaCppRuntimeTest {
         val runtime = loader.load(MODEL)
         loader.unload(MODEL)
 
-        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hi") }
+        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hi").text() }
         assertTrue(failure.message!!.contains(MODEL), failure.message!!)
     }
 
@@ -256,8 +256,8 @@ class LlamaCppRuntimeTest {
     fun streamsChunksAndConcatenatesToTheBlockingReply() = runTest {
         val runtime = runtime()
 
-        val streamed = runtime.streamResponse("hello").toList()
-        val blocking = runtime.generateResponse("hello")
+        val streamed = runtime.streamResponse("hello").toList().textParts()
+        val blocking = runtime.generateResponse("hello").text()
 
         assertTrue(streamed.size > 1, "a stream that arrives in one piece is not a stream")
         assertEquals(blocking, streamed.joinToString(""))
@@ -278,11 +278,11 @@ class LlamaCppRuntimeTest {
     fun aStreamHoldsTheRuntimeSoASecondTurnCannotInterleave() = runTest {
         val runtime = runtime()
 
-        val chunks = runtime.streamResponse("first").toList()
+        val chunks = runtime.streamResponse("first").toList().textParts()
 
         // The second turn ran only after the first flow completed, so both are whole turns
         // rather than two generations decoding into one KV cache.
-        runtime.generateResponse("second")
+        runtime.generateResponse("second").text()
         assertTrue(chunks.isNotEmpty())
         assertEquals(listOf("first", "second"), bridge.model.session.turns.map { it.prompt })
     }
@@ -301,7 +301,7 @@ class LlamaCppRuntimeTest {
         val loader = loader()
         val runtime = loader.load(MODEL)
         // First turn opens the session, so the hook below is installed on a real one.
-        runtime.generateResponse("warm up")
+        runtime.generateResponse("warm up").text()
 
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -314,7 +314,7 @@ class LlamaCppRuntimeTest {
             modelWasOpen = !bridge.model.closed
         }
 
-        val generating = launch(Dispatchers.Default) { runtime.generateResponse("slow") }
+        val generating = launch(Dispatchers.Default) { runtime.generateResponse("slow").text() }
         started.await()
         val unloading = launch(Dispatchers.Default) { loader.unload(MODEL) }
 
@@ -331,8 +331,8 @@ class LlamaCppRuntimeTest {
     fun placesTheThreadsBeforeDecodingAndOnlyOnce() = runTest {
         val runtime = runtime()
 
-        runtime.generateResponse("one")
-        runtime.generateResponse("two")
+        runtime.generateResponse("one").text()
+        runtime.generateResponse("two").text()
 
         // Chosen before the first decode, and not re-applied when the machine has not changed.
         assertEquals(listOf(listOf(4, 5, 6, 7)), bridge.model.session.maskHistory)
@@ -345,9 +345,9 @@ class LlamaCppRuntimeTest {
         val machine = MutableMachine()
         val runtime = loader(placementPolicy = CpuPlacementPolicy(machine)).load(MODEL)
 
-        runtime.generateResponse("foreground")
+        runtime.generateResponse("foreground").text()
         machine.permitted = "0-3"
-        runtime.generateResponse("background")
+        runtime.generateResponse("background").text()
 
         assertEquals(
             listOf(listOf(4, 5, 6, 7), emptyList()),
@@ -358,11 +358,11 @@ class LlamaCppRuntimeTest {
     @Test
     fun aNewSessionIsPlacedAgain() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         // The parameter change rebuilds the session, and a fresh pool starts unplaced.
         runtime.updateGenerationParameters(GenerationParameters(topK = 1))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertEquals(listOf(listOf(4, 5, 6, 7)), bridge.model.session.maskHistory)
     }

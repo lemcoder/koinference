@@ -107,43 +107,49 @@ The test for it is typed as `ModelRuntime` on purpose: see `ModelRuntimeContract
 `resetConversation` has no llama.cpp counterpart — that engine carries no conversation to forget —
 so it is not hoisted. The bar is a counterpart that exists, not a signature that would compile.
 
-## Two modalities, and what that cost
+## One runtime, and replies made of parts
 
-`runtime` holds what every model has — settings, sampling parameters, `RuntimeGuard`. Output-shaped
-interfaces live under it: `runtime.text` for `TextRuntime` / `StreamingTextRuntime` /
-`TokenCounting` / `TextModelRuntime`, `runtime.vision` for `ImageRuntime` / `ImageModelRuntime` /
-`GeneratedImage`.
+`runtime` holds what every model has — settings, sampling parameters, `RuntimeGuard` — and
+`GeneratingRuntime` is the one interface a backend implements to generate anything:
 
-A second modality was added as a probe — `FakeVisionBackend` in `:core`'s tests, written as if it
-were real, for a modality this repository has no engine for. What it needed from `:core` was a
-`Modality` constant and an output interface. Reused unchanged: `Backend`, `ModelLoader`,
-`ModelConfig`, `RuntimeGuard`, the whole settings surface, and `PromptPart` — which has carried
-`ImageFile` and `ImageBytes` from the start, and is why a vision-language model answering in words
-is `Modality.TEXT` rather than something new. `honours` needed nothing either: a diffusion model has
-a seed and no top-k, which the same set already expresses.
+```kotlin
+suspend fun generateResponse(prompt: List<PromptPart>, constraint: GenerationConstraint? = null): List<ResponsePart>
+fun streamResponse(prompt: List<PromptPart>, constraint: GenerationConstraint? = null): Flow<ResponsePart>
+```
 
-**One thing did break, and it is the thing that was predicted.** `ModelLoader.load` returned
-`TextModelRuntime`, which stopped being true the moment a loader could produce something else. It
-returns `ModelRuntime` again, and `Koinference` gained `loadText` and `loadVision`, which check the
-backend's declared `Modality` *before* reading the weights and narrow the result. The cast is the
-library's now, once, with a message naming the mismatch — not every caller's.
+**It was split by output type before, and a real model broke the split.** There was a
+`runtime.text` with `TextRuntime` returning a `String` and a `runtime.vision` with `ImageRuntime`
+returning one image. `Modality` was already a `Set`, so `setOf(TEXT, AUDIO)` was expressible — but a
+model that interleaves speech with its transcript had no interface it could implement. Two return
+types cannot express one ordered reply, and `Pair<String, List<ByteArray>>` throws away the ordering
+that was the whole point.
 
-Modality is named for the **output**, because that is the axis the interfaces split on. Input was
-already multimodal.
+`ResponsePart` is a sealed interface — `Text`, `Audio`, `Image` — so order is what the list carries.
+`FakeOmniBackend` in `:core`'s tests is written as if it were such an engine, emitting
+`Text("Hello") · Audio · Text(" there") · Audio`, and `MultiModalityTest` asserts the interleaving
+survives both the blocking call and the stream. What it needs from `:core` is one `Modality`
+constant and nothing else; `Backend`, `ModelLoader`, `ModelConfig`, `GeneratingRuntime` and
+`RuntimeGuard` are all reused unchanged. `PromptPart` needed nothing either — it has carried
+`ImageFile` and `AudioFile` from the start, which is why a vision-language model answering in words
+is `Modality.TEXT`: **modality is named for the output**, because input was already multimodal.
 
-## Text runtimes only
+`Audio` and `Image` are deliberately not `data class`es. `ByteArray` equality is by reference, so a
+generated `equals` would report two identical replies as different; theirs compare the bytes.
 
-There is one kind of runtime and it produces text. There used to be a sealed hierarchy with a
-`LlamaCppEmbeddingRuntime` in it that nothing implemented, which cost every caller of
-`load()` a downcast that could never fail — including the benchmark adapter and the sample app.
-`load()` now returns the backend's text runtime directly.
+**There is no `text()` helper in `:core`, and that is a decision.** A caller narrowing a reply to
+text is discarding whatever else the model produced, and the discard belongs in the calling code
+where it can be seen. `LoadedModel` in the benchmark app does it explicitly, because a
+chat-completions `delta` has nowhere to put audio. The tests have their own helper; the library does
+not ship one.
+
+`TokenCounting` stayed in `runtime.text`, because a token is a text notion. It is the only member of
+that package now.
 
 `koi_embed` is still in `koinference_facade.h`. **Leave it there.** The generated JNI bridges are
 numbered by declaration position, so deleting a function from the middle of the header renumbers
 every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` silently starts
 calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
 afternoon. Same rule as ever: **append new functions at the end.**
-
 ## Platform files are named `<Expect>.<platform>.kt`
 
 `LlamaCppBridge.kt` in commonMain is answered by `LlamaCppBridge.jvm.kt`,

@@ -1,57 +1,85 @@
 package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.Modality
-import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.runtime.vision.ImageFormat
+import io.github.lemcoder.koinference.runtime.AudioFormat
+import io.github.lemcoder.koinference.runtime.Modality
+import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
- * Does the architecture hold when a second modality arrives?
+ * Does the architecture hold for a model whose reply carries two modalities at once?
  *
- * `FakeVisionBackend` is written as if it were a real engine for a modality this repository has no
- * engine for. What it needed from `:core` is the answer: a `Modality`, a runtime interface for its
- * output, and nothing else. `Backend`, `ModelLoader`, `ModelConfig`, `RuntimeGuard`, `PromptPart`
- * and the whole settings surface were reused unchanged.
+ * This is the case that broke the previous design. Runtimes were split by output type —
+ * `generateResponse(): String` and an `ImageRuntime` returning a single image — so a model that
+ * interleaves speech with its transcript had no interface it could implement. `Modality` was already
+ * a `Set` and would have allowed `setOf(TEXT, AUDIO)`; there was simply nothing to implement.
  *
- * The one thing that did have to change is recorded here too: `load` could no longer promise text.
+ * `FakeOmniBackend` is written as if it were such an engine. What it needs from `:core` is a
+ * `Modality` constant and nothing else: `Backend`, `ModelLoader`, `ModelConfig`, `GeneratingRuntime`,
+ * the settings surface and `PromptPart` are all reused as a text engine uses them.
  */
 class MultiModalityTest {
 
     private val text = FakeBackend("llama.cpp", listOf(".gguf"))
-    private val vision = FakeVisionBackend()
-    private val koi = Koinference(text, vision)
+    private val omni = FakeOmniBackend()
+    private val koi = Koinference(text, omni)
 
     @Test
-    fun bothModalitiesLoadThroughOneEntryPoint() = runTest {
-        assertEquals("reply from /m/a.gguf", koi.loadText("/m/a.gguf").generateResponse("hi"))
+    fun aReplyCanInterleaveTextAndAudio() = runTest {
+        val reply = koi.load("/m/qwen.omni").generateResponse("say hello")
 
-        val image = koi.loadVision("/m/sd.safetensors").generateImage("a cat")
-        assertEquals(ImageFormat.PNG, image.format)
-        assertEquals(8, image.width)
+        // The ordering is the point: a shape that returned text and audio separately would lose it.
+        assertEquals(
+            listOf("Text", "Audio", "Text", "Audio"),
+            reply.map { it::class.simpleName },
+        )
+        assertEquals("Hello there", reply.text())
     }
 
     @Test
-    fun askingForTheWrongModalityFailsBeforeReadingWeights() = runTest {
-        // The check is against the declared modality, not the runtime that comes back, so a caller
-        // gets told for free rather than after several hundred megabytes.
-        val failure = assertFailsWith<IllegalStateException> { koi.loadText("/m/sd.safetensors") }
+    fun interleavingSurvivesStreaming() = runTest {
+        val parts = koi.load("/m/qwen.omni").streamResponse("say hello").toList()
 
-        assertTrue(failure.message!!.contains("fake-diffusion"), failure.message!!)
-        assertTrue(failure.message!!.contains("TEXT"), failure.message!!)
-        assertTrue(vision.loaders.isEmpty(), "must not construct a loader for a refused modality")
+        assertEquals(4, parts.size)
+        val audio = parts.filterIsInstance<ResponsePart.Audio>()
+        assertEquals(AudioFormat.PCM_16, audio.first().format)
+        assertEquals(24_000, audio.first().sampleRateHz)
+    }
+
+    @Test
+    fun aTextOnlyEngineIsTheSameShapeWithOneKindOfPart() = runTest {
+        val reply = koi.load("/m/a.gguf").generateResponse("hi")
+
+        // No special case anywhere: a text engine simply never emits anything but Text.
+        assertTrue(reply.all { it is ResponsePart.Text })
+        assertEquals("reply from /m/a.gguf", reply.text())
+    }
+
+    @Test
+    fun oneLoadServesBothKindsOfModel() = runTest {
+        // There is no loadText/loadVision to choose between, because there is nothing to choose:
+        // every generating runtime speaks ResponsePart.
+        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
+        assertEquals("Hello there", koi.load("/m/qwen.omni").generateResponse("hi").text())
+    }
+
+    @Test
+    fun aBackendDeclaresEveryModalityItsRepliesCarry() {
+        assertEquals(setOf(Modality.TEXT, Modality.AUDIO), omni.modalities)
+        assertEquals(setOf(Modality.TEXT), text.modalities)
     }
 
     @Test
     fun theSettingsSurfaceIsSharedAcrossModalities() = runTest {
-        // The whole ModelRuntime contract applies unchanged to an image model: it has a device and
-        // a sampler like anything else, which is why those members are not on the text interfaces.
-        val runtime = koi.loadVision("/m/sd.safetensors")
+        // An omni model has a device and a sampler like anything else, which is why those members
+        // are on ModelRuntime rather than on a per-modality interface.
+        val runtime = koi.load("/m/qwen.omni")
 
         runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
 
@@ -59,41 +87,13 @@ class MultiModalityTest {
     }
 
     @Test
-    fun aPromptCanCarryImagesIntoEitherModality() = runTest {
-        // PromptPart needed no change: it has carried ImageFile and ImageBytes from the start, which
-        // is why a vision-language model answering in words is still TEXT.
-        val runtime = koi.loadVision("/m/sd.safetensors")
-
-        val image = runtime.generateImage(
-            listOf(PromptPart.Text("in this style: "), PromptPart.ImageFile("/img/ref.png")),
+    fun aPromptCanCarryAudioIntoAnOmniModel() = runTest {
+        // PromptPart needed no change: it has carried AudioFile from the start, which is why the
+        // input side was never the problem.
+        val reply = koi.load("/m/qwen.omni").generateResponse(
+            listOf(PromptPart.Text("reply to this: "), PromptPart.AudioFile("/a/question.wav")),
         )
 
-        assertEquals(ImageFormat.PNG, image.format)
-    }
-
-    @Test
-    fun anImageRuntimeRejectsPartsItCannotUse() = runTest {
-        val runtime = koi.loadVision("/m/sd.safetensors")
-
-        assertFailsWith<UnsupportedOperationException> {
-            runtime.generateImage(listOf(PromptPart.AudioFile("/a.wav")))
-        }
-    }
-
-    @Test
-    fun aBackendDeclaresWhichKnobsItAppliesRegardlessOfModality() {
-        // honours was built for text sampling and needed no change: a diffusion model has a seed
-        // and no top-k, which the same set expresses.
-        assertEquals(setOf(Modality.IMAGE), vision.modalities)
-        assertTrue(vision.honours.isNotEmpty())
-    }
-
-    @Test
-    fun theBaseLoadStillWorksWithoutKnowingTheModality() = runTest {
-        // Useful for a caller that only wants to retune or unload: no cast, no modality needed.
-        val runtime = koi.load("/m/sd.safetensors")
-
-        assertEquals(Accelerator.CPU, runtime.runtimeSettings.accelerator)
-        koi.unloadAll()
+        assertEquals("Hello there", reply.text())
     }
 }

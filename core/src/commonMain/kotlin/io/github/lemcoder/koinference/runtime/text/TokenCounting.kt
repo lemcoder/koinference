@@ -8,8 +8,9 @@ package io.github.lemcoder.koinference.runtime.text
  * means the same thing on both sides — unlike streamed chunks, which are whatever an engine
  * chooses to emit, and unlike a character count, which is not a token count at all.
  *
- * Separate from [TextRuntime] because not every backend exposes a tokenizer: implementing this
- * is a claim that the number comes from the model's vocabulary.
+ * Separate from `GeneratingRuntime` because not every backend exposes a tokenizer: implementing
+ * this is a claim that the number comes from the model's vocabulary. Under `.text` because a token
+ * is a text notion — a diffusion model has no use for one.
  */
 interface TokenCounting {
 

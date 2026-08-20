@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference.benchmark.runner
 
 import io.github.lemcoder.koinference.benchmark.platform.PlatformProbe
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -15,6 +16,9 @@ import kotlinx.coroutines.flow.Flow
  * Android: monotonic, unaffected by wall-clock changes, and unaffected by the process being
  * descheduled.
  *
+ * What it measures is arrival, not content: every part counts as a chunk, whatever it carries.
+ * Only [ResponsePart.Text] contributes to the reply text that gets tokenized.
+ *
  * What this cannot do is count tokens. A chunk is an emission, not a token — one token for
  * llama.cpp, whatever LiteRT-LM chooses to send for that engine — so [GenerationMeasurement]
  * reports chunks under that name and leaves tokens to whoever has a tokenizer. Calling chunks
@@ -23,7 +27,7 @@ import kotlinx.coroutines.flow.Flow
  */
 suspend fun measureGeneration(
     probe: PlatformProbe,
-    chunks: Flow<String>,
+    chunks: Flow<ResponsePart>,
     /**
      * Counts tokens in the finished reply with the engine's own tokenizer, or null when the
      * engine has none.
@@ -44,7 +48,11 @@ suspend fun measureGeneration(
         // measurement is when it arrived, not when the harness finished handling it.
         if (firstChunkNanos == null) firstChunkNanos = probe.monotonicNanos()
         chunkCount++
-        collected.append(chunk)
+        // Only text is collected, and only text is tokenized. A reply can carry audio or image
+        // parts, which are emissions like any other — so they count as chunks and move the clock
+        // — but they have no characters and no token count, and folding a byte array into the
+        // reply text would put a number in the tokens column that means nothing.
+        if (chunk is ResponsePart.Text) collected.append(chunk.text)
     }
 
     val endNanos = probe.monotonicNanos()

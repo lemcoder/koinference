@@ -1,9 +1,11 @@
 package io.github.lemcoder.koinference.litertlm
 
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
@@ -13,6 +15,7 @@ import io.github.lemcoder.koinference.litertlm.internal.toConversationOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /**
@@ -61,7 +64,7 @@ class LiteRtLmRuntime internal constructor(
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): String {
+    ): List<ResponsePart> {
         // Flattened before the guard, so a bad prompt does not queue behind someone else's
         // generation.
         val text = prompt.joinToString("") { (it as PromptPart.Text).text }
@@ -74,7 +77,8 @@ class LiteRtLmRuntime internal constructor(
         return guard.whileOpen {
             withContext(Dispatchers.Default) {
                 explainingSystemPromptFailures {
-                    currentConversation().generate(text, schema)
+                    // One part: this engine emits text and nothing else.
+                    listOf(ResponsePart.Text(currentConversation().generate(text, schema)))
                 }
             }
         }
@@ -90,12 +94,17 @@ class LiteRtLmRuntime internal constructor(
     override fun streamResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): Flow<String> {
+    ): Flow<ResponsePart> {
         val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         val schema = (constraint as? GenerationConstraint.JsonSchema)?.schema
 
         return guard.streamWhileOpen {
-            emitAll(explainingSystemPromptFailures { currentConversation().stream(text, schema) })
+            // Text only from this engine, so each chunk becomes one Text part.
+            emitAll(
+                explainingSystemPromptFailures {
+                    currentConversation().stream(text, schema).map(ResponsePart::Text)
+                },
+            )
         }
     }
 

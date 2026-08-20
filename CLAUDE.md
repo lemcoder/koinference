@@ -451,7 +451,7 @@ lags the SoC badly enough to read identical across a 2x swing.
   private adapter classes, so a new backend silently ran with the wrong token budget instead of
   failing to compile.
 - **Backends stream; the harness measures.** Neither backend reports timings any more. Both
-  implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
+  implement `GeneratingRuntime`, and `measureGeneration` in `:benchmark:core` is the only
   code that touches a clock — one definition of time to first token for every engine, instead
   of one per binding. Resist adding a metric to a backend: it would only be comparable with
   itself.
@@ -470,6 +470,25 @@ lags the SoC badly enough to read identical across a 2x swing.
   property, so `conversation.benchmarkInfo` fails with "Unresolved reference" and looks like an
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
+
+## A reply is a list of parts, and there is no shortcut to its text
+
+`GeneratingRuntime` is the only generating interface, and both of its methods answer in
+`ResponsePart` — `Text`, `Audio`, `Image`. The split it replaced was by output type
+(`TextRuntime: String`, `ImageRuntime: GeneratedImage`), which cannot express one reply that
+interleaves speech with its transcript; two return types have no ordering between them.
+`FakeOmniBackend` in `:core`'s tests is that engine, and `MultiModalityTest` asserts the
+interleaving survives both the blocking call and the stream.
+
+**Do not add a `text()` or `streamText()` convenience to `:core`.** It was asked for and refused:
+a caller narrowing a reply to text is discarding what else the model produced, and that discard
+belongs in the calling code. The benchmark app's `LoadedModel` filters explicitly because an SSE
+`delta` has nowhere to put audio; the tests carry their own helper per module.
+
+`ResponsePart.Audio` and `.Image` are not `data class`es — `ByteArray` equality is by reference, so
+a generated `equals` would call two identical replies different.
+
+`TokenCounting` is the only thing left in `runtime.text`, because a token is a text notion.
 
 ## A stream has to arrive in pieces, and that is asserted
 

@@ -2,21 +2,22 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
-import io.github.lemcoder.koinference.runtime.text.StreamingTextRuntime
-import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
-import io.github.lemcoder.koinference.runtime.text.TextRuntime
-import kotlin.test.Test
-import kotlin.test.assertTrue
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
+import kotlin.test.Test
+import kotlin.test.assertTrue
 
 /**
  * What a caller with a GGUF on disk actually writes, compiled and run.
  *
- * Here as a test rather than as a README snippet so it cannot drift from the API: if the caller
- * story gets worse, this stops compiling. Two lines and no cast — `load` returns a
- * `TextModelRuntime`, so a caller who wants a reply does not first have to prove what kind of
- * runtime it got.
+ * A test rather than a README snippet so it cannot drift from the API: if the caller story gets
+ * worse, this stops compiling.
+ *
+ * Note the filter. A reply is a list of [ResponsePart] because some models interleave text with
+ * audio, and the library offers no shortcut that hides it — a caller narrowing to text should be
+ * able to see that it is dropping whatever else the model produced. For a GGUF there is nothing else
+ * to drop, and the filter says so out loud.
  */
 class CallerExampleTest {
 
@@ -28,9 +29,11 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.loadText(path)
+            val runtime = koi.load(path)
 
             val reply = runtime.generateResponse("What is the capital of France?")
+                .filterIsInstance<ResponsePart.Text>()
+                .joinToString("") { it.text }
 
             assertTrue(reply.isNotBlank())
             println("blocking reply: $reply")
@@ -44,12 +47,13 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.loadText(path)
+            val runtime = koi.load(path)
 
-            val chunks = runtime.streamResponse("What is the capital of France?").toList()
+            val parts = runtime.streamResponse("What is the capital of France?").toList()
+            val text = parts.filterIsInstance<ResponsePart.Text>().map { it.text }
 
-            assertTrue(chunks.size > 1, "expected a stream, got ${chunks.size} chunk")
-            println("streamed ${chunks.size} chunks: ${chunks.joinToString("")}")
+            assertTrue(text.size > 1, "expected a stream, got ${text.size} part")
+            println("streamed ${text.size} parts: ${text.joinToString("")}")
             koi.unloadAll()
         }
     }

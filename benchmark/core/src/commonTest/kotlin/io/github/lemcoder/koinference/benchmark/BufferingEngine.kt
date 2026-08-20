@@ -5,6 +5,7 @@ import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.benchmark.engine.BenchmarkInferenceEngine
 import io.github.lemcoder.koinference.benchmark.engine.GenerationRequest
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -25,9 +26,9 @@ internal class BufferingEngine(
 
     override suspend fun initialize(config: BenchmarkModelConfig): BenchmarkInferenceEngine.EngineSession =
         object : BenchmarkInferenceEngine.EngineSession {
-            override fun stream(request: GenerationRequest): Flow<String> = flow {
+            override fun stream(request: GenerationRequest): Flow<ResponsePart> = flow {
                 probe.advance(30_000_000L)
-                emit("one two three four")
+                emit(ResponsePart.Text("one two three four"))
             }
 
             override suspend fun countTokens(text: String): Int =

@@ -14,10 +14,11 @@ interface ModelLoader {
     /**
      * Load [modelPath], or return the runtime already loaded for it.
      *
-     * Returns the base [ModelRuntime], because with more than one modality a loader cannot promise
-     * which kind it produced. Callers should go through `Koinference.loadText` or `loadVision`,
-     * which narrow it against the backend's declared [io.github.lemcoder.koinference.runtime.Modality]
-     * and fail with a message naming the mismatch rather than a ClassCastException.
+     * Returns the base [ModelRuntime]. A loader that only loads weights cannot promise what can be
+     * done with them — an embedding-only model has no generation to offer — so
+     * [io.github.lemcoder.koinference.Koinference.load] is what narrows this to a
+     * [io.github.lemcoder.koinference.runtime.GeneratingRuntime], with a message naming the backend
+     * rather than a ClassCastException.
      *
      * Safe to call concurrently for the same path: the weights are loaded once and every
      * caller gets the same runtime.

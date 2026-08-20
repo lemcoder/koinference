@@ -5,6 +5,7 @@ import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.benchmark.engine.BenchmarkInferenceEngine
 import io.github.lemcoder.koinference.benchmark.engine.GenerationRequest
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
@@ -20,11 +21,11 @@ internal class TokenizerlessEngine(
 
     override suspend fun initialize(config: BenchmarkModelConfig): BenchmarkInferenceEngine.EngineSession =
         object : BenchmarkInferenceEngine.EngineSession {
-            override fun stream(request: GenerationRequest): Flow<String> = flow {
+            override fun stream(request: GenerationRequest): Flow<ResponsePart> = flow {
                 probe.advance(10_000_000L)
-                emit("one")
+                emit(ResponsePart.Text("one"))
                 probe.advance(10_000_000L)
-                emit(" two")
+                emit(ResponsePart.Text(" two"))
             }
 
             override suspend fun countTokens(text: String): Int? = null

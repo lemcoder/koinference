@@ -40,8 +40,9 @@ interface Backend {
     /**
      * What this backend's runtimes produce.
      *
-     * Declared rather than discovered by casting, so `Koinference.loadText` can refuse a vision-only
-     * backend before reading several hundred megabytes of weights, and say why.
+     * Declared rather than discovered by generating something and looking at the parts, so a caller
+     * can tell whether this engine will ever answer with audio before reading several hundred
+     * megabytes of weights.
      */
     val modalities: Set<Modality>
 

@@ -17,8 +17,8 @@ class KoinferenceTest {
 
     @Test
     fun loadsThroughWhicheverBackendReadsTheContainer() = runTest {
-        assertEquals("reply from /m/a.gguf", koi.loadText("/m/a.gguf").generateResponse("hi"))
-        assertEquals("reply from /m/b.task", koi.loadText("/m/b.task").generateResponse("hi"))
+        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
+        assertEquals("reply from /m/b.task", koi.load("/m/b.task").generateResponse("hi").text())
 
         // Each backend was asked for exactly one loader, and only when it was needed.
         assertEquals(1, gguf.loaders.size)
@@ -28,13 +28,13 @@ class KoinferenceTest {
     @Test
     fun theSamePathIsLoadedOnce() = runTest {
         // Weights are the expensive part; two calls must not read them twice.
-        assertSame(koi.loadText("/m/a.gguf"), koi.loadText("/m/a.gguf"))
+        assertSame(koi.load("/m/a.gguf"), koi.load("/m/a.gguf"))
     }
 
     @Test
     fun anUnreadableContainerNamesWhatIsRegistered() = runTest {
         // The usual cause is a module that was not depended on, which "unsupported model" hides.
-        val failure = assertFailsWith<IllegalStateException> { koi.loadText("/m/model.onnx") }
+        val failure = assertFailsWith<IllegalStateException> { koi.load("/m/model.onnx") }
 
         assertTrue(failure.message!!.contains("llama.cpp"), failure.message!!)
         assertTrue(failure.message!!.contains("litert-lm"), failure.message!!)
@@ -42,7 +42,7 @@ class KoinferenceTest {
 
     @Test
     fun unloadReachesTheLoaderThatLoaded() = runTest {
-        koi.loadText("/m/a.gguf")
+        koi.load("/m/a.gguf")
 
         koi.unload("/m/a.gguf")
 
@@ -52,8 +52,8 @@ class KoinferenceTest {
 
     @Test
     fun unloadAllReachesEveryBackend() = runTest {
-        koi.loadText("/m/a.gguf")
-        koi.loadText("/m/b.litertlm")
+        koi.load("/m/a.gguf")
+        koi.load("/m/b.litertlm")
 
         koi.unloadAll()
 
@@ -63,17 +63,17 @@ class KoinferenceTest {
 
     @Test
     fun theInstanceStaysUsableAfterUnloadAll() = runTest {
-        koi.loadText("/m/a.gguf")
+        koi.load("/m/a.gguf")
         koi.unloadAll()
 
-        assertEquals("reply from /m/a.gguf", koi.loadText("/m/a.gguf").generateResponse("hi"))
+        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
     }
 
     @Test
     fun theConfigReachesEveryModelThisInstanceLoads() = runTest {
         val configured = Koinference(listOf(gguf), ModelConfig(contextTokens = 512))
 
-        configured.loadText("/m/a.gguf")
+        configured.load("/m/a.gguf")
 
         assertEquals(512, gguf.loaders.single().config.contextTokens)
     }

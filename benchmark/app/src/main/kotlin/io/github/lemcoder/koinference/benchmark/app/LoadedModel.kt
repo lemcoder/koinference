@@ -1,17 +1,19 @@
 package io.github.lemcoder.koinference.benchmark.app
 
 import android.os.SystemClock
-import io.github.lemcoder.koinference.runtime.Accelerator
 import io.github.lemcoder.koinference.Koinference
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
-import io.github.lemcoder.koinference.runtime.RuntimeSettings
-import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
-import kotlinx.coroutines.flow.Flow
+import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import java.io.File
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.mapNotNull
 
 /**
  * One model, loaded, with the engine that loaded it.
@@ -25,14 +27,23 @@ class LoadedModel private constructor(
     val modelPath: String,
     val modelLoadMs: Double,
     private val koi: Koinference,
-    private val runtime: TextModelRuntime,
+    private val runtime: GeneratingRuntime,
 ) {
 
     /** The id clients see in `/v1/models` and send back as `model`. */
     val modelId: String = File(modelPath).nameWithoutExtension
 
+    /**
+     * The reply, as text, for an endpoint whose wire format only carries text.
+     *
+     * A reply is a stream of [ResponsePart] because some models interleave text with audio. This
+     * is a chat-completions server: anything that is not text has nowhere to go in an SSE `delta`,
+     * so it is dropped here, where a reader can see it happening, rather than by a convenience
+     * on the runtime.
+     */
     fun stream(prompt: String, schema: String?): Flow<String> =
         runtime.streamResponse(prompt, schema?.let { GenerationConstraint.JsonSchema(it) })
+            .mapNotNull { part -> (part as? ResponsePart.Text)?.text }
 
     suspend fun unload() = koi.unload(modelPath)
 
@@ -75,7 +86,7 @@ class LoadedModel private constructor(
                 ?: error("No engine for $modelPath. Registered: ${koi.backendIds}")
 
             val start = SystemClock.elapsedRealtimeNanos()
-            val runtime = koi.loadText(modelPath)
+            val runtime = koi.load(modelPath)
             val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
 
             return LoadedModel(engineId, modelPath, loadMs, koi, runtime)

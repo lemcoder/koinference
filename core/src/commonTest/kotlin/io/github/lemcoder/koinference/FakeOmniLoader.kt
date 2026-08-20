@@ -4,12 +4,12 @@ import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.runtime.ModelRuntime
 
-internal class FakeImageLoader(val config: ModelConfig) : ModelLoader {
+internal class FakeOmniLoader(val config: ModelConfig) : ModelLoader {
 
-    private val runtimes = mutableMapOf<String, FakeImageRuntime>()
+    private val runtimes = mutableMapOf<String, FakeOmniRuntime>()
 
     override suspend fun load(modelPath: String): ModelRuntime =
-        runtimes.getOrPut(modelPath) { FakeImageRuntime(config) }
+        runtimes.getOrPut(modelPath) { FakeOmniRuntime(config) }
 
     override suspend fun unload(modelPath: String) {
         runtimes.remove(modelPath)

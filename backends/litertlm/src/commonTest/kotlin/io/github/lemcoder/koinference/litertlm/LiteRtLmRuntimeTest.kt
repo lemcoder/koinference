@@ -44,8 +44,8 @@ class LiteRtLmRuntimeTest {
     fun reusesOneConversationAcrossTurns() = runTest {
         val runtime = runtime()
 
-        runtime.generateResponse("one")
-        runtime.generateResponse("two")
+        runtime.generateResponse("one").text()
+        runtime.generateResponse("two").text()
 
         assertEquals(1, bridge.engine.conversations.size)
         assertEquals(
@@ -57,7 +57,7 @@ class LiteRtLmRuntimeTest {
     @Test
     fun opensTheConversationWithTheParametersItWasGiven() = runTest {
         runtime(GenerationParameters(topK = 7, topP = 0.5, temperature = 0.1, seed = 3))
-            .generateResponse("hello")
+            .generateResponse("hello").text()
 
         val options = bridge.engine.conversation.options
         assertEquals(7, options.topK)
@@ -69,7 +69,7 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun unsetKnobsFallBackToTheSharedDefaults() = runTest {
-        runtime().generateResponse("hello")
+        runtime().generateResponse("hello").text()
 
         val options = bridge.engine.conversation.options
         assertEquals(DEFAULT_TOP_K, options.topK)
@@ -81,7 +81,7 @@ class LiteRtLmRuntimeTest {
 
     @Test
     fun minPIsNotPassedOffAsTopP() = runTest {
-        runtime(GenerationParameters(minP = 0.05)).generateResponse("hello")
+        runtime(GenerationParameters(minP = 0.05)).generateResponse("hello").text()
 
         assertEquals(DEFAULT_TOP_P, bridge.engine.conversation.options.topP)
     }
@@ -90,7 +90,7 @@ class LiteRtLmRuntimeTest {
     fun passesTheSchemaThrough() = runTest {
         val schema = """{"type":"object"}"""
 
-        runtime().generateResponse("hello", GenerationConstraint.JsonSchema(schema))
+        runtime().generateResponse("hello", GenerationConstraint.JsonSchema(schema)).text()
 
         assertEquals(schema, bridge.engine.conversation.turns.single().jsonSchema)
     }
@@ -98,11 +98,11 @@ class LiteRtLmRuntimeTest {
     @Test
     fun changingParametersReopensTheConversationButKeepsTheEngine() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
         val first = bridge.engine.conversation
 
         runtime.updateGenerationParameters(GenerationParameters(topK = 1))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertTrue(first.closed, "the old conversation was leaked")
         assertEquals(2, bridge.engine.conversations.size)
@@ -114,10 +114,10 @@ class LiteRtLmRuntimeTest {
     @Test
     fun settingTheSameParametersKeepsTheConversation() = runTest {
         val runtime = runtime(GenerationParameters(topK = 1))
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         runtime.updateGenerationParameters(GenerationParameters(topK = 1))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertEquals(1, bridge.engine.conversations.size, "history was dropped for nothing")
     }
@@ -125,10 +125,10 @@ class LiteRtLmRuntimeTest {
     @Test
     fun resettingDropsTheHistoryAndKeepsTheParameters() = runTest {
         val runtime = runtime(GenerationParameters(topK = 3))
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         runtime.resetConversation()
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertEquals(2, bridge.engine.conversations.size)
         assertTrue(bridge.engine.conversations.first().closed)
@@ -140,11 +140,11 @@ class LiteRtLmRuntimeTest {
     @Test
     fun changingTheBackendReloadsTheModelOnIt() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
         val cpuEngine = bridge.engine
 
         runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
-        runtime.generateResponse("two")
+        runtime.generateResponse("two").text()
 
         assertTrue(cpuEngine.closed, "the CPU engine was leaked")
         assertEquals(2, bridge.engines.size)
@@ -158,7 +158,7 @@ class LiteRtLmRuntimeTest {
     @Test
     fun settingTheSameBackendDoesNotReload() = runTest {
         val runtime = runtime()
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.CPU))
 
@@ -170,7 +170,7 @@ class LiteRtLmRuntimeTest {
     fun aBackendThatCannotBeOpenedLeavesTheRuntimeUnloaded() = runTest {
         val bridge = FakeLiteRtLmBridge(unavailable = Accelerator.GPU)
         val runtime = runtime(bridge = bridge)
-        runtime.generateResponse("one")
+        runtime.generateResponse("one").text()
 
         val failure = assertFailsWith<IllegalStateException> {
             runtime.updateRuntimeSettings(RuntimeSettings(Accelerator.GPU))
@@ -179,7 +179,7 @@ class LiteRtLmRuntimeTest {
 
         // The CPU engine is already gone, so the runtime says so instead of generating
         // through a freed handle.
-        assertFailsWith<IllegalStateException> { runtime.generateResponse("two") }
+        assertFailsWith<IllegalStateException> { runtime.generateResponse("two").text() }
         assertTrue(bridge.engines.single().closed)
     }
 
@@ -189,7 +189,7 @@ class LiteRtLmRuntimeTest {
         val runtime = loader.load(MODEL)
         loader.unload(MODEL)
 
-        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hi") }
+        val failure = assertFailsWith<IllegalStateException> { runtime.generateResponse("hi").text() }
         assertTrue(failure.message!!.contains(MODEL), failure.message!!)
     }
 
@@ -214,7 +214,7 @@ class LiteRtLmRuntimeTest {
         val loader = LiteRtLmModelLoader(bridge = bridge, config = ModelConfig())
         val runtime = loader.load(MODEL)
         // First turn opens the conversation, so the fake below is installed on a real one.
-        runtime.generateResponse("warm up")
+        runtime.generateResponse("warm up").text()
 
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -227,7 +227,7 @@ class LiteRtLmRuntimeTest {
             engineWasOpen = !bridge.engine.closed
         }
 
-        val generating = launch(Dispatchers.Default) { runtime.generateResponse("slow") }
+        val generating = launch(Dispatchers.Default) { runtime.generateResponse("slow").text() }
         started.await()
         val unloading = launch(Dispatchers.Default) { loader.unload(MODEL) }
 

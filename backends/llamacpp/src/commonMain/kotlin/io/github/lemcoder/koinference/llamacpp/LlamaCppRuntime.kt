@@ -1,9 +1,11 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
@@ -19,6 +21,7 @@ import io.github.lemcoder.koinference.llamacpp.internal.toSessionOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /**
@@ -67,7 +70,7 @@ class LlamaCppRuntime internal constructor(
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): String {
+    ): List<ResponsePart> {
         // Flattened before the guard, so a bad prompt does not queue behind someone else's
         // generation.
         val text = prompt.joinToString("") { (it as PromptPart.Text).text }
@@ -77,8 +80,10 @@ class LlamaCppRuntime internal constructor(
                 val grammar = grammarFor(constraint)
                 val session = currentSession()
                 placeThreads(session)
-                session.generate(systemPrompt, text, grammar)
+                val reply = session.generate(systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for ${modelOptions.modelPath}") }
+                // One part: this engine emits text and nothing else.
+                listOf(ResponsePart.Text(reply))
             }
         }
     }
@@ -92,13 +97,15 @@ class LlamaCppRuntime internal constructor(
     override fun streamResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): Flow<String> {
+    ): Flow<ResponsePart> {
         val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         return guard.streamWhileOpen {
             val grammar = grammarFor(constraint)
             val session = currentSession()
             placeThreads(session)
-            emitAll(session.stream(systemPrompt, text, grammar))
+            // This engine emits text only, so every chunk is one Text part. The wrapping is
+            // here rather than in the binding because the binding speaks the facade's language.
+            emitAll(session.stream(systemPrompt, text, grammar).map(ResponsePart::Text))
         }
     }
 

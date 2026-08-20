@@ -3,6 +3,7 @@ package io.github.lemcoder.koinference.benchmark.engine
 import io.github.lemcoder.koinference.benchmark.config.BenchmarkModelConfig
 import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
+import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -61,7 +62,7 @@ interface BenchmarkInferenceEngine {
          * produces them and does nothing else — no buffering that would delay the first chunk,
          * because when that chunk arrives is the measurement.
          */
-        fun stream(request: GenerationRequest): Flow<String>
+        fun stream(request: GenerationRequest): Flow<ResponsePart>
 
         /**
          * Tokens in [text] by this engine's tokenizer, or null when it has none.

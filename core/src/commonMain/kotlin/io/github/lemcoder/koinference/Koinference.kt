@@ -3,18 +3,18 @@ package io.github.lemcoder.koinference
 import io.github.lemcoder.koinference.backend.Backend
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
-import io.github.lemcoder.koinference.runtime.Modality
 import io.github.lemcoder.koinference.runtime.ModelRuntime
-import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
-import io.github.lemcoder.koinference.runtime.vision.ImageModelRuntime
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 
 /**
  * The entry point: the backends an application was built with, and the models loaded through them.
  *
  * ```kotlin
  * val koi = Koinference(LlamaCpp, LiteRtLm)
- * val runtime = koi.loadText("/models/model.gguf")
+ * val runtime = koi.load("/models/model.gguf")
  * val reply = runtime.generateResponse("What is the capital of France?")
+ *     .filterIsInstance<ResponsePart.Text>()
+ *     .joinToString("") { it.text }
  * ```
  *
  * Which engine reads a container is the backend's own answer, so a caller names a path rather than
@@ -60,48 +60,23 @@ class Koinference(
     /**
      * Load [modelPath] with whichever registered backend reads it.
      *
-     * Returns the base runtime — the settings and parameters every model has. Use [loadText] or
-     * [loadVision] to get something that can generate; they narrow this against the backend's
-     * declared [Modality].
+     * One method, because there is nothing to choose between: every generating runtime speaks
+     * [io.github.lemcoder.koinference.runtime.ResponsePart], and what a given model puts in a reply
+     * is its own business rather than a different type. Read [Backend.modalities] if you want to know
+     * before collecting.
      *
      * Loading the same path twice returns the same runtime — the weights are read once.
      *
-     * @throws IllegalStateException if no registered backend reads this container. The message
-     *         names what is registered, because the usual cause is a missing module rather than a
-     *         bad path.
+     * @throws IllegalStateException if no registered backend reads this container, or if a backend's
+     *         loader returns something that does not generate. The first message names what is
+     *         registered, because the usual cause is a missing module rather than a bad path.
      */
-    suspend fun load(modelPath: String): ModelRuntime = loaderFor(modelPath).load(modelPath)
-
-    /**
-     * Load [modelPath] as a model that answers in text.
-     *
-     * The modality is checked against the backend *before* the weights are read, so asking a
-     * vision-only engine for text costs nothing and says so. The cast afterwards is the library's
-     * rather than the caller's: a backend whose declared modality disagrees with what its loader
-     * returns is a bug in that backend, and this is where it surfaces with a legible message.
-     */
-    suspend fun loadText(modelPath: String): TextModelRuntime =
-        loadAs(modelPath, Modality.TEXT)
-
-    /** Load [modelPath] as a model that answers with an image. See [loadText]. */
-    suspend fun loadVision(modelPath: String): ImageModelRuntime =
-        loadAs(modelPath, Modality.IMAGE)
-
-    private suspend inline fun <reified R : ModelRuntime> loadAs(
-        modelPath: String,
-        modality: Modality,
-    ): R {
+    suspend fun load(modelPath: String): GeneratingRuntime {
         val backend = backendFor(modelPath)
             ?: error("No registered backend reads $modelPath. Registered: $backendIds")
-        check(modality in backend.modalities) {
-            "${backend.id} reads $modelPath but produces ${backend.modalities}, not $modality"
-        }
         val runtime = loaderFor(modelPath).load(modelPath)
-        return runtime as? R
-            ?: error(
-                "${backend.id} declares $modality but its loader returned " +
-                    "${runtime::class.simpleName}",
-            )
+        return runtime as? GeneratingRuntime
+            ?: error("${backend.id} returned ${runtime::class.simpleName}, which does not generate")
     }
 
     /** Release the model at [modelPath]. Idempotent. */
