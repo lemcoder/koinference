@@ -5,6 +5,7 @@ import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
+import io.github.lemcoder.koinference.runtime.Modality
 
 /**
  * llama.cpp, as something a [io.github.lemcoder.koinference.Koinference] can hold.
@@ -15,6 +16,9 @@ import io.github.lemcoder.koinference.backend.SamplingKnob
 object LlamaCpp : Backend {
 
     override val id: String = "llama.cpp"
+
+    /** Text out. A GGUF vision-language model still answers in words; see Modality. */
+    override val modalities: Set<Modality> = setOf(Modality.TEXT)
 
     override fun handles(modelPath: String): Boolean = modelPath.endsWith(".gguf")
 

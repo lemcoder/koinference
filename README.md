@@ -21,7 +21,7 @@ the model file:
 ```kotlin
 val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(maxOutputTokens = 128))
 
-val runtime = koi.load("/models/model.gguf")
+val runtime = koi.loadText("/models/model.gguf")
 val reply = runtime.generateResponse("What is the capital of France?")
 
 runtime.streamResponse("Once upon a time").collect(::print)

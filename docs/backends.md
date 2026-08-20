@@ -107,6 +107,30 @@ The test for it is typed as `ModelRuntime` on purpose: see `ModelRuntimeContract
 `resetConversation` has no llama.cpp counterpart — that engine carries no conversation to forget —
 so it is not hoisted. The bar is a counterpart that exists, not a signature that would compile.
 
+## Two modalities, and what that cost
+
+`runtime` holds what every model has — settings, sampling parameters, `RuntimeGuard`. Output-shaped
+interfaces live under it: `runtime.text` for `TextRuntime` / `StreamingTextRuntime` /
+`TokenCounting` / `TextModelRuntime`, `runtime.vision` for `ImageRuntime` / `ImageModelRuntime` /
+`GeneratedImage`.
+
+A second modality was added as a probe — `FakeVisionBackend` in `:core`'s tests, written as if it
+were real, for a modality this repository has no engine for. What it needed from `:core` was a
+`Modality` constant and an output interface. Reused unchanged: `Backend`, `ModelLoader`,
+`ModelConfig`, `RuntimeGuard`, the whole settings surface, and `PromptPart` — which has carried
+`ImageFile` and `ImageBytes` from the start, and is why a vision-language model answering in words
+is `Modality.TEXT` rather than something new. `honours` needed nothing either: a diffusion model has
+a seed and no top-k, which the same set already expresses.
+
+**One thing did break, and it is the thing that was predicted.** `ModelLoader.load` returned
+`TextModelRuntime`, which stopped being true the moment a loader could produce something else. It
+returns `ModelRuntime` again, and `Koinference` gained `loadText` and `loadVision`, which check the
+backend's declared `Modality` *before* reading the weights and narrow the result. The cast is the
+library's now, once, with a message naming the mismatch — not every caller's.
+
+Modality is named for the **output**, because that is the axis the interfaces split on. Input was
+already multimodal.
+
 ## Text runtimes only
 
 There is one kind of runtime and it produces text. There used to be a sealed hierarchy with a

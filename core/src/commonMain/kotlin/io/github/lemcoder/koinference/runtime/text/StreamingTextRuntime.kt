@@ -1,7 +1,9 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.text
 
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.prompt.promptOf
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.ModelRuntime
 import kotlinx.coroutines.flow.Flow
 
 /**

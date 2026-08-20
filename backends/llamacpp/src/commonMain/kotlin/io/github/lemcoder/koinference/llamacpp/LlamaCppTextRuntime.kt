@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.runtime.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 
 /**
  * What a loaded GGUF model can do.

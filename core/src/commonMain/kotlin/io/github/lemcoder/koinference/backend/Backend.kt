@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference.backend
 
 import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.Modality
 
 /**
  * An inference engine this library can load models with.
@@ -35,6 +36,14 @@ interface Backend {
      * read is a bug in the backend, not a question for the caller.
      */
     fun handles(modelPath: String): Boolean
+
+    /**
+     * What this backend's runtimes produce.
+     *
+     * Declared rather than discovered by casting, so `Koinference.loadText` can refuse a vision-only
+     * backend before reading several hundred megabytes of weights, and say why.
+     */
+    val modalities: Set<Modality>
 
     /**
      * Which of [GenerationParameters]' knobs this backend actually applies.

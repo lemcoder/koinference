@@ -4,13 +4,15 @@ import io.github.lemcoder.koinference.backend.Backend
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
-import io.github.lemcoder.koinference.runtime.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.Modality
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 
 /** A backend that hands out fake runtimes, so the entry point can be tested without an engine. */
 internal class FakeBackend(
     override val id: String,
     private val extensions: List<String>,
     override val honours: Set<SamplingKnob> = emptySet(),
+    override val modalities: Set<Modality> = setOf(Modality.TEXT),
 ) : Backend {
 
     val loaders = mutableListOf<FakeLoader>()

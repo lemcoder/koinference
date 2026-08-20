@@ -1,4 +1,6 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.text
+
+import io.github.lemcoder.koinference.runtime.ModelRuntime
 
 /**
  * Everything a loaded text model can do, as one type.

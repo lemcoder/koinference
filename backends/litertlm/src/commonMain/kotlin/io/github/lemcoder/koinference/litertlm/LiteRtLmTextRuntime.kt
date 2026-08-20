@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.runtime.ModelRuntime
-import io.github.lemcoder.koinference.runtime.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 
 /**
  * What a loaded LiteRT-LM model can do.

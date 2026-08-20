@@ -2,7 +2,7 @@ package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
-import io.github.lemcoder.koinference.runtime.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 
 /** Caches per path the way the real loaders do, so "loaded twice" can be asserted. */
 internal class FakeLoader(val config: ModelConfig) : ModelLoader {

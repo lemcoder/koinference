@@ -7,7 +7,7 @@ import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
-import io.github.lemcoder.koinference.runtime.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import kotlinx.coroutines.flow.Flow
@@ -75,7 +75,7 @@ class LoadedModel private constructor(
                 ?: error("No engine for $modelPath. Registered: ${koi.backendIds}")
 
             val start = SystemClock.elapsedRealtimeNanos()
-            val runtime = koi.load(modelPath)
+            val runtime = koi.loadText(modelPath)
             val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
 
             return LoadedModel(engineId, modelPath, loadMs, koi, runtime)

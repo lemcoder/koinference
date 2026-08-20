@@ -12,8 +12,8 @@ import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import io.github.lemcoder.koinference.runtime.Accelerator
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
-import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
-import io.github.lemcoder.koinference.runtime.TokenCounting
+import io.github.lemcoder.koinference.runtime.text.StreamingTextRuntime
+import io.github.lemcoder.koinference.runtime.text.TokenCounting
 
 /**
  * Adapts any [Backend] to the harness.

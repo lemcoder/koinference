@@ -5,8 +5,8 @@ package io.github.lemcoder.koinference.runtime
  *
  * Every backend fixes its sampler and its device when something is opened rather than per request,
  * so every backend needs a way to say what those are and to change them. Both did, with the same
- * four members and near-identical KDoc arguing they could not be shared — [TextRuntime] used to
- * say the signatures matched but the contracts did not.
+ * four members and near-identical KDoc arguing they could not be shared: the signatures matched,
+ * it said, but the contracts did not.
  *
  * They differ in *cost*, not in meaning. llama.cpp rebuilds a session and, for a device change,
  * reloads the weights; LiteRT-LM reopens a conversation and loses its prefilled history. Both are

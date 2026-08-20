@@ -2,12 +2,13 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
-import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
-import io.github.lemcoder.koinference.runtime.TextRuntime
-import kotlinx.coroutines.flow.toList
-import kotlinx.coroutines.runBlocking
+import io.github.lemcoder.koinference.runtime.text.StreamingTextRuntime
+import io.github.lemcoder.koinference.runtime.text.TextModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TextRuntime
 import kotlin.test.Test
 import kotlin.test.assertTrue
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
 
 /**
  * What a caller with a GGUF on disk actually writes, compiled and run.
@@ -27,7 +28,7 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.load(path)
+            val runtime = koi.loadText(path)
 
             val reply = runtime.generateResponse("What is the capital of France?")
 
@@ -43,7 +44,7 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.load(path)
+            val runtime = koi.loadText(path)
 
             val chunks = runtime.streamResponse("What is the capital of France?").toList()
 

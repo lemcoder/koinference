@@ -1,4 +1,4 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.text
 
 /**
  * A runtime that can count tokens with the tokenizer its model actually uses.
