@@ -17,14 +17,14 @@ class EnginesTest {
 
     @Test
     fun everyRegisteredBackendIsBenchmarkable() {
-        assertEquals(benchmarkBackends.ids, availableEngines().map { it.id })
+        assertEquals(benchmarkBackends.map { it.id }, availableEngines().map { it.id })
     }
 
     @Test
     fun theOrderIsTheOneEngineAllRunsIn() {
         // The first engine in a process is the only one that sees an untouched heap and a cold
         // SoC, so this order is part of what a run means.
-        assertEquals(listOf("llama.cpp", "litert-lm"), benchmarkBackends.ids)
+        assertEquals(listOf("llama.cpp", "litert-lm"), benchmarkBackends.map { it.id })
     }
 
     @Test

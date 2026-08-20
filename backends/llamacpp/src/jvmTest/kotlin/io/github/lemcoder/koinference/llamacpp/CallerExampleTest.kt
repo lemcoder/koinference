@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
 import io.github.lemcoder.koinference.runtime.TextRuntime
@@ -13,7 +13,9 @@ import kotlin.test.assertTrue
  * What a caller with a GGUF on disk actually writes, compiled and run.
  *
  * Here as a test rather than as a README snippet so it cannot drift from the API: if the caller
- * story gets worse, this stops compiling.
+ * story gets worse, this stops compiling. Two lines and no cast — `load` returns a
+ * `TextModelRuntime`, so a caller who wants a reply does not first have to prove what kind of
+ * runtime it got.
  */
 class CallerExampleTest {
 
@@ -24,15 +26,14 @@ class CallerExampleTest {
         val path = model ?: return
 
         runBlocking {
-            val backends = BackendRegistry(LlamaCpp)
-            val loader = backends.requireForModel(path).loader(ModelConfig(maxOutputTokens = 24))
-            val runtime = loader.load(path) as TextRuntime
+            val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
+            val runtime = koi.load(path)
 
             val reply = runtime.generateResponse("What is the capital of France?")
 
             assertTrue(reply.isNotBlank())
             println("blocking reply: $reply")
-            loader.unloadAll()
+            koi.unloadAll()
         }
     }
 
@@ -41,15 +42,14 @@ class CallerExampleTest {
         val path = model ?: return
 
         runBlocking {
-            val backends = BackendRegistry(LlamaCpp)
-            val loader = backends.requireForModel(path).loader(ModelConfig(maxOutputTokens = 24))
-            val runtime = loader.load(path) as StreamingTextRuntime
+            val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
+            val runtime = koi.load(path)
 
             val chunks = runtime.streamResponse("What is the capital of France?").toList()
 
             assertTrue(chunks.size > 1, "expected a stream, got ${chunks.size} chunk")
             println("streamed ${chunks.size} chunks: ${chunks.joinToString("")}")
-            loader.unloadAll()
+            koi.unloadAll()
         }
     }
 }

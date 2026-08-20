@@ -1,13 +1,13 @@
 package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.backend.Backend
-import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
 
 /**
- * llama.cpp, as something a [io.github.lemcoder.koinference.BackendRegistry] can hold.
+ * llama.cpp, as something a [io.github.lemcoder.koinference.Koinference] can hold.
  *
  * Register it to make GGUF loadable without naming [LlamaCppModelLoader] at the call site. The
  * loader stays public for a caller that wants this engine specifically.

@@ -14,12 +14,15 @@ There is the seam a **consumer** sees — `Backend`, `ModelConfig`, `BackendRegi
 and the seam a **backend implementor** sees, below. A caller never names `LlamaCppModelLoader`:
 
 ```kotlin
-val backends = BackendRegistry(LlamaCpp, LiteRtLm)
-
-val backend = backends.requireForModel(path)      // or requireById("llama.cpp")
-val runtime = backend.loader(ModelConfig(contextTokens = 512, maxOutputTokens = 128))
-    .load(path) as StreamingTextRuntime
+val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(contextTokens = 512))
+val runtime = koi.load(path)
 ```
+
+`ModelLoader.load` returns a `TextModelRuntime` — everything a loaded text model can do, as one
+type — so a caller who wants a reply does not first cast to prove what it got. That cast was the
+same hedge the deleted embedding runtime was: room kept for a case that does not exist. If an
+embedding backend is ever added, `load` widens or the registry gains a typed variant, and that
+problem arrives with the code that needs it.
 
 `ModelConfig` is one vocabulary for knobs the engines spell differently — llama.cpp's
 `nCtx`/`nPredict` are LiteRT-LM's `maxTokens`/`maxOutputTokens`. A knob an engine has no

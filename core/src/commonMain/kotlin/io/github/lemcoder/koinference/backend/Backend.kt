@@ -11,7 +11,7 @@ import io.github.lemcoder.koinference.runtime.GenerationParameters
  * `:core`.
  *
  * Implementations are objects in their backend module, so a consumer depends on the modules it
- * wants and assembles them into a [BackendRegistry]. `:core` deliberately does not enumerate them;
+ * wants and assembles them into a [Koinference]. `:core` deliberately does not enumerate them;
  * it cannot, since every backend depends on it rather than the other way round, and an enum here
  * would mean a new engine could not be added without editing this module and every exhaustive
  * `when` over it.

@@ -2,13 +2,12 @@ package io.github.lemcoder.koinference.benchmark.app
 
 import android.os.SystemClock
 import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
-import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
-import io.github.lemcoder.koinference.runtime.StreamingTextRuntime
+import io.github.lemcoder.koinference.runtime.TextModelRuntime
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import kotlinx.coroutines.flow.Flow
@@ -25,8 +24,8 @@ class LoadedModel private constructor(
     val engineId: String,
     val modelPath: String,
     val modelLoadMs: Double,
-    private val loader: ModelLoader,
-    private val runtime: StreamingTextRuntime,
+    private val koi: Koinference,
+    private val runtime: TextModelRuntime,
 ) {
 
     /** The id clients see in `/v1/models` and send back as `model`. */
@@ -35,12 +34,12 @@ class LoadedModel private constructor(
     fun stream(prompt: String, schema: String?): Flow<String> =
         runtime.streamResponse(prompt, schema?.let { GenerationConstraint.JsonSchema(it) })
 
-    suspend fun unload() = loader.unload(modelPath)
+    suspend fun unload() = koi.unload(modelPath)
 
     companion object {
 
         /** The engines this app links. Adding one is adding it here. */
-        val backends = BackendRegistry(LlamaCpp, LiteRtLm)
+        private val backends = listOf(LlamaCpp, LiteRtLm)
 
         /**
          * @param maxNewTokens fixed for the life of the model, because both backends decide it
@@ -58,10 +57,10 @@ class LoadedModel private constructor(
         ): LoadedModel {
             require(File(modelPath).isFile) { "No model file at $modelPath" }
 
-            // Which engine reads this container is the backend's own answer, not a branch here.
-            val backend = backends.requireForModel(modelPath)
-            val loader = backend.loader(
-                ModelConfig(
+            // Which engine reads this container is Koinference's answer, not a branch here.
+            val koi = Koinference(
+                backends = backends,
+                config = ModelConfig(
                     settings = RuntimeSettings(
                         accelerator = if (useGpu) Accelerator.GPU else Accelerator.CPU,
                     ),
@@ -72,12 +71,14 @@ class LoadedModel private constructor(
                     cacheDir = cacheDir,
                 ),
             )
+            val engineId = koi.backendFor(modelPath)?.id
+                ?: error("No engine for $modelPath. Registered: ${koi.backendIds}")
 
             val start = SystemClock.elapsedRealtimeNanos()
-            val runtime = loader.load(modelPath) as StreamingTextRuntime
+            val runtime = koi.load(modelPath)
             val loadMs = (SystemClock.elapsedRealtimeNanos() - start) / 1_000_000.0
 
-            return LoadedModel(backend.id, modelPath, loadMs, loader, runtime)
+            return LoadedModel(engineId, modelPath, loadMs, koi, runtime)
         }
 
     }

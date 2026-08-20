@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.benchmark.engine
 
 import io.github.lemcoder.koinference.backend.Backend
-import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.SamplingKnob
 import io.github.lemcoder.koinference.benchmark.config.BenchmarkModelConfig

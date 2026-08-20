@@ -1,13 +1,13 @@
 package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.backend.Backend
-import io.github.lemcoder.koinference.backend.BackendRegistry
+import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
 
 /**
- * LiteRT-LM, as something a [io.github.lemcoder.koinference.BackendRegistry] can hold.
+ * LiteRT-LM, as something a [io.github.lemcoder.koinference.Koinference] can hold.
  *
  * Handles the two containers the runtime accepts. A raw `.tflite` is not one of them — LiteRT-LM
  * needs the tokenizer and metadata that only these carry.

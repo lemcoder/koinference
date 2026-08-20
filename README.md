@@ -14,18 +14,23 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
 
-Backends are interchangeable by design — a consumer registers the ones it links and asks the
-registry, rather than naming an engine's classes:
+`Koinference` is the entry point. Register the backends the application links, then load a model by
+path — which engine reads a container is the backend's own answer, so switching engines is changing
+the model file:
 
 ```kotlin
-val backends = BackendRegistry(LlamaCpp, LiteRtLm)
+val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(maxOutputTokens = 128))
 
-val backend = backends.requireForModel(path)
-val runtime = backend.loader(ModelConfig(contextTokens = 512, maxOutputTokens = 128))
-    .load(path) as StreamingTextRuntime
+val runtime = koi.load("/models/model.gguf")
+val reply = runtime.generateResponse("What is the capital of France?")
 
 runtime.streamResponse("Once upon a time").collect(::print)
 ```
+
+A class rather than an object with `init`: `load` before `init` would fail at run time instead of
+compile time, two consumers in one process would fight over one registry, and tests would have to
+reset it. An application that wants one instance everywhere can hold this in its own object.
+`CallerExampleTest` compiles and runs the snippet above, so it cannot drift.
 
 Adding a third backend is documented in [docs/backends.md](docs/backends.md); all of them have the
 same shape on purpose, and adding one touches no file in `:core`.

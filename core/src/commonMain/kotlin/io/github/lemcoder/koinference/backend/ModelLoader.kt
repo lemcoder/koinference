@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.backend
 
-import io.github.lemcoder.koinference.runtime.ModelRuntime
+import io.github.lemcoder.koinference.runtime.TextModelRuntime
 
 /**
  * Owns loaded models and hands out runtimes over them.
@@ -17,7 +17,7 @@ interface ModelLoader {
      * Safe to call concurrently for the same path: the weights are loaded once and every
      * caller gets the same runtime.
      */
-    suspend fun load(modelPath: String): ModelRuntime
+    suspend fun load(modelPath: String): TextModelRuntime
 
     /** Release the runtime for [modelPath], if any. Idempotent. */
     suspend fun unload(modelPath: String)
