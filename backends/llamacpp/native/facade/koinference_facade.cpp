@@ -61,16 +61,24 @@ static constexpr int   MAX_DECODE_THREADS = 8;
  * using.
  */
 /**
- * Fallback worker count when the caller does not say.
+ * Fallback worker count when the caller does not say and the threads are not pinned.
  *
- * Deliberately dumb. Choosing well needs the CPU topology intersected with the cpuset this process
- * is in, and that heuristic lives in Kotlin — `CpuPlacementPolicy` — where it is one
- * implementation and can be tested against topologies nobody here owns. This is only what happens
- * when nothing above has an opinion.
+ * `cores - 2`, measured. On an M4 (4 performance + 6 efficiency cores) running LFM2.5-1.2B Q4_0:
+ * 5 threads gave 120 tok/s, 7 gave 139, 8 gave 144, 9 gave 135. Eight is cores - 2.
+ *
+ * Note how unlike Android that is, where 4 threads beat 8 by a wide margin. The difference is
+ * pinning: Darwin ignores CPU affinity entirely — ggml's `ggml_thread_apply_affinity` is a
+ * documented no-op there — but its scheduler places heterogeneous cores well on its own, so the
+ * efficiency cores contribute instead of stalling a barrier. On Android the same spread of threads
+ * across a little cluster is what made 4 threads run at half the speed of 2 until they were pinned.
+ *
+ * So this is not the Android answer and should not be made to match it. Where pinning works, the
+ * mask decides the count; this is for where it does not. Choosing under pinning is
+ * `CpuPlacementPolicy`'s job, in Kotlin, where it is one tested implementation.
  */
 static int detect_decode_threads() {
     const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
-    return std::max(2, std::min(cores / 2, MAX_DECODE_THREADS));
+    return std::max(2, std::min(cores - 2, MAX_DECODE_THREADS));
 }
 
 struct KoiModel {
@@ -478,10 +486,12 @@ int koi_session_set_cpu_mask(KoiSession* session, const int* cpus, int count) {
     // heuristic that has to agree with the first.
     const std::vector<int> requested(cpus, cpus + count);
 
-    // What the session was created with is the ceiling; the mask narrows it further.
+    // One worker per core in the mask, which is what the mask means: the largest set of cores that
+    // reach a barrier together. An explicit n_threads from the caller still wins, so a caller who
+    // has measured something better is not overridden by a default.
     const int requested_threads = session->params.n_threads > 0
         ? session->params.n_threads
-        : detect_decode_threads();
+        : static_cast<int>(requested.size());
 
     return apply_cpu_mask(session, requested, requested_threads) ? 0 : -1;
 }

@@ -90,6 +90,48 @@ core is in the cpuset and online, none is at the slowest frequency tier, and the
 same speed. There is **no evidence yet** that reacting to anything
 beats picking once at load; the mechanism exists so that question can be measured.
 
+## macOS: no pinning, and the opposite thread count
+
+Darwin **cannot** pin. ggml says so itself:
+
+```c
+#elif defined(__APPLE__)
+static bool ggml_thread_apply_affinity(const bool * mask) {
+    // Not supported on Apple platforms
+    UNUSED(mask);
+    return true;
+}
+```
+
+The mask is discarded and success is returned, so a Darwin build that passed one would look like it
+had worked. `platformCpuPlacement()`'s native leg therefore declines outright, and
+`CpuPlacementAppleTest` holds it to that. Thread *priority* is implemented on Apple (SCHED_FIFO), so
+that — not affinity — is the lever if one is ever wanted.
+
+Which makes the thread count the only knob, and its best value is the opposite of Android's. On an
+M4 (4 performance + 6 efficiency cores), LFM2.5-1.2B Q4_0, medians of repeated runs:
+
+| threads | tok/s |
+|---|---|
+| 4 | 102 |
+| 5 (the old default) | 120 |
+| 7 | 139 |
+| **8** | **144** |
+| 9 | 135 |
+| 10 | 123 |
+
+More threads win here, where on Android 4 beat 8 by a wide margin. The difference is pinning:
+Darwin's scheduler places heterogeneous cores well on its own, so the efficiency cores contribute
+instead of stalling a barrier — which is precisely what the little cluster did on Android until the
+threads were pinned to the big one.
+
+So the facade's unpinned fallback is `cores - 2`, which is 8 here and measures 143.6 as the
+default. It is deliberately *not* the Android answer, and the two should not be made to match. Where
+pinning works the mask decides the count; this is for where it does not.
+
+`KOI_BENCH_THREADS` sweeps it: `KOI_TEST_GGUF=… KOI_BENCH_THREADS=8 ./gradlew
+:benchmark:core:macosArm64Test --rerun-tasks`.
+
 ## KleidiAI: no effect on decode
 
 `KOI_KLEIDIAI=ON` builds ggml's CPU backend with ARM's own quantized-matmul microkernels. Measured
