@@ -84,6 +84,26 @@ different places: llama.cpp fixes GPU offload in `llama_model_params.n_gpu_layer
 LiteRT-LM decides where a model runs when the engine is created. If the reload fails, the runtime
 is left unloaded and says so, rather than pretending to be on the new backend.
 
+## What belongs on ModelRuntime
+
+`ModelRuntime` carries what every engine has: the sampling parameters and device it was loaded
+with, and suspending updates for both. It was an empty marker while both backends declared those
+four members themselves, with near-identical KDoc explaining that the signatures matched but the
+contracts did not.
+
+They differ in cost, not in meaning — llama.cpp rebuilds a session and may reload the weights,
+LiteRT-LM reopens a conversation and loses its prefilled history, and both are "this may throw away
+work the engine had prepared". One contract states that, and stating it is what lets a caller
+holding whatever `load()` returned retune it without knowing which engine answered. Before the
+hoist that took a cast to a backend-specific interface, which put the caller straight back into
+knowing its backend.
+
+The test for it is typed as `ModelRuntime` on purpose: see `ModelRuntimeContractTest`.
+
+**What stays on a backend's interface is what only that backend has.** LiteRT-LM's
+`resetConversation` has no llama.cpp counterpart — that engine carries no conversation to forget —
+so it is not hoisted. The bar is a counterpart that exists, not a signature that would compile.
+
 ## Text runtimes only
 
 There is one kind of runtime and it produces text. There used to be a sealed hierarchy with a

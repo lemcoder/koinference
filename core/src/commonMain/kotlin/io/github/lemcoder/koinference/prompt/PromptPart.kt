@@ -21,11 +21,7 @@ sealed interface PromptPart {
 
     data class AudioFile(val path: String) : PromptPart
 
-    /**
-     * Not a data class: a generated `equals` on a [ByteArray] compares references, which makes
-     * two identical images unequal and is a trap in tests.
-     */
-    class ImageBytes(val bytes: ByteArray) : PromptPart {
+    data class ImageBytes(val bytes: ByteArray) : PromptPart {
         override fun equals(other: Any?): Boolean =
             this === other || (other is ImageBytes && bytes.contentEquals(other.bytes))
 
@@ -34,8 +30,7 @@ sealed interface PromptPart {
         override fun toString(): String = "ImageBytes(${bytes.size} bytes)"
     }
 
-    /** See [ImageBytes] for why this is not a data class. */
-    class AudioBytes(val bytes: ByteArray) : PromptPart {
+    data class AudioBytes(val bytes: ByteArray) : PromptPart {
         override fun equals(other: Any?): Boolean =
             this === other || (other is AudioBytes && bytes.contentEquals(other.bytes))
 

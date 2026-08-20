@@ -11,11 +11,10 @@ import io.github.lemcoder.koinference.prompt.promptOf
  * same input types, same return type, same constraint type — so it is the only part of a
  * runtime that lives in `:core`.
  *
- * Deliberately not here: parameter and settings updates. Their signatures match across
- * backends but their contracts do not — LiteRT-LM reopens its conversation, llama.cpp rebuilds
- * its session and, for a backend change, reloads the model — and the parameter types
- * themselves differ per backend. Those stay concrete on each implementation until something
- * needs to vary them polymorphically.
+ * Parameter and settings updates used to be excluded from `:core` on the grounds that their
+ * signatures matched but their contracts did not. They differ in cost — LiteRT-LM reopens a
+ * conversation, llama.cpp rebuilds a session and may reload the model — which one contract can
+ * state, so they live on [ModelRuntime] now. Both backends had declared them identically.
  */
 interface TextRuntime : ModelRuntime {
 
