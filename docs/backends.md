@@ -150,6 +150,39 @@ numbered by declaration position, so deleting a function from the middle of the 
 every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` silently starts
 calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
 afternoon. Same rule as ever: **append new functions at the end.**
+## A backend may refuse the device it was installed on
+
+`Backend.unsupportedReason(): String?` returns null by default, and an engine that runs wherever it
+compiles never overrides it. `Koinference.load` calls it before asking the loader for anything and
+throws `BackendUnsupportedException` on a non-null answer; `Koinference.unsupported` reports the
+same at startup, for an application that would rather hide a feature than catch a throw.
+
+**The failure being prevented is not an exception.** ggml selects its ARM kernels at compile time —
+the Q4_0 path is behind `#if defined(__ARM_FEATURE_DOTPROD)` and `ggml-cpu` calls `getauxval`
+nowhere — so a CPU without the dot-product extension takes SIGILL partway through a decode. That
+reaches the application as a process death with no stack trace and nothing to catch. A backend with
+a hardware requirement therefore declares it here rather than documenting it in prose.
+
+A string rather than a boolean because the caller has to be able to report *what* is missing;
+"unsupported device" in a bug report cannot be acted on.
+
+**Registering an unrunnable backend is deliberately not an error.** An application that ships both
+engines and only ever loads `.litertlm` keeps working on hardware llama.cpp refuses, which is why the
+constructor accepts it and `load` is where it becomes a failure.
+
+Two independent floors on Android, and only the second one is really about capability:
+
+- `:backends:llamacpp` declares `minSdk 31` (`androidMinSdkLlamaCpp` in the version catalog) against
+  24 everywhere else, so a consumer below it fails at manifest merge. A policy choice — dotprod
+  predates API 31.
+- **API level does not imply dotprod.** Cortex-A53 and A55 class arm64 parts ship on current
+  Android, so the Android actual reads `asimddp` out of `/proc/cpuinfo`. Kotlin, not JNI: it is the
+  same file `CpuPlacement` already reads.
+
+LiteRT-LM declares nothing. Its runtime contains `sdot` and `smmla`, but XNNPACK dispatches on
+runtime CPU detection, so its floor is unknown rather than known to be the same — untested for want
+of a device without dotprod.
+
 ## Platform files are named `<Expect>.<platform>.kt`
 
 `LlamaCppBridge.kt` in commonMain is answered by `LlamaCppBridge.jvm.kt`,
@@ -191,7 +224,8 @@ implementation was silently giving Linux the Darwin one. See the rules at the to
    tests inject a fake. Map `ModelConfig`'s fields onto the engine's own names here — this is the
    only place that should know both vocabularies.
 5. An `object X : Backend` — id, `handles`, `honours`, `loader`. Ten lines, and the only thing a
-   consumer needs to see.
+   consumer needs to see. Override `unsupportedReason` if the engine can be installed on hardware
+   it cannot run on.
 6. `FakeXBridge` in `commonTest`, and the runtime tests that go with it. Assert `honours` against
    what the binding actually passes down; that set is a claim, and a wrong one is invisible at
    run time.

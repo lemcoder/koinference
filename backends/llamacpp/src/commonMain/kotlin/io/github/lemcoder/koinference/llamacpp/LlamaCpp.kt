@@ -27,13 +27,7 @@ object LlamaCpp : Backend {
     // rather than surprised by another knob standing in for it.
     override val honours: Set<SamplingKnob> = setOf(SamplingKnob.TOP_K, SamplingKnob.MIN_P, SamplingKnob.TEMPERATURE)
 
-    /**
-     * Android only, and it can refuse a device the AAR was installed on.
-     *
-     * See [llamaCppUnsupportedReason]. The short version: ggml's ARM kernels are selected when the
-     * library is compiled, so a CPU without the dot-product extension crashes rather than running
-     * slowly, and API level is not a proxy for having it.
-     */
+    /** Android only, and it can refuse a device the AAR was installed on. */
     override fun unsupportedReason(): String? = llamaCppUnsupportedReason()
 
     override fun loader(config: ModelConfig): ModelLoader = LlamaCppModelLoader(config)

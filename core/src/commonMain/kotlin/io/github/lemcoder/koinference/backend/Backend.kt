@@ -59,18 +59,8 @@ interface Backend {
     /**
      * Why this backend cannot run on this device, or null when it can.
      *
-     * Checked before weights are read, because the failure it prevents is not catchable: an engine
-     * compiled for instructions the CPU does not implement dies on SIGILL mid-decode, and the
-     * application sees a process death rather than an exception. A device that cannot run an engine
-     * should learn it in a sentence, at registration time.
-     *
-     * Null by default: an engine that runs wherever it compiles has nothing to declare. The one
-     * that does is llama.cpp, whose ARM kernels are selected at compile time — ggml guards them
-     * with `#if defined(__ARM_FEATURE_DOTPROD)` and consults no CPU feature register at run time,
-     * so the requirement is real and there is no fallback path behind it.
-     *
-     * A string rather than a boolean because the caller has to be able to say *what* is missing;
-     * "unsupported device" in a bug report is not actionable.
+     * Called by [io.github.lemcoder.koinference.Koinference.load] before any weights are read; a
+     * non-null answer becomes a [BackendUnsupportedException]. See `docs/backends.md`.
      */
     fun unsupportedReason(): String? = null
 

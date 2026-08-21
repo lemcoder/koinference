@@ -50,13 +50,10 @@ class Koinference(
     val backendIds: List<String> get() = backends.map { it.id }
 
     /**
-     * Registered backends this device cannot run, by id, with the reason.
+     * Registered backends this device cannot run, by id, with the reason. Empty when it can run all
+     * of them.
      *
-     * Empty on a device that can run all of them. Read it at startup to hide a feature or warn once,
-     * rather than discovering the same thing from a [load] that throws — an application that
-     * registers two engines and only ever loads one container should not be stopped by the other
-     * being unrunnable, which is why the constructor accepts them and [load] is where it becomes
-     * an error.
+     * Registering one is not an error — [load] is where it becomes one.
      */
     val unsupported: Map<String, String>
         get() = backends.mapNotNull { backend ->
@@ -86,8 +83,8 @@ class Koinference(
      *         loader returns something that does not generate. The first message names what is
      *         registered, because the usual cause is a missing module rather than a bad path.
      * @throws BackendUnsupportedException if the backend that reads this container cannot run on
-     *         this device. Thrown before the weights are opened, and before anything native is
-     *         called — the failure it stands in for is a SIGILL that no `catch` would see.
+     *         this device. Thrown before the weights are opened and before anything native is
+     *         called.
      */
     suspend fun load(modelPath: String): GeneratingRuntime {
         val backend = backendFor(modelPath)
