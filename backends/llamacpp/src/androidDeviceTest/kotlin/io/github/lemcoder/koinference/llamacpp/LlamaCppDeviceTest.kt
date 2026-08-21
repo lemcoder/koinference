@@ -2,7 +2,7 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
-import io.github.lemcoder.koinference.llamacpp.internal.llamaCppUnsupportedReason
+import io.github.lemcoder.koinference.llamacpp.internal.unsupportedReason
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
 import kotlinx.coroutines.flow.toList
@@ -58,7 +58,7 @@ class LlamaCppDeviceTest {
      */
     @Test
     fun theDeviceIsNotRefused() {
-        assertNull(llamaCppUnsupportedReason(), "this device runs the other tests in this class")
+        assertNull(unsupportedReason(), "this device runs the other tests in this class")
     }
 
     /** Null when the test should run, or a reason to skip when no model was asked for. */

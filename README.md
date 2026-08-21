@@ -49,8 +49,8 @@ reset it. An application that wants one instance everywhere can hold this in its
 
 On Android, `:backends:llamacpp` declares `minSdk 31` and refuses hardware without the ARM
 dot-product extension: ggml picks its kernels at compile time, so such a CPU would take SIGILL
-mid-decode rather than run slowly. Its loader throws `BackendUnsupportedException` before reading any
-weights, so `koi.load(…)` fails with a message naming what the device is missing. `:core` and
+mid-decode rather than run slowly. It throws `BackendUnsupportedException` before reading any weights, so
+`koi.load(…)` fails with a message naming what the device is missing. `:core` and
 `:backends:litertlm` stay at `minSdk 24`.
 
 Adding a third backend is documented in [docs/backends.md](docs/backends.md); all of them have the

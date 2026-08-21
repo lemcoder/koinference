@@ -152,35 +152,42 @@ calling a different C function. An unused C function costs nothing; a renumbered
 afternoon. Same rule as ever: **append new functions at the end.**
 ## A backend may refuse the device it was installed on
 
-`:core` has no notion of device capability, and deliberately gained none: there is no
-`Backend.unsupportedReason` to override, no map of unrunnable engines on `Koinference`. A backend
-that can be installed on hardware it cannot use throws `BackendUnsupportedException` from **its own
-loader**, before anything native is called, and it surfaces to the caller out of `Koinference.load`
-like any other load failure.
+`:core` has no notion of device capability, and deliberately gained none: no
+`Backend.unsupportedReason` to override, no map of unrunnable engines on `Koinference`. Nor does
+`:backends:llamacpp`'s common code — the requirement is Android's alone, so it lives in
+`LlamaCppBridge.android.kt` and nowhere else. `platformBridge()` refuses to hand back a binding on
+hardware that cannot run it, throwing `BackendUnsupportedException`, which surfaces out of
+`Koinference.load` like any other load failure.
 
 `BackendUnsupportedException` lives in `:core` because it is vocabulary a consumer catches, not
-behaviour `:core` implements. It carries the backend id and the reason, so an application holding
-two engines can drop one and go on.
+behaviour `:core` implements.
 
 **The failure being prevented is not an exception.** ggml selects its ARM kernels at compile time —
 the Q4_0 path is behind `#if defined(__ARM_FEATURE_DOTPROD)` and `ggml-cpu` calls `getauxval`
 nowhere — so a CPU without the dot-product extension takes SIGILL partway through a decode. That
 reaches the application as a process death with no stack trace and nothing to catch.
 
-In `:backends:llamacpp` the check is `internal expect fun llamaCppUnsupportedReason(): String?` —
-Android answers, jvm and one shared native actual return null, since those legs link an archive
-built for the machine that runs them. `LlamaCppModelLoader` takes it as an internal constructor
-parameter defaulting to that function, which is the same trick the bridge uses: it is what makes the
-refusal testable without a device that lacks the instruction.
+There is no `expect`/`actual` for this, on purpose. An `expect fun` would put the question in front
+of all five legs so that four could answer null: macOS, iOS, Linux and the desktop JVM each link an
+archive built for the machine that runs it, and none of them can be installed onto hardware it was
+not built for. **The Android AAR is the only shipped binary that can.**
 
-Two independent floors on Android, and only the second is really about capability:
+The cost is that the refusal cannot be unit-tested — there is nothing to inject, and the check reads
+a file that only exists on the device. `LlamaCppDeviceTest` asserts the Pixel 8a is *not* refused,
+which is the half that can be verified on hardware anyone here owns.
+
+Two independent floors, and only the second is really about capability:
 
 - `:backends:llamacpp` declares `minSdk 31` (`androidMinSdkLlamaCpp` in the version catalog) against
   24 everywhere else, so a consumer below it fails at manifest merge. A policy choice — dotprod
   predates API 31.
 - **API level does not imply dotprod.** Cortex-A53 and A55 class arm64 parts ship on current
-  Android, so the Android actual reads `asimddp` out of `/proc/cpuinfo`. Kotlin, not JNI: it is the
-  same file `CpuPlacement` already reads.
+  Android, so the check reads `asimddp` out of `/proc/cpuinfo`. Kotlin, not JNI: it is the same file
+  `CpuPlacement` already reads.
+
+This is also why `LlamaCppBridge.android.kt` is no longer byte-identical to `LlamaCppBridge.jvm.kt`,
+while `JniBridge.kt` still is. The pair that must not diverge is the generated-bridge caller; the
+`platformBridge()` actuals are per-platform files precisely so a platform can differ here.
 
 LiteRT-LM refuses nothing. Its runtime contains `sdot` and `smmla`, but XNNPACK dispatches on
 runtime CPU detection, so its floor is unknown rather than known to be the same — untested for want
@@ -228,9 +235,8 @@ implementation was silently giving Linux the Darwin one. See the rules at the to
    only place that should know both vocabularies.
 5. An `object X : Backend` — id, `handles`, `honours`, `loader`. Ten lines, and the only thing a
    consumer needs to see.
-6. If the engine can be installed on hardware it cannot run on, throw
-   `BackendUnsupportedException` from the loader before touching the bridge, and take the check as
-   an internal constructor parameter so a test can inject it.
+6. If the engine can be installed on hardware it cannot run on, refuse in the leg that ships that
+   binary — `platformBridge()` throwing `BackendUnsupportedException` — not in common code.
 7. `FakeXBridge` in `commonTest`, and the runtime tests that go with it. Assert `honours` against
    what the binding actually passes down; that set is a claim, and a wrong one is invisible at
    run time.

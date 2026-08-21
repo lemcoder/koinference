@@ -1,13 +1,11 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.backend.BackendUnsupportedException
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementSource
 import io.github.lemcoder.koinference.llamacpp.internal.platformCpuPlacement
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
-import io.github.lemcoder.koinference.llamacpp.internal.llamaCppUnsupportedReason
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -19,15 +17,11 @@ import kotlinx.coroutines.withContext
  *
  * [ModelConfig.cacheDir] is ignored: llama.cpp memory-maps the weights and keeps no prepared copy
  * beside them.
- *
- * @param unsupportedReason why this device cannot run the engine, or null when it can. See
- *        `docs/backends.md`.
  */
 class LlamaCppModelLoader internal constructor(
     private val bridge: LlamaCppBridge,
     private val config: ModelConfig,
     private val placementPolicy: CpuPlacementSource = platformCpuPlacement(),
-    private val unsupportedReason: () -> String? = ::llamaCppUnsupportedReason,
 ) : ModelLoader {
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
@@ -43,7 +37,6 @@ class LlamaCppModelLoader internal constructor(
         require(modelPath.endsWith(".gguf")) {
             "llama.cpp loader expects a .gguf model path, got: $modelPath"
         }
-        unsupportedReason()?.let { throw BackendUnsupportedException(LlamaCpp.id, it) }
 
         return lock.withLock {
             runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
