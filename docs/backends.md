@@ -152,25 +152,28 @@ calling a different C function. An unused C function costs nothing; a renumbered
 afternoon. Same rule as ever: **append new functions at the end.**
 ## A backend may refuse the device it was installed on
 
-`Backend.unsupportedReason(): String?` returns null by default, and an engine that runs wherever it
-compiles never overrides it. `Koinference.load` calls it before asking the loader for anything and
-throws `BackendUnsupportedException` on a non-null answer; `Koinference.unsupported` reports the
-same at startup, for an application that would rather hide a feature than catch a throw.
+`:core` has no notion of device capability, and deliberately gained none: there is no
+`Backend.unsupportedReason` to override, no map of unrunnable engines on `Koinference`. A backend
+that can be installed on hardware it cannot use throws `BackendUnsupportedException` from **its own
+loader**, before anything native is called, and it surfaces to the caller out of `Koinference.load`
+like any other load failure.
+
+`BackendUnsupportedException` lives in `:core` because it is vocabulary a consumer catches, not
+behaviour `:core` implements. It carries the backend id and the reason, so an application holding
+two engines can drop one and go on.
 
 **The failure being prevented is not an exception.** ggml selects its ARM kernels at compile time —
 the Q4_0 path is behind `#if defined(__ARM_FEATURE_DOTPROD)` and `ggml-cpu` calls `getauxval`
 nowhere — so a CPU without the dot-product extension takes SIGILL partway through a decode. That
-reaches the application as a process death with no stack trace and nothing to catch. A backend with
-a hardware requirement therefore declares it here rather than documenting it in prose.
+reaches the application as a process death with no stack trace and nothing to catch.
 
-A string rather than a boolean because the caller has to be able to report *what* is missing;
-"unsupported device" in a bug report cannot be acted on.
+In `:backends:llamacpp` the check is `internal expect fun llamaCppUnsupportedReason(): String?` —
+Android answers, jvm and one shared native actual return null, since those legs link an archive
+built for the machine that runs them. `LlamaCppModelLoader` takes it as an internal constructor
+parameter defaulting to that function, which is the same trick the bridge uses: it is what makes the
+refusal testable without a device that lacks the instruction.
 
-**Registering an unrunnable backend is deliberately not an error.** An application that ships both
-engines and only ever loads `.litertlm` keeps working on hardware llama.cpp refuses, which is why the
-constructor accepts it and `load` is where it becomes a failure.
-
-Two independent floors on Android, and only the second one is really about capability:
+Two independent floors on Android, and only the second is really about capability:
 
 - `:backends:llamacpp` declares `minSdk 31` (`androidMinSdkLlamaCpp` in the version catalog) against
   24 everywhere else, so a consumer below it fails at manifest merge. A policy choice — dotprod
@@ -179,7 +182,7 @@ Two independent floors on Android, and only the second one is really about capab
   Android, so the Android actual reads `asimddp` out of `/proc/cpuinfo`. Kotlin, not JNI: it is the
   same file `CpuPlacement` already reads.
 
-LiteRT-LM declares nothing. Its runtime contains `sdot` and `smmla`, but XNNPACK dispatches on
+LiteRT-LM refuses nothing. Its runtime contains `sdot` and `smmla`, but XNNPACK dispatches on
 runtime CPU detection, so its floor is unknown rather than known to be the same — untested for want
 of a device without dotprod.
 
@@ -224,10 +227,12 @@ implementation was silently giving Linux the Darwin one. See the rules at the to
    tests inject a fake. Map `ModelConfig`'s fields onto the engine's own names here — this is the
    only place that should know both vocabularies.
 5. An `object X : Backend` — id, `handles`, `honours`, `loader`. Ten lines, and the only thing a
-   consumer needs to see. Override `unsupportedReason` if the engine can be installed on hardware
-   it cannot run on.
-6. `FakeXBridge` in `commonTest`, and the runtime tests that go with it. Assert `honours` against
+   consumer needs to see.
+6. If the engine can be installed on hardware it cannot run on, throw
+   `BackendUnsupportedException` from the loader before touching the bridge, and take the check as
+   an internal constructor parameter so a test can inject it.
+7. `FakeXBridge` in `commonTest`, and the runtime tests that go with it. Assert `honours` against
    what the binding actually passes down; that set is a claim, and a wrong one is invisible at
    run time.
-7. If it should be benchmarkable: add it to `benchmarkBackends` in `:benchmark:core`'s
+8. If it should be benchmarkable: add it to `benchmarkBackends` in `:benchmark:core`'s
    `Engines.kt`. **No adapter to write** — `BackendEngine` adapts any `Backend`.

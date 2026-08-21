@@ -49,17 +49,6 @@ class Koinference(
     /** Ids of the registered backends, in the order they were given. */
     val backendIds: List<String> get() = backends.map { it.id }
 
-    /**
-     * Registered backends this device cannot run, by id, with the reason. Empty when it can run all
-     * of them.
-     *
-     * Registering one is not an error — [load] is where it becomes one.
-     */
-    val unsupported: Map<String, String>
-        get() = backends.mapNotNull { backend ->
-            backend.unsupportedReason()?.let { backend.id to it }
-        }.toMap()
-
     // One loader per backend, kept so that unload and unloadAll reach the same loader a load used —
     // a loader owns the runtimes it handed out, and a second one would not know about them.
     private val loaders = mutableMapOf<String, ModelLoader>()
@@ -82,14 +71,13 @@ class Koinference(
      * @throws IllegalStateException if no registered backend reads this container, or if a backend's
      *         loader returns something that does not generate. The first message names what is
      *         registered, because the usual cause is a missing module rather than a bad path.
-     * @throws BackendUnsupportedException if the backend that reads this container cannot run on
-     *         this device. Thrown before the weights are opened and before anything native is
-     *         called.
+     * @throws BackendUnsupportedException if the engine cannot run on this device. A backend that
+     *         can be installed on hardware it cannot use throws this from its own loader, before
+     *         anything native is called.
      */
     suspend fun load(modelPath: String): GeneratingRuntime {
         val backend = backendFor(modelPath)
             ?: error("No registered backend reads $modelPath. Registered: $backendIds")
-        backend.unsupportedReason()?.let { throw BackendUnsupportedException(backend.id, it) }
         val runtime = loaderFor(modelPath).load(modelPath)
         return runtime as? GeneratingRuntime
             ?: error("${backend.id} returned ${runtime::class.simpleName}, which does not generate")

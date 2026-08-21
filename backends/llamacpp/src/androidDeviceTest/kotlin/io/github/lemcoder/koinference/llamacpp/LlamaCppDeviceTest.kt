@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
+import io.github.lemcoder.koinference.llamacpp.internal.llamaCppUnsupportedReason
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
 import kotlinx.coroutines.flow.toList
@@ -49,19 +50,15 @@ class LlamaCppDeviceTest {
         requestedModel ?: "/data/local/tmp/koinference/stories260K.gguf"
 
     /**
-     * The support check answers on a real device, and answers correctly.
+     * The support check answers on a real device, and does not refuse this one.
      *
-     * Worth a device test rather than a unit one: the Android leg reads `/proc/cpuinfo`, and an
-     * emulator, a robolectric shadow or a JVM test would each be answering about a different
-     * machine. This device is a Pixel 8a — API 36, Cortex-A715, dotprod — so the expected answer is
-     * null, and every other test in this class would be crashing rather than failing if it were not.
+     * A device test rather than a unit one because the Android leg reads `/proc/cpuinfo`: an
+     * emulator or a JVM test would be answering about a different machine. This is a Pixel 8a —
+     * API 36, dotprod — so a refusal here would mean the check is wrong, not the device.
      */
     @Test
-    fun theBackendAcceptsThisDevice() {
-        assertNull(
-            LlamaCpp.unsupportedReason(),
-            "this device runs the other tests in this class, so it must not be refused",
-        )
+    fun theDeviceIsNotRefused() {
+        assertNull(llamaCppUnsupportedReason(), "this device runs the other tests in this class")
     }
 
     /** Null when the test should run, or a reason to skip when no model was asked for. */

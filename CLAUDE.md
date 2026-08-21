@@ -368,10 +368,12 @@ so generation tests are env-gated rather than run in CI.
 - **The llama.cpp AAR declares `minSdk 31` while everything else declares 24**, and
   `androidMinSdkLlamaCpp` in the version catalog is the single place it lives. A consumer below it
   fails at manifest merge, which is the point. **The API level is not the real constraint** —
-  A53/A55 arm64 parts ship on current Android — so `LlamaCpp.unsupportedReason()` also reads
-  `asimddp` out of `/proc/cpuinfo`, and `Koinference.load` throws `BackendUnsupportedException`
-  before touching the loader. Adding a backend with a hardware requirement means overriding
-  `Backend.unsupportedReason`, not documenting the requirement in prose.
+  A53/A55 arm64 parts ship on current Android — so `llamaCppUnsupportedReason()` also reads
+  `asimddp` out of `/proc/cpuinfo`, and `LlamaCppModelLoader` throws `BackendUnsupportedException`
+  before it touches the bridge. **`:core` has no capability concept and is not getting one**: a
+  backend that can be installed on hardware it cannot use refuses from its own loader. That was
+  briefly a `Backend.unsupportedReason` method and it earned its removal — an interface member every
+  backend has to read past, to say something only one of them has ever needed.
 - **A CMake cache outlives the experiment that set it.** `KOI_KLEIDIAI` forced
   `GGML_CPU_KLEIDIAI` on and never off, so once any build enabled it every later build in that
   directory kept it — which invalidated the "KleidiAI is a wash" measurement in

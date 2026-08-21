@@ -4,7 +4,6 @@ import io.github.lemcoder.koinference.backend.SamplingKnob
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class LlamaCppBackendTest {
@@ -25,14 +24,6 @@ class LlamaCppBackendTest {
             setOf(SamplingKnob.TOP_K, SamplingKnob.MIN_P, SamplingKnob.TEMPERATURE),
             LlamaCpp.honours,
         )
-    }
-
-    @Test
-    fun `the host targets have nothing to refuse`() {
-        // jvm, macOS, iOS and Linux link an archive built for the machine running it. Only the
-        // Android AAR is one binary meeting hardware it was not built on, and this test does not
-        // run there — LlamaCppDeviceTest asserts the Android answer on a real device.
-        assertNull(LlamaCpp.unsupportedReason())
     }
 
     @Test

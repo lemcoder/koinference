@@ -12,15 +12,11 @@ internal class FakeBackend(
     private val extensions: List<String>,
     override val honours: Set<SamplingKnob> = emptySet(),
     override val modalities: Set<Modality> = setOf(Modality.TEXT),
-    /** Non-null makes this backend one the device cannot run; see [Backend.unsupportedReason]. */
-    private val unsupportedReason: String? = null,
 ) : Backend {
 
     val loaders = mutableListOf<FakeLoader>()
 
     override fun handles(modelPath: String) = extensions.any { modelPath.endsWith(it) }
-
-    override fun unsupportedReason(): String? = unsupportedReason
 
     override fun loader(config: ModelConfig): ModelLoader = FakeLoader(config).also { loaders += it }
 }

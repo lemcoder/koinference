@@ -56,14 +56,6 @@ interface Backend {
      */
     val honours: Set<SamplingKnob>
 
-    /**
-     * Why this backend cannot run on this device, or null when it can.
-     *
-     * Called by [io.github.lemcoder.koinference.Koinference.load] before any weights are read; a
-     * non-null answer becomes a [BackendUnsupportedException]. See `docs/backends.md`.
-     */
-    fun unsupportedReason(): String? = null
-
     /** A loader configured with [config]. Knobs this engine has no equivalent for are ignored. */
     fun loader(config: ModelConfig): ModelLoader
 }

@@ -5,7 +5,6 @@ import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
-import io.github.lemcoder.koinference.llamacpp.internal.llamaCppUnsupportedReason
 import io.github.lemcoder.koinference.runtime.Modality
 
 /**
@@ -26,9 +25,6 @@ object LlamaCpp : Backend {
     // koi_session_create takes no top-p and no seed, so a caller setting either is ignored
     // rather than surprised by another knob standing in for it.
     override val honours: Set<SamplingKnob> = setOf(SamplingKnob.TOP_K, SamplingKnob.MIN_P, SamplingKnob.TEMPERATURE)
-
-    /** Android only, and it can refuse a device the AAR was installed on. */
-    override fun unsupportedReason(): String? = llamaCppUnsupportedReason()
 
     override fun loader(config: ModelConfig): ModelLoader = LlamaCppModelLoader(config)
 }
