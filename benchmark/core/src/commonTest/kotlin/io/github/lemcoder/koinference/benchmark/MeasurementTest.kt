@@ -1,12 +1,14 @@
 package io.github.lemcoder.koinference.benchmark
 
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.runTest
+import io.github.lemcoder.koinference.benchmark.runner.measureGeneration
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import io.github.lemcoder.koinference.runtime.ResponsePart
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.runTest
 
 /**
  * The one function every reported number comes out of, tested directly.
@@ -24,9 +26,9 @@ class MeasurementTest {
         val probe = probe()
         val chunks = flow {
             probe.advance(30_000_000L) // 30 ms of prefill
-            emit("a")
+            emit(ResponsePart.Text("a"))
             probe.advance(70_000_000L) // 70 ms of decode
-            emit("b")
+            emit(ResponsePart.Text("b"))
         }
 
         val measurement = measureGeneration(probe, chunks)
@@ -39,7 +41,7 @@ class MeasurementTest {
 
     @Test
     fun `concatenates chunks in order`() = runTest {
-        val measurement = measureGeneration(probe(), flowOf("Hel", "lo ", "there"))
+        val measurement = measureGeneration(probe(), flowOf(ResponsePart.Text("Hel"), ResponsePart.Text("lo "), ResponsePart.Text("there")))
 
         assertEquals("Hello there", measurement.text)
         assertEquals(3, measurement.chunks)
@@ -61,7 +63,7 @@ class MeasurementTest {
         val probe = probe()
         var totalAtCount = 0L
 
-        val measurement = measureGeneration(probe, flowOf("one ", "two")) { text ->
+        val measurement = measureGeneration(probe, flowOf(ResponsePart.Text("one "), ResponsePart.Text("two"))) { text ->
             // Tokenizing must never land inside a timing.
             probe.advance(500_000_000L)
             totalAtCount = probe.monotonicNanos()
@@ -75,7 +77,7 @@ class MeasurementTest {
 
     @Test
     fun `an engine with no tokenizer reports no token count`() = runTest {
-        val measurement = measureGeneration(probe(), flowOf("one"), countTokens = null)
+        val measurement = measureGeneration(probe(), flowOf(ResponsePart.Text("one")), countTokens = null)
 
         assertNull(measurement.generatedTokens)
         assertNull(measurement.tokensPerSecond)
@@ -85,7 +87,7 @@ class MeasurementTest {
     fun `a negative count is treated as absent rather than as a number`() = runTest {
         // -1 is the harness's "this engine has no tokenizer"; zero tokens is a real outcome for a
         // model that generated nothing, and the two must not collapse into one value.
-        val measurement = measureGeneration(probe(), flowOf("one")) { -1 }
+        val measurement = measureGeneration(probe(), flowOf(ResponsePart.Text("one"))) { -1 }
 
         assertNull(measurement.generatedTokens)
     }
@@ -95,9 +97,9 @@ class MeasurementTest {
         val probe = probe()
         val chunks = flow {
             probe.advance(100_000_000L) // prefill, excluded
-            emit("a")
+            emit(ResponsePart.Text("a"))
             probe.advance(1_000_000_000L) // 1 s of decode
-            emit("b")
+            emit(ResponsePart.Text("b"))
         }
 
         val measurement = measureGeneration(probe, chunks) { 10 }
@@ -110,11 +112,11 @@ class MeasurementTest {
     fun `chunks per second excludes the first chunk from the count`() = runTest {
         val probe = probe()
         val chunks = flow {
-            emit("a")
+            emit(ResponsePart.Text("a"))
             probe.advance(1_000_000_000L)
-            emit("b")
+            emit(ResponsePart.Text("b"))
             probe.advance(1_000_000_000L)
-            emit("c")
+            emit(ResponsePart.Text("c"))
         }
 
         val measurement = measureGeneration(probe, chunks)
@@ -128,7 +130,7 @@ class MeasurementTest {
     @Test
     fun `a single chunk has no chunk rate to report`() = runTest {
         val probe = probe()
-        val measurement = measureGeneration(probe, flow { probe.advance(1_000_000L); emit("all of it") })
+        val measurement = measureGeneration(probe, flow { probe.advance(1_000_000L); emit(ResponsePart.Text("all of it")) })
 
         assertEquals(1, measurement.chunks)
         // One chunk is not a rate; reporting one would divide by an interval that never held any.

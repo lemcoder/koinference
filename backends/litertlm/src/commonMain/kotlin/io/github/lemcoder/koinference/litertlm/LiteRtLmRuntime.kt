@@ -1,11 +1,12 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.PromptPart
-import io.github.lemcoder.koinference.RuntimeGuard
-import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.textOnly
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.RuntimeGuard
+import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmConversation
@@ -14,6 +15,7 @@ import io.github.lemcoder.koinference.litertlm.internal.toConversationOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /**
@@ -29,7 +31,7 @@ import kotlinx.coroutines.withContext
  */
 class LiteRtLmRuntime internal constructor(
     private val bridge: LiteRtLmBridge,
-    engineOptions: EngineOptions,
+    private var engineOptions: EngineOptions,
     private val systemPrompt: String?,
     private var engine: LiteRtLmEngine,
     parameters: GenerationParameters = GenerationParameters(),
@@ -44,15 +46,13 @@ class LiteRtLmRuntime internal constructor(
     private val maxOutputTokens: Int = 0,
 ) : LiteRtLmTextRuntime {
 
-    private var engineOptions: EngineOptions = engineOptions
-
     override var generationParameters: GenerationParameters = parameters
         private set
 
     // Derived rather than stored: the backend is a property of the engine, and a second copy
     // of it is a second thing that can be true while the engine says otherwise.
     override val runtimeSettings: RuntimeSettings
-        get() = RuntimeSettings(engineOptions.backend)
+        get() = RuntimeSettings(engineOptions.accelerator)
 
     // Conversations carry prefilled state, so one is opened per runtime and reused across
     // turns. Reopening it is how a parameter change takes effect, since the sampler is fixed
@@ -64,13 +64,10 @@ class LiteRtLmRuntime internal constructor(
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): String {
-        // Text-only for now. The prebuilt runtime itself can do vision and audio — that code
-        // is compiled into it, unlike a source build — but reaching it needs the engine
-        // created with a vision/audio backend and the facade taught to pass content parts
-        // through, neither of which is wired up. Rejected before the guard: a bad prompt is
-        // the caller's mistake and should not queue behind someone else's generation.
-        val text = prompt.textOnly("LiteRT-LM")
+    ): List<ResponsePart> {
+        // Flattened before the guard, so a bad prompt does not queue behind someone else's
+        // generation.
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
 
         val schema = when (constraint) {
             is GenerationConstraint.JsonSchema -> constraint.schema
@@ -80,7 +77,8 @@ class LiteRtLmRuntime internal constructor(
         return guard.whileOpen {
             withContext(Dispatchers.Default) {
                 explainingSystemPromptFailures {
-                    currentConversation().generate(text, schema)
+                    // One part: this engine emits text and nothing else.
+                    listOf(ResponsePart.Text(currentConversation().generate(text, schema)))
                 }
             }
         }
@@ -96,12 +94,17 @@ class LiteRtLmRuntime internal constructor(
     override fun streamResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): Flow<String> {
-        val text = prompt.textOnly("LiteRT-LM")
+    ): Flow<ResponsePart> {
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         val schema = (constraint as? GenerationConstraint.JsonSchema)?.schema
 
         return guard.streamWhileOpen {
-            emitAll(explainingSystemPromptFailures { currentConversation().stream(text, schema) })
+            // Text only from this engine, so each chunk becomes one Text part.
+            emitAll(
+                explainingSystemPromptFailures {
+                    currentConversation().stream(text, schema).map(ResponsePart::Text)
+                },
+            )
         }
     }
 
@@ -137,10 +140,10 @@ class LiteRtLmRuntime internal constructor(
      */
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
         guard.whileOpen {
-            if (settings.backend == engineOptions.backend) return@whileOpen
+            if (settings.accelerator == engineOptions.accelerator) return@whileOpen
 
             releaseConversation()
-            val reopened = engineOptions.copy(backend = settings.backend)
+            val reopened = engineOptions.copy(accelerator = settings.accelerator)
             withContext(Dispatchers.Default) {
                 engine.close()
                 try {
@@ -149,7 +152,7 @@ class LiteRtLmRuntime internal constructor(
                 } catch (failure: Throwable) {
                     guard.markClosed()
                     throw IllegalStateException(
-                        "Could not reopen ${reopened.modelPath} on ${settings.backend}; " +
+                        "Could not reopen ${reopened.modelPath} on ${settings.accelerator}; " +
                             "the runtime is unloaded and has to be loaded again",
                         failure,
                     )

@@ -1,18 +1,21 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
+import io.github.lemcoder.koinference.llamacpp.internal.unsupportedReason
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.runtime.GenerationParameters
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -46,6 +49,18 @@ class LlamaCppDeviceTest {
     private val modelPath: String =
         requestedModel ?: "/data/local/tmp/koinference/stories260K.gguf"
 
+    /**
+     * The support check answers on a real device, and does not refuse this one.
+     *
+     * A device test rather than a unit one because the Android leg reads `/proc/cpuinfo`: an
+     * emulator or a JVM test would be answering about a different machine. This is a Pixel 8a —
+     * API 36, dotprod — so a refusal here would mean the check is wrong, not the device.
+     */
+    @Test
+    fun theDeviceIsNotRefused() {
+        assertNull(unsupportedReason(), "this device runs the other tests in this class")
+    }
+
     /** Null when the test should run, or a reason to skip when no model was asked for. */
     private fun skipReason(): String? = when {
         File(modelPath).isFile -> null
@@ -78,11 +93,11 @@ class LlamaCppDeviceTest {
         // The bridge test below proves the .so runs; this proves the public API reaches it —
         // the loader owns backend init and session creation, which the bridge test does by hand.
         runBlocking {
-            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 16)
+            val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 16))
             val runtime = loader.load(modelPath)
             try {
                 assertIs<LlamaCppTextRuntime>(runtime)
-                val reply = runtime.generateResponse("Once upon a time")
+                val reply = runtime.generateResponse("Once upon a time").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unload(modelPath)
@@ -103,14 +118,14 @@ class LlamaCppDeviceTest {
         if (skipReason() != null) return
 
         runBlocking {
-            val loader = LlamaCppModelLoader(nCtx = 256, nPredict = 24)
+            val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 24))
             val runtime = loader.load(modelPath)
             try {
                 // Greedy, so the two calls answer identically rather than by luck.
                 runtime.updateGenerationParameters(GenerationParameters(temperature = 0.0))
 
-                val streamed = runtime.streamResponse("Once upon a time").toList()
-                val blocking = runtime.generateResponse("Once upon a time")
+                val streamed = runtime.streamResponse("Once upon a time").toList().textParts()
+                val blocking = runtime.generateResponse("Once upon a time").text()
 
                 Log.i(
                     "koinference-benchmark",

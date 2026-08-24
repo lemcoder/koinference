@@ -9,7 +9,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.benchmark.platform.BenchmarkContext
+import io.github.lemcoder.koinference.runtime.GenerationParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,7 +51,7 @@ class InferenceService : Service() {
 
         // The harness's Android probe reads device facts through this; without it the
         // /koinference/device endpoint would report a device with every field null.
-        io.github.lemcoder.koinference.benchmark.BenchmarkContext.applicationContext = applicationContext
+        io.github.lemcoder.koinference.benchmark.platform.BenchmarkContext.applicationContext = applicationContext
 
         val port = intent.getIntExtra(EXTRA_PORT, DEFAULT_PORT)
         val bind = intent.getStringExtra(EXTRA_BIND) ?: DEFAULT_BIND
@@ -69,6 +70,10 @@ class InferenceService : Service() {
                     threads = intent.getIntExtra(EXTRA_THREADS, 0),
                     contextTokens = intent.getIntExtra(EXTRA_CONTEXT_TOKENS, 0),
                     useGpu = intent.getBooleanExtra(EXTRA_GPU, false),
+                    // This process's own cache. A model may live on /data/local/tmp, which is
+                    // readable; the weight cache may not, and without a writable one a large
+                    // model rebuilds its prefill signatures on every load.
+                    cacheDir = intent.getStringExtra(EXTRA_CACHE_DIR) ?: cacheDir.absolutePath,
                 )
                 model = loaded
                 log("loaded ${loaded.modelId} on ${loaded.engineId} in ${loaded.modelLoadMs} ms")
@@ -131,6 +136,7 @@ class InferenceService : Service() {
         const val EXTRA_THREADS = "threads"
         const val EXTRA_CONTEXT_TOKENS = "contextTokens"
         const val EXTRA_GPU = "gpu"
+        const val EXTRA_CACHE_DIR = "cacheDir"
 
         const val DEFAULT_PORT = 8080
 

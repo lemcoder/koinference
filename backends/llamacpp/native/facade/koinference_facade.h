@@ -166,6 +166,42 @@ void koi_generate_end(KoiSession* session);
  */
 int koi_token_count(KoiSession* session, const char* text);
 
+/* ── thread placement ─────────────────────────────────────────────────────── */
+
+/**
+ * Report the CPUs this session's decode threads are pinned to.
+ *
+ * Pinning is what makes the thread count worth choosing: unpinned, a worker scheduled onto a
+ * little core makes every barrier wait for it. Reporting the mask is how a caller can tell what
+ * actually happened on a device nobody has measured, instead of inferring it from timings.
+ *
+ * Appended at the end, like every addition here — the JNI bridge numbering follows declaration
+ * order, so inserting above renumbers every bridge after it.
+ *
+ * @param out_cpus  filled with CPU indices, ascending.
+ * @param max_cpus  capacity of out_cpus.
+ * @return the number of CPUs written, 0 when the threads are not pinned, or -1 on invalid
+ *         arguments. Follows snprintf only in spirit: a buffer too small truncates.
+ */
+int koi_session_cpu_mask(KoiSession* session, int* out_cpus, int max_cpus);
+
+/**
+ * Re-pin this session's decode threads to `cpus`.
+ *
+ * The pool is immutable once built, so this detaches, frees and rebuilds it — which is what
+ * ggml_threadpool_params_match exists for upstream. Safe only between decodes: during one the
+ * pool is in use, and the caller is responsible for not overlapping this with a generation.
+ * Passing count = 0 drops the pinning and returns the session to default placement.
+ *
+ * Thread count follows the mask: never more workers than cores in it, because strict placement
+ * puts worker i on the i-th core and the surplus goes nowhere.
+ *
+ * @return 0 on success, -1 on invalid arguments or if the pool could not be rebuilt. On failure
+ *         the previous placement is gone and the session runs with default placement rather than
+ *         with no threads.
+ */
+int koi_session_set_cpu_mask(KoiSession* session, const int* cpus, int count);
+
 #ifdef __cplusplus
 }
 #endif

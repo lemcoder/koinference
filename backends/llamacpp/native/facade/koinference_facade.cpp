@@ -10,11 +10,18 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
+
+#if defined(__linux__)
+#include <sched.h>
+#endif
 
 static constexpr int   DEFAULT_N_CTX     = 4096;
 static constexpr int   DEFAULT_N_PREDICT = 512;
@@ -22,6 +29,49 @@ static constexpr float DEFAULT_TEMP      = 0.8f;
 static constexpr int   DEFAULT_TOP_K     = 40;
 static constexpr float DEFAULT_MIN_P     = 0.05f;
 static constexpr int   BATCH_SIZE        = 512;
+
+/** Ceiling on the auto-detected thread count; bandwidth, not cores, is the limit. */
+static constexpr int   MAX_DECODE_THREADS = 8;
+
+/**
+ * How many threads to decode with when the caller does not say.
+ *
+ * Decoding one token is a GEMV over the whole model: it reads every weight once and does almost
+ * no arithmetic per byte, so it is bound by memory bandwidth rather than by cores. A couple of
+ * threads already saturate a phone's DRAM, and past that point extra threads buy nothing while
+ * still paying ggml's per-node barrier and sharing the SoC's power budget, which clocks
+ * everything down.
+ *
+ * Measured on a Pixel 8a (4x A510 @ 1.70 GHz, 4x A715 @ 2.37 GHz, 1x X3 @ 2.91 GHz) on
+ * LFM2.5-1.2B-Instruct Q4_0, medians of interleaved runs in both orderings:
+ *
+ *     1 thread  10.6 tok/s     3 threads  12.3-14.6
+ *     2 threads 12.1-13.8      4 threads   5.3-6.2
+ *                              5 threads   2.5-2.7
+ *
+ * So the count is deliberately *not* the number of big cores. That would be 4 here, which is
+ * exactly where throughput falls off a cliff. Half the big cluster is the rule: it lands on the
+ * measured optimum on this device and still scales up on a machine whose big cluster is wider.
+ *
+ * The old default was hardware_concurrency() - 2, which picked 7 and ran at about half the speed
+ * of picking 2.
+ *
+ * A caller who knows better should pass n_threads: this is a default, not a policy, and the
+ * balance shifts with model size, quantization and how much bandwidth the rest of the device is
+ * using.
+ */
+/**
+ * Worker count when the caller passes none.
+ *
+ * Every Kotlin binding supplies one — each platform's `platformCpuPlacement()` decides it along
+ * with the mask, because the two are one choice and it differs per platform. This exists only for a
+ * caller reaching the C API directly, and is deliberately the dumbest thing that works rather than
+ * a second copy of a rule that is tested elsewhere.
+ */
+static int detect_decode_threads() {
+    const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+    return std::max(2, std::min(cores - 2, MAX_DECODE_THREADS));
+}
 
 struct KoiModel {
     llama_model* model;
@@ -45,6 +95,8 @@ struct KoiGeneration {
 struct KoiSession {
     llama_model*              model;   // non-owning; lifetime tied to KoiModel
     llama_context*            ctx;
+    ggml_threadpool*          threadpool = nullptr;
+    std::vector<int>          pinned_cpus;   // empty when on default placement
     llama_batch               batch;
     common_chat_templates_ptr chat_templates;
     KoiSessionParams          params;
@@ -92,12 +144,61 @@ KoiSessionParams koi_default_session_params(void) {
     return {DEFAULT_N_CTX, auto_threads, DEFAULT_N_PREDICT, DEFAULT_TEMP, DEFAULT_TOP_K, DEFAULT_MIN_P};
 }
 
+/**
+ * Build a pinned threadpool over `cpus` and attach it, replacing whatever the session had.
+ *
+ * Shared by session creation and koi_session_set_cpu_mask. An empty mask, or a pool that cannot be
+ * created, leaves the session on llama.cpp's own placement — slower, but running.
+ *
+ * Without a mask the scheduler is free to put a ggml worker on a little core, and since every graph
+ * node ends in a barrier the whole batch then runs at that core's pace. That — not bandwidth — is
+ * why 4 threads measured slower than 2 on a Pixel 8a before pinning.
+ */
+static bool apply_cpu_mask(KoiSession* session, const std::vector<int>& cpus, int requested_threads) {
+    llama_detach_threadpool(session->ctx);
+    if (session->threadpool) {
+        ggml_threadpool_free(session->threadpool);
+        session->threadpool = nullptr;
+    }
+    session->pinned_cpus.clear();
+
+    if (cpus.empty()) return true;
+
+    // Never more workers than cores in the mask: strict placement puts worker i on the i-th core,
+    // so the surplus goes nowhere — 6 threads against this phone's 4 big cores measured 0.6 tok/s
+    // against 39.8 for 4.
+    const int threads = std::max(1, std::min(requested_threads, static_cast<int>(cpus.size())));
+
+    ggml_threadpool_params tpp = ggml_threadpool_params_default(threads);
+    std::fill(std::begin(tpp.cpumask), std::end(tpp.cpumask), false);
+    int masked = 0;
+    for (int cpu : cpus) {
+        if (cpu >= 0 && cpu < GGML_MAX_N_THREADS) {
+            tpp.cpumask[cpu] = true;
+            ++masked;
+        }
+    }
+    if (masked == 0) return true;
+    tpp.strict_cpu = true;
+
+    session->threadpool = ggml_threadpool_new(&tpp);
+    if (!session->threadpool) return false;
+
+    llama_attach_threadpool(session->ctx, session->threadpool, nullptr);
+    // The context has to agree, or it dispatches more work than the pool has workers.
+    llama_set_n_threads(session->ctx, threads, threads);
+    session->pinned_cpus = cpus;
+    return true;
+}
+
 KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     if (!model) return nullptr;
 
-    const int n_threads = (params.n_threads <= 0)
-        ? std::max(1, static_cast<int>(std::thread::hardware_concurrency()) - 2)
-        : params.n_threads;
+    // Computed once: reading sysfs per session would be wasted work, and the topology of a
+    // machine does not change while it is running.
+    static const int default_threads = detect_decode_threads();
+
+    const int n_threads = (params.n_threads <= 0) ? default_threads : params.n_threads;
 
     const int trained_ctx = llama_model_n_ctx_train(model->model);
 
@@ -117,6 +218,7 @@ KoiSession* koi_session_create(KoiModel* model, KoiSessionParams params) {
     session->batch           = llama_batch_init(BATCH_SIZE, 0, 1);
     session->chat_templates  = common_chat_templates_init(model->model, "");
     session->params          = params;
+
     return session;
 }
 
@@ -125,7 +227,10 @@ void koi_session_free(KoiSession* session) {
     koi_generate_end(session);
     session->chat_templates.reset();
     llama_batch_free(session->batch);
+    // Before the context: it is attached to it, and freeing the pool out from under a context
+    // that still references it is a use-after-free.
     llama_free(session->ctx);
+    if (session->threadpool) ggml_threadpool_free(session->threadpool);
     delete session;
 }
 
@@ -355,3 +460,30 @@ int koi_json_schema_to_grammar(const char* schema, char* out_buf, int buf_size) 
     return static_cast<int>(grammar.size());
 }
 
+/* ── thread placement ─────────────────────────────────────────────────────── */
+
+int koi_session_cpu_mask(KoiSession* session, int* out_cpus, int max_cpus) {
+    if (!session || !out_cpus || max_cpus < 0) return -1;
+    const int count = std::min(static_cast<int>(session->pinned_cpus.size()), max_cpus);
+    for (int i = 0; i < count; ++i) out_cpus[i] = session->pinned_cpus[i];
+    return count;
+}
+
+int koi_session_set_cpu_mask(KoiSession* session, const int* cpus, int count) {
+    if (!session || count < 0) return -1;
+    if (count > 0 && !cpus) return -1;
+
+    // Taken as given. The caller chose these against /proc and /sys itself — see
+    // CpuPlacementPolicy — and re-deriving the same intersection here would be a second copy of a
+    // heuristic that has to agree with the first.
+    const std::vector<int> requested(cpus, cpus + count);
+
+    // One worker per core in the mask, which is what the mask means: the largest set of cores that
+    // reach a barrier together. An explicit n_threads from the caller still wins, so a caller who
+    // has measured something better is not overridden by a default.
+    const int requested_threads = session->params.n_threads > 0
+        ? session->params.n_threads
+        : static_cast<int>(requested.size());
+
+    return apply_cpu_mask(session, requested, requested_threads) ? 0 : -1;
+}

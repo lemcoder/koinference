@@ -1,14 +1,18 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.PromptPart
-import io.github.lemcoder.koinference.RuntimeGuard
-import io.github.lemcoder.koinference.RuntimeSettings
-import io.github.lemcoder.koinference.textOnly
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.RuntimeGuard
+import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufMetadata
 import io.github.lemcoder.koinference.llamacpp.gguf.GgufParser
 import io.github.lemcoder.koinference.llamacpp.gguf.readFileBytes
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacement
+import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementSource
+import io.github.lemcoder.koinference.llamacpp.internal.platformCpuPlacement
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppModel
 import io.github.lemcoder.koinference.llamacpp.internal.LlamaCppSession
@@ -17,6 +21,7 @@ import io.github.lemcoder.koinference.llamacpp.internal.toSessionOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 /**
@@ -38,6 +43,7 @@ class LlamaCppRuntime internal constructor(
     private val nThreads: Int,
     private val nPredict: Int,
     parameters: GenerationParameters = GenerationParameters(),
+    private val placementPolicy: CpuPlacementSource = platformCpuPlacement(),
 ) : LlamaCppTextRuntime {
 
     private var modelOptions: ModelOptions = modelOptions
@@ -48,7 +54,7 @@ class LlamaCppRuntime internal constructor(
     // Derived rather than stored: where the model runs is a property of the loaded model, and a
     // second copy of it is a second thing that can be true while the model says otherwise.
     override val runtimeSettings: RuntimeSettings
-        get() = RuntimeSettings(modelOptions.backend)
+        get() = RuntimeSettings(modelOptions.accelerator)
 
     // The session owns the KV cache, the batch and the sampler, so it is opened once and reused.
     // Rebuilding it is how a parameter change takes effect, since the sampler is fixed when the
@@ -57,20 +63,27 @@ class LlamaCppRuntime internal constructor(
 
     private val guard = RuntimeGuard { modelOptions.modelPath }
 
+    // What the session is currently pinned to, so a re-evaluation that changes nothing costs
+    // nothing. Null until the first decode has placed the threads.
+    private var placement: CpuPlacement? = null
+
     override suspend fun generateResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): String {
-        // The facade is text-only: llama.cpp has mtmd upstream, but koi_generate takes a single
-        // user string and nothing wires the multimodal projector. Rejected before the guard: a bad
-        // prompt is the caller's mistake and should not queue behind someone else's generation.
-        val text = prompt.textOnly("llama.cpp")
+    ): List<ResponsePart> {
+        // Flattened before the guard, so a bad prompt does not queue behind someone else's
+        // generation.
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
 
         return guard.whileOpen {
             withContext(Dispatchers.Default) {
                 val grammar = grammarFor(constraint)
-                currentSession().generate(systemPrompt, text, grammar)
+                val session = currentSession()
+                placeThreads(session)
+                val reply = session.generate(systemPrompt, text, grammar)
                     .ifEmpty { error("llama.cpp generated nothing for ${modelOptions.modelPath}") }
+                // One part: this engine emits text and nothing else.
+                listOf(ResponsePart.Text(reply))
             }
         }
     }
@@ -84,11 +97,15 @@ class LlamaCppRuntime internal constructor(
     override fun streamResponse(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,
-    ): Flow<String> {
-        val text = prompt.textOnly("llama.cpp")
+    ): Flow<ResponsePart> {
+        val text = prompt.joinToString("") { (it as PromptPart.Text).text }
         return guard.streamWhileOpen {
             val grammar = grammarFor(constraint)
-            emitAll(currentSession().stream(systemPrompt, text, grammar))
+            val session = currentSession()
+            placeThreads(session)
+            // This engine emits text only, so every chunk is one Text part. The wrapping is
+            // here rather than in the binding because the binding speaks the facade's language.
+            emitAll(session.stream(systemPrompt, text, grammar).map(ResponsePart::Text))
         }
     }
 
@@ -125,10 +142,10 @@ class LlamaCppRuntime internal constructor(
      */
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
         guard.whileOpen {
-            if (settings.backend == modelOptions.backend) return@whileOpen
+            if (settings.accelerator == modelOptions.accelerator) return@whileOpen
 
             releaseSession()
-            val reloaded = modelOptions.copy(backend = settings.backend)
+            val reloaded = modelOptions.copy(accelerator = settings.accelerator)
             withContext(Dispatchers.Default) {
                 model.close()
                 try {
@@ -137,7 +154,7 @@ class LlamaCppRuntime internal constructor(
                 } catch (failure: Throwable) {
                     guard.markClosed()
                     throw IllegalStateException(
-                        "Could not reload ${reloaded.modelPath} on ${settings.backend}; " +
+                        "Could not reload ${reloaded.modelPath} on ${settings.accelerator}; " +
                             "the runtime is unloaded and has to be loaded again",
                         failure,
                     )
@@ -165,9 +182,46 @@ class LlamaCppRuntime internal constructor(
     }
 
     private fun currentSession(): LlamaCppSession =
-        session ?: model
-            .openSession(generationParameters.toSessionOptions(nCtx, nThreads, nPredict))
-            .also { session = it }
+        session ?: openSession().also {
+            session = it
+            placement = null
+        }
+
+    /**
+     * Opens a session with the worker count this platform's placement asks for.
+     *
+     * The count comes from the same decision as the mask, because on an unpinned platform it *is*
+     * the whole decision — Darwin cannot pin, so `cores - 2` is all its policy has to say. Letting
+     * the facade choose instead would put that rule in C, next to a different one for Android, and
+     * the two would drift.
+     *
+     * An explicit `nThreads` from the caller still wins: someone who measured their own workload
+     * should not be overridden by a default.
+     */
+    private fun openSession(): LlamaCppSession {
+        val threads = if (nThreads > 0) nThreads else placementPolicy.choose().threads
+        return model.openSession(generationParameters.toSessionOptions(nCtx, threads, nPredict))
+    }
+
+    /**
+     * Place the decode threads, re-deciding if the machine has changed underneath us.
+     *
+     * Called immediately before every decode rather than once at load, because the answer expires:
+     * Android moves an app between cpusets, so a mask chosen while in the foreground names cores
+     * the process is forbidden from touching once it is backgrounded — `foreground` is typically
+     * every core but the prime one, `background` the little cluster. Pinning to a forbidden core
+     * fails rather than degrading, so the pin has to be refreshed, and a decode boundary is the
+     * only safe moment: the pool is in use during one.
+     *
+     * Choosing is a handful of small file reads, and re-pinning only happens when the decision
+     * actually changed, so the steady state costs those reads and nothing else.
+     */
+    private fun placeThreads(session: LlamaCppSession) {
+        val chosen = placementPolicy.choose()
+        if (chosen == placement) return
+        session.setCpuMask(chosen.cpus)
+        placement = chosen
+    }
 
     private fun releaseSession() {
         session?.close()

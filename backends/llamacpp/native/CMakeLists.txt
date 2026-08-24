@@ -16,6 +16,144 @@ include(cmake/get_cpm.cmake)
 # Force-set before CPM includes llama.cpp so option() in its cmake picks up
 # these values from cache rather than re-defaulting to ON.
 set(GGML_NATIVE           OFF CACHE BOOL   "" FORCE)
+
+# GGML_NATIVE is off because these are cross-compiles, which leaves ggml at the toolchain's
+# baseline — plain armv8-a for the NDK. That compiles the dot-product kernels out entirely, and
+# they are what Q4_0 decoding runs on. The arm64 preset therefore sets GGML_CPU_ARM_ARCH to
+# armv8.2-a+dotprod; see docs/performance.md for the measurements and for why +i8mm is *not*
+# there.
+#
+# This is a floor, not a detection: a device older than dotprod (pre-2018, roughly Cortex-A53)
+# will take SIGILL rather than fall back. Shipping below that floor needs several variants and a
+# runtime pick, the way llama.rn does it — that work is not done here.
+# ── GPU offload (Vulkan) ─────────────────────────────────────────────────────
+# Off by default, and opt-in rather than automatic, because turning it on moves the floor: the
+# backend calls Vulkan 1.1 entry points (vkGetPhysicalDeviceFeatures2), and the NDK only exports
+# those from API 28, while this module's minSdk is 24.
+#
+# Vulkan is the measured path: on a Pixel 8a (Mali-G715) it runs LFM2.5-1.2B Q4_0 at ~17.9 tok/s
+# against ~15.2 on CPU. KOI_OPENCL below builds the other one; it needs a manifest declaration to
+# load and has not been measured. See docs/performance.md.
+#
+# Selecting it at run time is the existing RuntimeSettings(accelerator = Accelerator.GPU), which
+# the facade already maps onto llama_model_params.n_gpu_layers. A build without this option
+# ignores that request and runs on the CPU rather than failing, which is llama.cpp's own
+# behaviour for a backend that was never compiled in.
+option(KOI_VULKAN "Build the llama.cpp Vulkan backend for GPU offload" OFF)
+
+if (KOI_VULKAN)
+    # ggml-vulkan needs the C++ bindings (vulkan.hpp) and the SPIR-V headers. The NDK sysroot
+    # ships neither — only the C headers and the loader stub — so they come through CPM, pinned
+    # like everything else here.
+    CPMAddPackage(
+        NAME        Vulkan-Headers
+        GITHUB_REPOSITORY KhronosGroup/Vulkan-Headers
+        GIT_TAG     v1.4.360
+        EXCLUDE_FROM_ALL TRUE
+    )
+    CPMAddPackage(
+        NAME        SPIRV-Headers
+        GITHUB_REPOSITORY KhronosGroup/SPIRV-Headers
+        GIT_TAG     v2026.08.0
+        EXCLUDE_FROM_ALL TRUE
+    )
+
+    # ggml-vulkan does find_package(SPIRV-Headers), which the Android toolchain confines to the
+    # sysroot unless told otherwise.
+    set(SPIRV-Headers_DIR "${SPIRV-Headers_SOURCE_DIR}" CACHE PATH "" FORCE)
+    set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
+    include_directories(${SPIRV-Headers_SOURCE_DIR}/include)
+
+    set(Vulkan_INCLUDE_DIR "${Vulkan-Headers_SOURCE_DIR}/include" CACHE PATH "" FORCE)
+
+    if (ANDROID)
+        # The shader compiler ships with the NDK but is not on PATH, and the loader stub has to
+        # come from an API level that actually exports the 1.1 entry points.
+        if (NOT DEFINED KOI_VULKAN_API)
+            set(KOI_VULKAN_API 28)
+        endif()
+        file(GLOB _koi_ndk_glslc "${CMAKE_ANDROID_NDK}/shader-tools/*/glslc")
+        list(GET _koi_ndk_glslc 0 _koi_glslc)
+        set(Vulkan_GLSLC_EXECUTABLE "${_koi_glslc}" CACHE FILEPATH "" FORCE)
+        # Globbed rather than composed from a triple variable: which one the toolchain file sets
+        # has moved between NDK and CMake versions, and there is exactly one match per ABI.
+        file(GLOB _koi_vulkan_lib
+             "${CMAKE_SYSROOT}/usr/lib/*/${KOI_VULKAN_API}/libvulkan.so")
+        list(LENGTH _koi_vulkan_lib _koi_vulkan_lib_count)
+        if (_koi_vulkan_lib_count EQUAL 0)
+            message(FATAL_ERROR
+                "KOI_VULKAN is on but no libvulkan.so for API ${KOI_VULKAN_API} in ${CMAKE_SYSROOT}")
+        endif()
+        list(GET _koi_vulkan_lib 0 _koi_vulkan_lib_first)
+        set(Vulkan_LIBRARY "${_koi_vulkan_lib_first}" CACHE FILEPATH "" FORCE)
+    endif()
+
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+endif()
+
+# ── GPU offload (OpenCL) ─────────────────────────────────────────────────────
+# Also off by default, and less proven than KOI_VULKAN — see docs/performance.md.
+#
+# Reaching OpenCL from an app needs two things beyond the backend compiling. The manifest has to
+# declare <uses-native-library android:name="libOpenCL.so">, which is mandatory from API 31 for a
+# vendor library even when it is already on the vendor public-libraries allowlist; that
+# declaration lives in src/androidMain/AndroidManifest.xml and merges into consumers. And the link
+# needs a libOpenCL.so to resolve against, which the NDK does not ship.
+#
+# The ICD loader supplies that: it is built from source purely as a link target, and its SONAME is
+# libOpenCL.so, so at run time the loader resolves the *vendor* driver of that name rather than
+# this copy. It is deliberately not packaged into jniLibs — packaging it would shadow the driver
+# with a loader that has no ICD to enumerate on devices that register none.
+# ARM's own microkernels for quantized matmul. Off upstream, and worth a look on any ARMv8.2+
+# target: this is exactly the shape of work a bandwidth-bound Q4_0 decode does.
+option(KOI_KLEIDIAI "Build ggml's CPU backend with ARM KleidiAI kernels" OFF)
+
+# Forced both ways. Forcing only ON leaves a build directory that once had KleidiAI enabled with
+# GGML_CPU_KLEIDIAI=ON in its cache forever, so KOI_KLEIDIAI=OFF measures the ON build — and the
+# way that surfaced was not a wrong number but an undefined-symbol link failure, when a change of
+# GGML_CPU_ARM_ARCH made ggml ask for kai kernels the cached KleidiAI build had not produced.
+if (KOI_KLEIDIAI)
+    set(GGML_CPU_KLEIDIAI ON CACHE BOOL "" FORCE)
+else()
+    set(GGML_CPU_KLEIDIAI OFF CACHE BOOL "" FORCE)
+endif()
+
+option(KOI_OPENCL "Build the llama.cpp OpenCL backend for GPU offload" OFF)
+
+if (KOI_OPENCL)
+    CPMAddPackage(
+        NAME        OpenCL-Headers
+        GITHUB_REPOSITORY KhronosGroup/OpenCL-Headers
+        GIT_TAG     v2026.05.29
+        EXCLUDE_FROM_ALL TRUE
+    )
+    CPMAddPackage(
+        NAME        OpenCL-ICD-Loader
+        GITHUB_REPOSITORY KhronosGroup/OpenCL-ICD-Loader
+        GIT_TAG     v2026.05.29
+        EXCLUDE_FROM_ALL TRUE
+        OPTIONS     "OPENCL_ICD_LOADER_HEADERS_DIR ${OpenCL-Headers_SOURCE_DIR}"
+                    "BUILD_TESTING OFF"
+    )
+
+    # Out of the JNI output directory, which the Konan plugin points at jniLibs: built there it
+    # would be packaged into the AAR and shadow the vendor driver at run time. It is a link
+    # target, nothing more.
+    set_target_properties(OpenCL PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/opencl-link"
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/opencl-link")
+
+    set(OpenCL_INCLUDE_DIR "${OpenCL-Headers_SOURCE_DIR}" CACHE PATH "" FORCE)
+    # The target name rather than its path: ggml links whatever this holds, and a bare target
+    # name gives CMake the dependency edge that a path string does not.
+    set(OpenCL_LIBRARY     OpenCL                         CACHE STRING "" FORCE)
+
+    set(GGML_OPENCL ON CACHE BOOL "" FORCE)
+    # Mali here, not Adreno. The Adreno kernels are the upstream default and are wrong for
+    # anything else.
+    set(GGML_OPENCL_USE_ADRENO_KERNELS OFF CACHE BOOL "" FORCE)
+endif()
+
 # Defaults to LLAMA_STANDALONE, i.e. OFF under CPM — but the facade uses common_* helpers.
 set(LLAMA_BUILD_COMMON    ON  CACHE BOOL   "" FORCE)
 set(LLAMA_BUILD_TESTS     OFF CACHE BOOL   "" FORCE)
@@ -33,7 +171,7 @@ set(BUILD_SHARED_LIBS     OFF CACHE BOOL   "" FORCE)
 CPMAddPackage(
     NAME        llama_cpp
     GITHUB_REPOSITORY ggerganov/llama.cpp
-    GIT_TAG     b10472
+    GIT_TAG     b10516
     EXCLUDE_FROM_ALL TRUE
 )
 

@@ -23,3 +23,6 @@ xcuserdata
 
 # JVM heap dumps, e.g. from a Gradle daemon running out of Metaspace
 *.hprof
+
+# Benchmark output: regenerated per run, and stale the moment anything is tuned.
+results/

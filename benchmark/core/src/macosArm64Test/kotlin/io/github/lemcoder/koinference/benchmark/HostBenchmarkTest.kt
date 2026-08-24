@@ -2,6 +2,22 @@
 
 package io.github.lemcoder.koinference.benchmark
 
+import io.github.lemcoder.koinference.benchmark.config.BenchmarkConfig
+import io.github.lemcoder.koinference.benchmark.config.BenchmarkModelConfig
+import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
+import io.github.lemcoder.koinference.benchmark.prompts.PromptCorpus
+import io.github.lemcoder.koinference.benchmark.result.BenchmarkFile
+import io.github.lemcoder.koinference.benchmark.result.BenchmarkStatus
+import io.github.lemcoder.koinference.benchmark.result.parseBenchmarkFile
+import io.github.lemcoder.koinference.benchmark.result.toJson
+import io.github.lemcoder.koinference.benchmark.runner.BenchmarkRunner
+import io.github.lemcoder.koinference.benchmark.runner.modelIdOf
+import io.github.lemcoder.koinference.benchmark.runner.quantizationOf
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.cinterop.ByteVar
 import kotlinx.cinterop.allocArray
 import kotlinx.cinterop.convert
@@ -19,11 +35,6 @@ import platform.posix.fseek
 import platform.posix.ftell
 import platform.posix.getenv
 import platform.posix.rewind
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
 
 /**
  * Runs the whole protocol on the host, against real models, for whichever engines have one.
@@ -43,6 +54,16 @@ class HostBenchmarkTest {
     private val ggufPath: String? = getenv("KOI_TEST_GGUF")?.toKString()
     private val liteRtLmPath: String? = getenv("KOI_TEST_LITERTLM")?.toKString()
     private val outputDir: String? = getenv("KOI_BENCH_OUT")?.toKString()
+
+    /**
+     * Worker count to pass down, for sweeping it from the shell.
+     *
+     * 0 leaves the facade's own choice. Present because thread count is the one knob whose best
+     * value is a property of the machine rather than of the model, and on a host the only way to
+     * find it is to try — Apple platforms ignore CPU affinity entirely (ggml's
+     * `ggml_thread_apply_affinity` is a documented no-op there), so the count is all there is.
+     */
+    private val threads: Int = getenv("KOI_BENCH_THREADS")?.toKString()?.toIntOrNull() ?: 0
 
     private val corpus = PromptCorpus.parse(readFile(fixturePath()))
 
@@ -170,6 +191,7 @@ class HostBenchmarkTest {
             modelPath = modelPath,
             quantization = quantizationOf(modelPath),
             maxContextTokens = 512,
+            threads = threads,
         ),
         workloads = listOf(WorkloadConfig("short_generation_v1", MAX_NEW_TOKENS)),
         warmupIterations = 1,

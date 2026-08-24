@@ -2,7 +2,17 @@ package io.github.lemcoder.koinference.benchmark.app
 
 import android.os.Debug
 import android.os.Process
-import io.github.lemcoder.koinference.benchmark.platformProbe
+import io.github.lemcoder.koinference.benchmark.app.api.ApiError
+import io.github.lemcoder.koinference.benchmark.app.api.ApiErrorBody
+import io.github.lemcoder.koinference.benchmark.app.api.ChatChoice
+import io.github.lemcoder.koinference.benchmark.app.api.ChatCompletionChunk
+import io.github.lemcoder.koinference.benchmark.app.api.ChatCompletionRequest
+import io.github.lemcoder.koinference.benchmark.app.api.ChatCompletionResponse
+import io.github.lemcoder.koinference.benchmark.app.api.ChatMessage
+import io.github.lemcoder.koinference.benchmark.app.api.ModelCard
+import io.github.lemcoder.koinference.benchmark.app.api.ModelList
+import io.github.lemcoder.koinference.benchmark.app.api.ProcessMemory
+import io.github.lemcoder.koinference.benchmark.platform.platformProbe
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
@@ -16,11 +26,11 @@ import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.Json
-import java.io.File
 
 /**
  * An OpenAI-compatible server in front of one loaded model.

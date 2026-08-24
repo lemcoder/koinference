@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp
 
-import io.github.lemcoder.koinference.GenerationConstraint
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKString
 import kotlinx.coroutines.test.runTest
@@ -38,11 +39,11 @@ class LlamaCppGenerationTest {
     fun generatesFromARealModel() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 16, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 16, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
-            val reply = runtime.generateResponse("Once upon a time")
+            val reply = runtime.generateResponse("Once upon a time").text()
             assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
         } finally {
             loader.unload(path)
@@ -53,7 +54,7 @@ class LlamaCppGenerationTest {
     fun honoursAJsonSchemaConstraint() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nPredict = 64, nCtx = 256)
+        val loader = LlamaCppModelLoader(ModelConfig(maxOutputTokens = 64, contextTokens = 256))
         val runtime = loader.load(path)
         assertIs<LlamaCppTextRuntime>(runtime)
         try {
@@ -61,7 +62,7 @@ class LlamaCppGenerationTest {
             val reply = runtime.generateResponse(
                 prompt = "Name a capital city.",
                 constraint = GenerationConstraint.JsonSchema(schema),
-            )
+            ).text()
             assertTrue(reply.trimStart().startsWith("{"), "expected a JSON object, got: '$reply'")
             assertTrue(reply.contains("\"city\""), "expected the schema's field, got: '$reply'")
         } finally {

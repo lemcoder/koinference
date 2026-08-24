@@ -1,7 +1,8 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.GenerationConstraint
-import io.github.lemcoder.koinference.GenerationParameters
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.GenerationParameters
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKString
 import kotlinx.coroutines.runBlocking
@@ -37,7 +38,7 @@ class LiteRtLmGenerationTest {
             // and this test is about generation working at all. See [systemPromptEitherWorksOrSaysWhy].
             val loader = LiteRtLmModelLoader()
             try {
-                val reply = loader.load(path).generateResponse("Say hello.")
+                val reply = loader.load(path).generateResponse("Say hello.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unloadAll()
@@ -57,7 +58,7 @@ class LiteRtLmGenerationTest {
                 val reply = loader.load(path).generateResponse(
                     prompt = "Name a capital city.",
                     constraint = GenerationConstraint.JsonSchema(schema),
-                )
+                ).text()
 
                 // llguidance constrains decoding token by token, so a well-formed object is a
                 // property of the sampler rather than of the model happening to comply.
@@ -88,11 +89,9 @@ class LiteRtLmGenerationTest {
             // Greedy would prove nothing about the seed, so temperature stays high enough for
             // the sampler to have a choice to make.
             val replies = (1..2).map {
-                val loader = LiteRtLmModelLoader(
-                    parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40),
-                )
+                val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40)))
                 try {
-                    loader.load(path).generateResponse("Name a colour.")
+                    loader.load(path).generateResponse("Name a colour.").text()
                 } finally {
                     loader.unloadAll()
                 }
@@ -115,11 +114,9 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(
-                parameters = GenerationParameters(temperature = 0.0),
-            )
+            val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0)))
             try {
-                val reply = loader.load(path).generateResponse("Name a colour.")
+                val reply = loader.load(path).generateResponse("Name a colour.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unloadAll()
@@ -145,19 +142,16 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(
-                parameters = GenerationParameters(temperature = 0.0),
-                nThreads = 1,
-            )
+            val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0), threads = 1))
             try {
                 val runtime = loader.load(path)
                 // Discarded: the first generation on a fresh engine is the odd one out.
-                runtime.generateResponse("Name a colour.")
+                runtime.generateResponse("Name a colour.").text()
 
                 runtime.resetConversation()
-                val second = runtime.generateResponse("Name a colour.")
+                val second = runtime.generateResponse("Name a colour.").text()
                 runtime.resetConversation()
-                val third = runtime.generateResponse("Name a colour.")
+                val third = runtime.generateResponse("Name a colour.").text()
 
                 assertEquals(second, third, "reopened conversations should answer identically")
             } finally {
@@ -180,9 +174,9 @@ class LiteRtLmGenerationTest {
         val path = modelPath ?: return
 
         runBlocking {
-            val loader = LiteRtLmModelLoader(systemPrompt = "You are terse.")
+            val loader = LiteRtLmModelLoader(ModelConfig(systemPrompt = "You are terse."))
             try {
-                val outcome = runCatching { loader.load(path).generateResponse("Say hello.") }
+                val outcome = runCatching { loader.load(path).generateResponse("Say hello.").text() }
                 outcome.onSuccess { reply ->
                     assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
                 }.onFailure { failure ->

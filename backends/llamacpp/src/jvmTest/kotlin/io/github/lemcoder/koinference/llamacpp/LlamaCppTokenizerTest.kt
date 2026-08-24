@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp
 
+import io.github.lemcoder.koinference.backend.ModelConfig
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -20,7 +21,7 @@ class LlamaCppTokenizerTest {
     fun `counts tokens with the models vocabulary`() = runTest {
         val path = modelPath ?: return@runTest
 
-        val loader = LlamaCppModelLoader(nCtx = 512)
+        val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 512))
         try {
             val runtime = loader.load(path) as LlamaCppTextRuntime
 

@@ -4,6 +4,47 @@ Things that cost time to discover. The README covers layout and commands, `docs/
 covers the shape both backends share and what a third one has to fill in; this is the stuff that
 is not visible from the code.
 
+## Three rules, learned the hard way in one session
+
+Rules 1 and 3 are enforced by Konsist in `core/src/jvmTest/.../architecture/`, and so is the
+checkable half of rule 2 — prose alone did not stop this session breaking all three. The tests were
+verified by breaking each rule on purpose and watching them fail, because an architecture test that
+cannot fail is decoration. What Konsist cannot see is C, so the rest of rule 2 stays a judgement
+call.
+
+**Do not create source sets to share code.** Not `jvmSharedMain`, not an `appleMain` that exists
+only so two legs can avoid duplicating a file. `JniBridge.kt` is byte-identical in `jvmMain` and
+`androidMain` and stays that way; so does `CpuPlacement*.kt`. Duplication is the cheaper trade here,
+and for the JNI bridges an intermediate source set cannot even work — the generated `…jni` functions
+land in each target's own source set, so a shared parent would not see them.
+
+This is about *purpose*, not about which directories exist. The per-target and per-family source
+sets the KMP default hierarchy already provides — `macosMain`, `iosMain`, `linuxMain`, `androidMain`,
+`jvmMain` — are there to be used when platforms genuinely differ, which is the next rule. Adding one
+to deduplicate is what is banned.
+
+**If it can be Kotlin, it is Kotlin.** C is for reaching the engine, not for logic. `NativeSeamTest`
+enforces the half of this that is mechanical: `koi_*`, `koilm_*` and `kniBridge*` may be named only
+by the binding files, plus the two tests that exist to compare the two sides of the boundary. Once a
+native symbol appears in a runtime, logic and marshalling have begun to mix. The CPU
+placement heuristic lived in the facade for a while and the only way to learn what it had decided
+was to infer it from throughput; moved to `CpuPlacementPolicy` it gained eleven tests against
+topologies nobody here owns. Where a platform API is needed, reach it from Kotlin —
+`sysconf(_SC_NPROCESSORS_ONLN)` is in `platform.posix`, `/proc` and `/sys` are `File.readText()`.
+Every rule that ends up in C is a rule that has to be kept in step with the Kotlin one, and they
+drift: `detect_decode_threads` and the Kotlin policy disagreed for most of a session, which cost
+macOS 20% silently.
+
+**If it is not identical on every platform, it is `expect`/`actual` — per platform, not per family.**
+Splitting four ways where three would compile is correct when the fourth is genuinely different, and
+"mac and iOS are both Apple" is not a reason to share. CPU placement is five actuals: Android pins
+its big cluster, macOS cannot pin at all and wants `cores - 2`, iOS cannot pin either but its 2/4
+core split is nothing like an M4's 4/6 so the number is not known to transfer, Linux *can* pin and
+was silently getting the Darwin answer while it sat in a shared `nativeMain`, and the JVM cannot know
+at compile time which of the two it is running on. A shared implementation hid a real bug in one of
+those five. When a leg is unmeasured, say so in that leg's own source rather than letting it inherit
+a comment about hardware it has never run on.
+
 ## The native seam
 
 CMake owns the native build. The Konan plugin only *generates* the JNI bindings and the `.c` stub —
@@ -117,8 +158,8 @@ its first successful run, after every structural check had passed. Keep it.
 `LLAMA_BUILD_COMMON` defaults to `LLAMA_STANDALONE` — OFF under CPM — and the facade uses `common_*`
 helpers. `native/CMakeLists.txt` forces it on and links whichever common target exists.
 
-**The pin is b10472, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
-it, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
+**The pin is b10516, and b10472 is the floor for LFM2** — `LLM_ARCH_LFM2` does not exist before
+b10472, so an LFM2 GGUF loads as "unknown model architecture" on anything older. Bumping from b5001
 cost four breakages, all silent-ish:
 
 - **`common` was renamed `llama-common`.** Getting this wrong does not fail at configure time:
@@ -132,6 +173,12 @@ cost four breakages, all silent-ish:
 - **The common headers include `<nlohmann/json_fwd.hpp>`**, which lives in `vendor/`, and
   `json-schema-to-grammar.h` now only forward-declares the type — parsing needs
   `<nlohmann/json.hpp>` included explicitly.
+
+**b10472 → b10516 cost nothing and gained nothing.** No API moved, both legs compiled unchanged,
+and on an M4 with LFM2.5-1.2B Q4_0 the two are indistinguishable: medians 138.8 against 138.5 tok/s
+over three interleaved rounds each, TTFT 63.0 against 62.5 ms. Worth knowing before spending an
+afternoon on the next bump hoping for free throughput — the wins in this repo came from thread
+placement and build flags, not from upstream.
 
 `common` is also what makes `GenerationConstraint.JsonSchema` work: `json_schema_to_grammar` lives
 there, so the facade converts and the Kotlin side never sees GBNF. Both the parse and the
@@ -225,6 +272,21 @@ deliberate: an engine hands out conversations, so neither can be used without it
 assertion that a path ends in `.gguf`. **`docs/backends.md` is the reference for the seam**; read
 it before adding a backend or changing either one's shape.
 
+**Above that seam sits `Backend` / `BackendRegistry` / `ModelConfig` in `:core`.** A consumer
+never names a loader class: it registers the backends it links and asks for one by id or by model
+path. `id` is a `String` and the registry is consumer-assembled on purpose — `:core` cannot
+enumerate its own dependents, and an enum would make adding an engine a `:core` edit plus every
+exhaustive `when` over it.
+
+**`Accelerator` is CPU-or-GPU; `Backend` is llama.cpp-or-LiteRT-LM.** The enum used to be called
+`InferenceBackend`, so "backend" meant both things at once — including in `RuntimeSettings(backend
+= …)`, which was about neither engine.
+
+**`Backend.honours` is a claim, and nothing checks it at run time.** It says which
+`GenerationParameters` knobs the engine actually applies, and the benchmark reads it instead of
+hardcoding `seedApplied` per adapter. Get it wrong and a results file asserts a reproducibility
+the run never had — so it is asserted in each backend's `commonTest`.
+
 **`KOILM_VERSION` in `native/CMakeLists.txt` is the only place the runtime version is pinned.**
 It used to also be `litertlm` in the version catalog, back when Android took its runtime from
 Maven; that entry is gone, and so is the skew between targets it could produce.
@@ -234,18 +296,32 @@ paragraph used to say the opposite — that the AAR carried no `.so` and the run
 transitively from `api(libs.litertlm.android)` — which was true of the SDK leg and survived its
 deletion by two releases. There is no Maven runtime dependency now.
 
-**A commonMain file with any top-level declaration collides with a same-named platform file.**
-`expect` declarations generate no JVM class, which is why a shared `LlamaCppBridge.kt` worked
-across source sets while that seam was expect/actual functions — and stopped working the moment it
-became interfaces. Adding one `const` to the common bridge produced `Duplicate JVM class name …
-LiteRtLmBridgeKt`. Hence platform files are named after their binding — `FacadeBridge.kt`,
-`JniBridge.kt` — and never after the common file they implement. Both backends follow this now.
+**Types are grouped into sub-packages, and a package is not a pile.** `:core` is `backend` /
+`runtime` / `prompt`; `:benchmark:core` is `config` / `result` / `engine` / `platform` / `prompts` /
+`runner`; the app's OpenAI DTOs are `app.api`. `PackageLayoutTest` checks that a package matches its
+directory and that no single directory holds more than twenty files — a loose cap, there to catch
+the next dumping ground rather than to force a split at a number. It counts by package *and* source
+set, since that pair is what a directory is: `llamacpp.internal` spans seven source sets and looks
+like 39 files if you count it as one.
 
-**Do not add a shared jvm/android source set.** `JniBridge.kt` is byte-identical in `jvmMain` and
-`androidMain`, and so is `GgufFileSource.kt`, and that duplication stays. The generated
-`…jni` bridges are produced per compilation into each target's own source set, so an intermediate
-source set holding the hand-written actual would not see them. Two copies of a file that only
-calls generated functions is cheaper than a source-set layout that fights the generator.
+**One top-level class, interface, object or enum per file, named after it.** `OneTypePerFileTest`
+enforces both halves. `BenchmarkResult.kt` used to hold thirteen types and `OpenAiApi.kt` twelve, so
+finding `ThermalSample` meant knowing which grab-bag it lived in; twenty-three files were like that.
+Nested declarations are untouched — `PromptPart.Text` belongs inside its sealed parent — and
+top-level functions may sit alongside a type, which is what lets `CpuPlacement.kt` hold both the
+type and the `expect fun` the naming rule below requires to be there.
+
+**A file holding actuals is named `<Expect>.<platform>.kt`** — `CpuPlacement.kt` in commonMain is
+answered by `CpuPlacement.android.kt`, `CpuPlacement.macos.kt` and so on. `ActualFileNamingTest`
+enforces it, including that a commonMain file of that name exists.
+
+This replaces an earlier convention of naming platform files after their *binding*
+(`JniBridge.kt`, `FacadeBridge.kt`), which existed to dodge `Duplicate JVM class name …
+LiteRtLmBridgeKt`: a commonMain file with real top-level declarations collides with a same-named
+platform file, and `expect` declarations generate no JVM class, so a shared name worked right up
+until the seam became interfaces. The dotted suffix sidesteps that on its own —
+`CpuPlacement.android.kt` and `CpuPlacement.kt` produce different facade classes — so the
+workaround is gone and the name can say which `expect` it answers instead.
 
 **The reply buffer is sized by the reply, which cannot be known in advance.** `koilm_generate`
 follows snprintf: it returns what the reply *needs*, writing only if it fits. A too-small buffer
@@ -269,6 +345,72 @@ Gradle.
 **Models are `.litertlm` or `.task`; raw `.tflite` is rejected** by LiteRT-LM itself. The
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
+
+## Performance on device
+
+`docs/performance.md` has the measurements. Two things that cost time to find:
+
+- **The thread default is not the core count, and not the big-core count either.** Decode is a
+  bandwidth-bound GEMV, so 2 threads saturate a Pixel 8a and 4 — exactly the size of its big
+  cluster — runs at *half* the speed of 2. `detect_decode_threads()` in the llama.cpp facade takes
+  half the largest cluster above the slowest frequency tier. The old
+  `hardware_concurrency() - 2` picked 7 and cost 2.6x.
+- **`GGML_NATIVE=OFF` leaves ggml at the NDK baseline**, which compiles the dot-product kernels
+  out of a Q4_0 build entirely. The arm64 preset sets `GGML_CPU_ARM_ARCH=armv8.2-a+dotprod`. That
+  raises the device floor to roughly 2018 hardware — SIGILL below it, no fallback. **Everything
+  above dotprod is absent because it was measured, not assumed**: `+fp16`, `+i8mm` and
+  `armv9-a+…+sve2` all land inside the noise on a Pixel 8a, and the same SVE2 binary swings 34.2 to
+  38.2 tok/s on run order alone. `GGML_CPU_ARM_ARCH` is a compile-time *baseline*, so enabling all
+  of them moves the floor to 2022 hardware for nothing. Runtime dispatch
+  (`GGML_CPU_ALL_VARIANTS`, which has `android_*` tiers upstream) needs `GGML_BACKEND_DL` and so
+  shared libs, plus `GGML_BACKEND_PATH` at run time — `ggml_backend_load_best` looks in
+  `/proc/self/exe`'s directory, which on Android is `/system/bin/`, not the app's `lib/`.
+- **The llama.cpp AAR declares `minSdk 31` while everything else declares 24**, and
+  `androidMinSdkLlamaCpp` in the version catalog is the single place it lives. A consumer below it
+  fails at manifest merge, which is the point. **The API level is not the real constraint** —
+  A53/A55 arm64 parts ship on current Android — so `platformBridge()` in
+  `LlamaCppBridge.android.kt` reads `asimddp` out of `/proc/cpuinfo` and throws
+  `BackendUnsupportedException` before handing back a binding. **The check lives only in
+  `androidMain`.** It was a `Backend` method first, then an `expect fun` with four null actuals,
+  and both earned their removal: Android is the one leg shipping a binary that can meet hardware it
+  was not built for, so four other legs answering "nothing to declare" is ceremony. The price is
+  that only a device test can exercise it.
+- **A CMake cache outlives the experiment that set it.** `KOI_KLEIDIAI` forced
+  `GGML_CPU_KLEIDIAI` on and never off, so once any build enabled it every later build in that
+  directory kept it — which invalidated the "KleidiAI is a wash" measurement in
+  `docs/performance.md` and then failed two builds of an ISA sweep on undefined `kai_*` symbols,
+  looking exactly like an i8mm problem. Fixed by forcing both ways. When an A/B moves a CMake
+  variable, read `CMakeCache.txt` back.
+
+- **GPU offload is Vulkan, opt-in at build time via `KOI_VULKAN`.** The run-time half was already
+  there — `Accelerator.GPU` maps onto `n_gpu_layers` — but a build with no GPU backend ignores it
+  and runs on the CPU. Enabling it moves the floor to API 28 (`vkGetPhysicalDeviceFeatures2` is
+  Vulkan 1.1), which is why the default AAR keeps `KOI_VULKAN=OFF` and its API 24 floor. Worth
+  ~15% on a Pixel 8a for ~500 MB more PSS.
+- **A vendor native library needs `<uses-native-library>` from API 31**, even when it is already on
+  the vendor public-libraries allowlist. Without it `dlopen` reports `library "libOpenCL.so" not
+  found ... in namespace clns-<n>`, which reads like the file is missing rather than undeclared —
+  it cost a wrong conclusion here that OpenCL was simply unreachable from an app. The declaration
+  is in `:backends:llamacpp`'s `androidMain/AndroidManifest.xml` so it merges into consumers, and
+  `KOI_OPENCL` builds the ICD loader as a *link target only*: its SONAME is `libOpenCL.so`, so the
+  vendor driver resolves at run time, and packaging it would shadow that driver with a loader this
+  device has no ICD for. Unmeasured — it landed after the test device went away.
+
+**A device measurement is not trustworthy until the APK is checked.** `cmakeBuildKoinferenceAndroid`
+does not declare the facade sources as inputs, so an edited `.cpp` can rebuild while AGP's
+`mergeAndroidMainJniLibFolders` still packages its cached `.so`. Two experiments in a row measured
+the old binary. `strings` the `.so` out of the APK for something only the new code contains before
+believing any number, and delete `merged_jni_libs` / `merged_native_libs` / `stripped_native_libs`
+/ `outputs/apk` to force an honest repackage. This is the same missing-input bug the cinterop
+tasks had, in a different task.
+
+**A pulled results file can be stale too.** `adb pull` of `benchmark-results.json` returns the
+previous run's file when the run wrote none — `adb shell rm -f` it first. An A/B here reported four
+identical rows because `timeout` is not installed on macOS, so `am instrument` never ran at all.
+
+**Single device runs are noise.** The same configuration measured 8.5 and 2.3 tok/s minutes apart.
+Interleave configurations across several rounds and check both orderings; `batteryTemperaturePeakC`
+lags the SoC badly enough to read identical across a 2x swing.
 
 ## The benchmark harness
 
@@ -337,7 +479,7 @@ so generation tests are env-gated rather than run in CI.
   private adapter classes, so a new backend silently ran with the wrong token budget instead of
   failing to compile.
 - **Backends stream; the harness measures.** Neither backend reports timings any more. Both
-  implement `StreamingTextRuntime`, and `measureGeneration` in `:benchmark:core` is the only
+  implement `GeneratingRuntime`, and `measureGeneration` in `:benchmark:core` is the only
   code that touches a clock — one definition of time to first token for every engine, instead
   of one per binding. Resist adding a metric to a backend: it would only be comparable with
   itself.
@@ -356,6 +498,25 @@ so generation tests are env-gated rather than run in CI.
   property, so `conversation.benchmarkInfo` fails with "Unresolved reference" and looks like an
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
+
+## A reply is a list of parts, and there is no shortcut to its text
+
+`GeneratingRuntime` is the only generating interface, and both of its methods answer in
+`ResponsePart` — `Text`, `Audio`, `Image`. The split it replaced was by output type
+(`TextRuntime: String`, `ImageRuntime: GeneratedImage`), which cannot express one reply that
+interleaves speech with its transcript; two return types have no ordering between them.
+`FakeOmniBackend` in `:core`'s tests is that engine, and `MultiModalityTest` asserts the
+interleaving survives both the blocking call and the stream.
+
+**Do not add a `text()` or `streamText()` convenience to `:core`.** It was asked for and refused:
+a caller narrowing a reply to text is discarding what else the model produced, and that discard
+belongs in the calling code. The benchmark app's `LoadedModel` filters explicitly because an SSE
+`delta` has nowhere to put audio; the tests carry their own helper per module.
+
+`ResponsePart.Audio` and `.Image` are not `data class`es — `ByteArray` equality is by reference, so
+a generated `equals` would call two identical replies different.
+
+`TokenCounting` is the only thing left in `runtime.text`, because a token is a text notion.
 
 ## A stream has to arrive in pieces, and that is asserted
 

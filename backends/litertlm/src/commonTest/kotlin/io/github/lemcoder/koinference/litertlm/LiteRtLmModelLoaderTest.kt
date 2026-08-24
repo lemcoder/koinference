@@ -1,7 +1,6 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.litertlm.internal.FakeLiteRtLmBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -19,13 +18,7 @@ class LiteRtLmModelLoaderTest {
 
     private fun loader(cacheDir: String? = null) = LiteRtLmModelLoader(
         bridge = bridge,
-        cacheDir = cacheDir,
-        systemPrompt = null,
-        settings = RuntimeSettings(),
-        parameters = GenerationParameters(),
-        nThreads = 4,
-        maxTokens = 512,
-        maxOutputTokens = 0,
+        config = ModelConfig(cacheDir = cacheDir, threads = 4, contextTokens = 512),
     )
 
     @Test

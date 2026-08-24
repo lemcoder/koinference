@@ -1,8 +1,7 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.ModelLoader
-import io.github.lemcoder.koinference.RuntimeSettings
+import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
 import io.github.lemcoder.koinference.litertlm.internal.platformBridge
@@ -14,40 +13,16 @@ import kotlinx.coroutines.withContext
 /**
  * Loads LiteRT-LM models.
  *
- * @param cacheDir     Writable directory LiteRT-LM may use to speed up subsequent loads of
- *                     the same model; null leaves the runtime to its own default.
- * @param systemPrompt Applied to every conversation this loader opens.
- * @param settings     Backend the models start on; changeable per runtime afterwards, at the
- *                     cost of a reload.
- * @param parameters   Sampling defaults for the runtimes this loader returns.
- * @param nThreads     CPU threads; 0 leaves the engine default.
- * @param maxTokens    Engine-wide token budget; 0 uses the model's own.
- * @param maxOutputTokens Cap on tokens per reply; 0 uses the engine's budget. Distinct from
- *                    [maxTokens], which bounds the whole conversation rather than one turn.
+ * Give it a [ModelConfig.cacheDir] the process can write to before running anything large: without
+ * one the runtime puts XNNPACK's weight cache beside the model, and when that is a directory the
+ * app cannot write to, the delegate rebuilds every prefill signature on each load.
  */
 class LiteRtLmModelLoader internal constructor(
     private val bridge: LiteRtLmBridge,
-    private val cacheDir: String?,
-    private val systemPrompt: String?,
-    private val settings: RuntimeSettings,
-    private val parameters: GenerationParameters,
-    private val nThreads: Int,
-    private val maxTokens: Int,
-    private val maxOutputTokens: Int,
+    private val config: ModelConfig,
 ) : ModelLoader {
 
-    constructor(
-        cacheDir: String? = null,
-        systemPrompt: String? = null,
-        settings: RuntimeSettings = RuntimeSettings(),
-        parameters: GenerationParameters = GenerationParameters(),
-        nThreads: Int = 0,
-        maxTokens: Int = 0,
-        maxOutputTokens: Int = 0,
-    ) : this(
-        platformBridge(), cacheDir, systemPrompt, settings, parameters, nThreads, maxTokens,
-        maxOutputTokens,
-    )
+    constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
     private val runtimes = mutableMapOf<String, LiteRtLmRuntime>()
 
@@ -87,10 +62,10 @@ class LiteRtLmModelLoader internal constructor(
     private suspend fun newRuntime(modelPath: String): LiteRtLmRuntime {
         val options = EngineOptions(
             modelPath = modelPath,
-            cacheDir = cacheDir,
-            backend = settings.backend,
-            nThreads = nThreads,
-            maxTokens = maxTokens,
+            cacheDir = config.cacheDir,
+            accelerator = config.settings.accelerator,
+            nThreads = config.threads,
+            maxTokens = config.contextTokens,
         )
         // Loading maps and prepares the weights, so it does not belong on the caller's
         // thread even though the handle it returns is just a pointer.
@@ -98,10 +73,10 @@ class LiteRtLmModelLoader internal constructor(
         return LiteRtLmRuntime(
             bridge = bridge,
             engineOptions = options,
-            systemPrompt = systemPrompt,
+            systemPrompt = config.systemPrompt,
             engine = engine,
-            parameters = parameters,
-            maxOutputTokens = maxOutputTokens,
+            parameters = config.parameters,
+            maxOutputTokens = config.maxOutputTokens,
         )
     }
 }

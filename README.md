@@ -5,15 +5,56 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 ## Modules
 
 - `:core` — high-level common interfaces:
+  - `Backend` / `Koinference` / `ModelConfig` — pick an engine and configure it without naming
+    its classes
   - `ModelLoader` (`load` / `unload` / `unloadAll`)
-  - `TextRuntime` / `StreamingTextRuntime` / `TokenCounting` (generation, streaming, tokenizing)
+  - `GeneratingRuntime` — one interface for every engine: `generateResponse` and `streamResponse`,
+    both answering in `ResponsePart`s
+  - `ResponsePart` — `Text`, `Audio`, `Image`; a reply is a list of them, and a stream is a flow of
+    them
+  - `runtime.text.TokenCounting` — the model's own tokenizer, where the engine exposes one
   - `RuntimeGuard`, the locking and use-after-unload scaffolding every backend shares
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
 
-Adding a third backend is documented in [docs/backends.md](docs/backends.md); both existing ones
-have the same shape on purpose.
+`Koinference` is the entry point. Register the backends the application links, then load a model by
+path — which engine reads a container is the backend's own answer, so switching engines is changing
+the model file:
+
+```kotlin
+val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(maxOutputTokens = 128))
+
+val runtime = koi.load("/models/model.gguf")
+
+val reply = runtime.generateResponse("What is the capital of France?")
+    .filterIsInstance<ResponsePart.Text>()
+    .joinToString("") { it.text }
+
+runtime.streamResponse("Once upon a time").collect { part ->
+    if (part is ResponsePart.Text) print(part.text)
+}
+```
+
+The filter is deliberate. A reply is a `List<ResponsePart>` rather than a `String` because models
+that interleave speech with its transcript exist, and there is no `text()` shortcut in `:core`: a
+caller narrowing a reply to text is discarding whatever else the model produced, and that should be
+visible in the calling code rather than hidden behind a convenience. For a GGUF there is nothing
+else to discard, and the filter says so.
+
+A class rather than an object with `init`: `load` before `init` would fail at run time instead of
+compile time, two consumers in one process would fight over one registry, and tests would have to
+reset it. An application that wants one instance everywhere can hold this in its own object.
+`CallerExampleTest` compiles and runs the snippet above, so it cannot drift.
+
+On Android, `:backends:llamacpp` declares `minSdk 31` and refuses hardware without the ARM
+dot-product extension: ggml picks its kernels at compile time, so such a CPU would take SIGILL
+mid-decode rather than run slowly. It throws `BackendUnsupportedException` before reading any weights, so
+`koi.load(…)` fails with a message naming what the device is missing. `:core` and
+`:backends:litertlm` stay at `minSdk 24`.
+
+Adding a third backend is documented in [docs/backends.md](docs/backends.md); all of them have the
+same shape on purpose, and adding one touches no file in `:core`.
 
 Published to Maven Central as `io.github.lemcoder:koinference-core`, `…:koinference-llamacpp` and
 `…:koinference-litertlm`. Each backend depends on `:core` with `api`, so adding a backend is

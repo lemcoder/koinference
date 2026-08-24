@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.GenerationParameters
-import io.github.lemcoder.koinference.InferenceBackend
+import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.Accelerator
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -33,77 +33,19 @@ internal interface LlamaCppBridge {
      */
     fun jsonSchemaToGrammar(schema: String): String
 }
-
-/** A model with its weights loaded. */
-internal interface LlamaCppModel {
-
-    fun openSession(options: SessionOptions): LlamaCppSession
-
-    /** Releases the weights. Calling anything on the model afterwards is undefined. */
-    fun close()
-}
-
-/** One session over a model, owning the KV cache, the batch and the sampler. */
-internal interface LlamaCppSession {
-
-    /** Generate one reply and wait for it (blocking). */
-    fun generate(systemPrompt: String?, prompt: String, grammar: String?): String
-
-    /**
-     * Stream the reply, one chunk per emission.
-     *
-     * A chunk is one sampled token: the facade's pull loop returns one per call. Whoever is
-     * timing decides when each one arrived — this hands back chunks and nothing else.
-     */
-    fun stream(systemPrompt: String?, prompt: String, grammar: String?): Flow<String>
-
-    /** Tokens in [text] by the model's own vocabulary. */
-    fun tokenCount(text: String): Int
-
-    fun close()
-}
-
 /** The binding this target was compiled with. */
 internal expect fun platformBridge(): LlamaCppBridge
-
-internal data class ModelOptions(
-    val modelPath: String,
-    /**
-     * Where the model runs.
-     *
-     * On the model rather than the session because llama.cpp decides GPU offload when the
-     * weights are loaded (`llama_model_params.n_gpu_layers`); nothing short of a reload moves a
-     * loaded model. A build with no GPU backend compiled in ignores the request rather than
-     * failing, so GPU on such a target is CPU inference and not an error.
-     */
-    val backend: InferenceBackend = InferenceBackend.CPU,
-)
-
-internal data class SessionOptions(
-    /** Context size in tokens; 0 uses the model's trained size. */
-    val nCtx: Int = 0,
-    /** CPU threads; 0 lets the facade pick. */
-    val nThreads: Int = 0,
-    /** Maximum tokens to generate; 0 uses the facade's default. */
-    val nPredict: Int = 0,
-    val temperature: Float = DEFAULT_TEMPERATURE,
-    val topK: Int = DEFAULT_TOP_K,
-    val minP: Float = DEFAULT_MIN_P,
-)
-
 // Concrete numbers rather than a sentinel, so the common runtime can report what a session was
 // actually created with. These mirror koi_default_session_params(); SessionDefaultsTest fails if
 // the facade ever drifts from them.
 internal const val DEFAULT_TEMPERATURE = 0.8f
 internal const val DEFAULT_TOP_K = 40
 internal const val DEFAULT_MIN_P = 0.05f
-
 /**
  * Offload everything the model has. llama.cpp clamps to the layer count, so a number larger than
  * any real model is how "all of it" is spelled.
  */
 internal const val ALL_GPU_LAYERS = 999
-
 /**
  * Map the common sampling knobs onto a session.
  *
