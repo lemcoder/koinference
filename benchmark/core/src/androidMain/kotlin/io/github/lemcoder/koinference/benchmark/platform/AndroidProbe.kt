@@ -18,10 +18,9 @@ internal object AndroidProbe : PlatformProbe {
 
     override fun monotonicNanos(): Long = SystemClock.elapsedRealtimeNanos()
 
-    override fun processUptimeMs(): Double? {
+    override fun processUptimeMs(): Double {
         // Process.getStartElapsedRealtime() is on the same clock as elapsedRealtime(), so the
         // difference is genuine process startup rather than a timer the harness started late.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
         return (SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()).toDouble()
     }
 
@@ -43,8 +42,8 @@ internal object AndroidProbe : PlatformProbe {
             // SOC_MANUFACTURER/SOC_MODEL are the only first-party SoC identifiers Android has,
             // and they arrived in API 31. Below that the marketing model name is all there is,
             // which is exactly why it is not trusted on its own.
-            socManufacturer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MANUFACTURER else null,
-            socModel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Build.SOC_MODEL else null,
+            socManufacturer = Build.SOC_MANUFACTURER,
+            socModel = Build.SOC_MODEL,
             hardware = Build.HARDWARE,
             cpuCores = Runtime.getRuntime().availableProcessors(),
             cpuMaxFrequenciesKhz = readCpuMaxFrequencies(),
@@ -63,8 +62,7 @@ internal object AndroidProbe : PlatformProbe {
         val runtime = Runtime.getRuntime()
         return MemorySnapshot(
             pssKb = info.totalPss.toLong(),
-            // VmRSS from /proc/self/status: readable for a process's own status without root.
-            rssKb = readProcStatusKb("VmRSS"),
+            rssKb = readProcStatusKb(),
             nativeHeapKb = Debug.getNativeHeapAllocatedSize() / 1024,
             javaHeapKb = (runtime.totalMemory() - runtime.freeMemory()) / 1024,
         )
@@ -109,7 +107,6 @@ internal object AndroidProbe : PlatformProbe {
     }
 
     private fun readThermalStatus(context: Context?): String? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val power = context?.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return null
         return when (power.currentThermalStatus) {
             PowerManager.THERMAL_STATUS_NONE -> "NONE"
@@ -129,9 +126,9 @@ internal object AndroidProbe : PlatformProbe {
         IntentFilter(Intent.ACTION_BATTERY_CHANGED),
     )
 
-    private fun readProcStatusKb(key: String): Long? = runCatching {
+    private fun readProcStatusKb(): Long? = runCatching {
         File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("$key:") }
+            lines.firstOrNull { it.startsWith("VmRSS:") }
                 ?.substringAfter(':')
                 ?.trim()
                 ?.removeSuffix(" kB")
