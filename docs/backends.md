@@ -138,7 +138,7 @@ generated `equals` would report two identical replies as different; theirs compa
 
 **There is no `text()` helper in `:core`, and that is a decision.** A caller narrowing a reply to
 text is discarding whatever else the model produced, and the discard belongs in the calling code
-where it can be seen. `LoadedModel` in the benchmark app does it explicitly, because a
+where it can be seen. `ServedModel` in the benchmark app does it explicitly, because a
 chat-completions `delta` has nowhere to put audio. The tests have their own helper; the library does
 not ship one.
 

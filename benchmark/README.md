@@ -209,29 +209,59 @@ for it.
 `benchmark/app` is a real app with two jobs: it hosts the inference service, and it is the APK
 Firebase Test Lab installs beside the instrumentation test APK.
 
-**The service runs in its own process** (`android:process=":inference"`). That is the whole
-reason it is a service: a model's memory is most of what anyone wants to measure, and in a
-shared process it arrives mixed with the UI toolkit, the HTTP client, and whatever the test
-runner brought along. Alone, `Debug.getMemoryInfo()` inside that process is the model, the
-engine and a small server — and `adb shell dumpsys meminfo` lists it separately.
+**Each engine runs in its own process** — `:llamacpp` and `:litertlm`, one manifest entry each —
+and the app talks to them over AIDL. That is the whole reason they are services: a model's memory
+is most of what anyone wants to measure, and in a shared process it arrives mixed with Compose, Ktor
+and whatever else the app holds. Alone, `Debug.getMemoryInfo()` in that process is the model and its
+engine, and `adb shell dumpsys meminfo` lists it separately. It also means a native crash — a CPU
+without the instructions ggml was compiled for, say — takes down one engine rather than the app.
 
-It is a *foreground* service because Android kills background ones, and a sustained run that
-dies at minute eleven of twenty has measured nothing.
+`android:process` is fixed per manifest entry, which is why there is a service class per backend
+rather than one service told which engine to be.
+
+**The benchmark runs inside the engine's process**, not the app's: `BenchmarkRunner` is constructed
+there and only the finished results file crosses the boundary, as JSON. No reported timing includes
+a binder round trip, and the memory readings describe the engine. The app is a UI and a results
+table.
+
+They are *foreground* services because Android kills background ones, and a sustained run that dies
+at minute eleven of twenty has measured nothing.
+
+### The app
+
+Two screens.
+
+**Benchmark** lists the engines this build ships, each with the models on the device it can read.
+Tick the ones to run, press the button at the bottom, and the results arrive as a table — medians
+per workload, with the note column carrying whatever the harness recorded. Engines run one after
+another, never together: two decoding at once share an SoC and a thermal budget, and the numbers
+would describe the contention.
+
+An engine this device cannot run is shown disabled with the reason rather than hidden, because
+"why is llama.cpp missing" is exactly the question hiding it would create.
+
+**Serve** picks one engine to put behind the HTTP server, for the Python clients below.
 
 ```bash
 adb install -r benchmark/app/build/outputs/apk/benchmark/koinference-benchmark-app-benchmark.apk
-adb shell mkdir -p /sdcard/Download/koinference
-adb push LFM2.5-1.2B-Instruct-Q4_0.gguf /sdcard/Download/koinference/
-
-adb shell am start-foreground-service \
-    -n io.github.lemcoder.koinference.benchmark.app/.InferenceService \
-    --es modelPath /sdcard/Download/koinference/LFM2.5-1.2B-Instruct-Q4_0.gguf \
-    --ei maxNewTokens 256
+adb push LFM2.5-1.2B-Instruct-Q4_0.gguf /data/local/tmp/koinference/
 ```
 
-The engine is chosen by file extension — `.gguf` to llama.cpp, `.litertlm`/`.task` to LiteRT-LM
-— and the integration with the library is one small file, `LoadedModel.kt`: pick a loader, call
-`load`, call `streamResponse`. That file is also the example of how to use the library.
+Models are looked for in `/sdcard/Download/koinference`, `/data/local/tmp/koinference` and the app's
+own external files directory. The engine that reads a container is the backend's own answer —
+`.gguf` to llama.cpp, `.litertlm`/`.task` to LiteRT-LM — so a model appears under whichever engine
+can load it.
+
+The server is also startable from a shell, for a scripted run that should not need anyone to tap
+anything:
+
+```bash
+adb shell am start-foreground-service \
+    -n io.github.lemcoder.koinference.benchmark.app/.net.WebServerService \
+    --es backend llama.cpp \
+    --es modelPath /data/local/tmp/koinference/LFM2.5-1.2B-Instruct-Q4_0.gguf \
+    --ei maxNewTokens 256
+```
 
 ### The OpenAI-compatible API
 
@@ -241,7 +271,7 @@ The engine is chosen by file extension — `.gguf` to llama.cpp, `.litertlm`/`.t
 | `POST /v1/chat/completions` | with `"stream": true` for SSE, without it for one JSON reply |
 | `GET /healthz` | liveness |
 | `GET /koinference/device` | the device as the harness's own probe reports it |
-| `GET /koinference/memory` | PSS/RSS/native/Java heap **of the inference process** |
+| `GET /koinference/memory` | PSS/native/Java heap **of the engine's process**, asked for over the binder |
 
 Compatible so that clients people already have work unchanged:
 
@@ -257,6 +287,10 @@ calling them tokens, which is the one thing this project keeps refusing to do.
 **The server binds `0.0.0.0` with no authentication.** Anyone who can reach the device can drive
 the model and read its output. That is a deliberate choice for a benchmark device on a lab
 network; pass `--es bind 127.0.0.1` and use `adb forward tcp:8080 tcp:8080` anywhere else.
+
+The server itself runs in the *app* process while the model stays in the engine's, so serving a
+model cannot contaminate the memory numbers it reports — `/koinference/memory` asks the engine
+process for its own.
 
 ### Benchmarking it from Python
 

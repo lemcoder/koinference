@@ -1,7 +1,5 @@
-package io.github.lemcoder.koinference.benchmark.app
+package io.github.lemcoder.koinference.benchmark.app.net
 
-import android.os.Debug
-import android.os.Process
 import io.github.lemcoder.koinference.benchmark.app.api.ApiError
 import io.github.lemcoder.koinference.benchmark.app.api.ApiErrorBody
 import io.github.lemcoder.koinference.benchmark.app.api.ChatChoice
@@ -11,7 +9,6 @@ import io.github.lemcoder.koinference.benchmark.app.api.ChatCompletionResponse
 import io.github.lemcoder.koinference.benchmark.app.api.ChatMessage
 import io.github.lemcoder.koinference.benchmark.app.api.ModelCard
 import io.github.lemcoder.koinference.benchmark.app.api.ModelList
-import io.github.lemcoder.koinference.benchmark.app.api.ProcessMemory
 import io.github.lemcoder.koinference.benchmark.platform.platformProbe
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
@@ -22,11 +19,11 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
@@ -43,7 +40,7 @@ import kotlinx.serialization.json.Json
  * lab network — pass `bindAddress = "127.0.0.1"` and use `adb forward` when it is not.
  */
 class InferenceServer(
-    private val model: LoadedModel,
+    private val model: ServedBackend,
     private val port: Int,
     private val bindAddress: String,
     private val maxNewTokens: Int,
@@ -86,7 +83,10 @@ class InferenceServer(
             // Not OpenAI's, and the reason this process exists on its own: read from inside the
             // inference process, these numbers describe the model and the engine and nothing else.
             get("/koinference/memory") {
-                call.respond(readProcessMemory())
+                // Passed through as the engine process wrote it, rather than re-read here: this
+                // process holds Compose and this server, and its PSS describes neither the model
+                // nor the engine.
+                call.respondText(model.processMemory(), ContentType.Application.Json)
             }
 
             post("/v1/chat/completions") {
@@ -194,42 +194,9 @@ class InferenceServer(
         }
     }
 
-    private fun readProcessMemory(): ProcessMemory {
-        val info = Debug.MemoryInfo()
-        Debug.getMemoryInfo(info)
-        val runtime = Runtime.getRuntime()
-
-        return ProcessMemory(
-            pid = Process.myPid(),
-            processName = processName(),
-            pssKb = info.totalPss.toLong(),
-            rssKb = readProcStatusKb("VmRSS"),
-            nativeHeapKb = Debug.getNativeHeapAllocatedSize() / 1024,
-            javaHeapKb = (runtime.totalMemory() - runtime.freeMemory()) / 1024,
-            engine = model.engineId,
-            modelPath = model.modelPath,
-            modelLoadMs = model.modelLoadMs,
-        )
-    }
-
-    private fun processName(): String = runCatching {
-        File("/proc/self/cmdline").readText().trim { it <= ' ' }
-    }.getOrDefault("unknown")
-
-    private fun readProcStatusKb(key: String): Long? = runCatching {
-        File("/proc/self/status").useLines { lines ->
-            lines.firstOrNull { it.startsWith("$key:") }
-                ?.substringAfter(':')
-                ?.trim()
-                ?.removeSuffix(" kB")
-                ?.trim()
-                ?.toLongOrNull()
-        }
-    }.getOrNull()
-
     private fun error(message: String, type: String) = ApiError(ApiErrorBody(message, type))
 
-    private fun completionId(): String = "chatcmpl-" + Process.myPid() + "-" + System.nanoTime()
+    private fun completionId(): String = "chatcmpl-" + android.os.Process.myPid() + "-" + System.nanoTime()
 
     private fun epochSeconds(): Long = System.currentTimeMillis() / 1000
 }

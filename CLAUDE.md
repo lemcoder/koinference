@@ -432,6 +432,15 @@ lags the SoC badly enough to read identical across a 2x swing.
   com/android/build/gradle/api/BaseVariant`). So `benchmark/app` is its own build and includes
   the main one — the reverse would be a cycle. Two toolchains in one daemon exhaust Metaspace,
   which surfaces as unrelated task-creation errors; its gradle.properties raises the limit.
+- **The app has no Gradle wrapper of its own.** `benchmark/app` is a separate build included the
+  other way round, and there is no `benchmark/app/gradlew` — `cd benchmark/app && ./gradlew …` fails
+  with "no such file or directory", which a grep for compiler errors silently swallows. Two "the app
+  builds" checks in one session were that failure. Drive it with `../../gradlew` from that directory.
+- **Each engine is a service in its own process, reached over AIDL** (`:llamacpp`, `:litertlm`), and
+  the benchmark runs *inside* that process — only the finished results file crosses the boundary, as
+  JSON. Putting the runner in the app would put a binder round trip inside every timing and Compose
+  inside every memory reading. `android:process` is fixed per manifest entry, which is why there is a
+  service class per backend rather than one service told which engine to be.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
 - **Give LiteRT-LM a writable `cacheDir` or it will not run a 1.2B model.** Without one it puts
@@ -510,7 +519,7 @@ interleaving survives both the blocking call and the stream.
 
 **Do not add a `text()` or `streamText()` convenience to `:core`.** It was asked for and refused:
 a caller narrowing a reply to text is discarding what else the model produced, and that discard
-belongs in the calling code. The benchmark app's `LoadedModel` filters explicitly because an SSE
+belongs in the calling code. The benchmark app's `ServedModel` filters explicitly because an SSE
 `delta` has nowhere to put audio; the tests carry their own helper per module.
 
 `ResponsePart.Audio` and `.Image` are not `data class`es — `ByteArray` equality is by reference, so
