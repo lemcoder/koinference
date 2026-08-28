@@ -114,6 +114,11 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
                     )
                 }.onSuccess { results += it }
                     .onFailure { failures += "${state.process.label}: ${it.message}" }
+
+                // The finished engine's process goes away before the next one starts. Left alive it
+                // holds its weights, and the engine measured after it runs against that pressure:
+                // measured 2.4 tok/s for an engine that gives 12.2 alone on the same device.
+                connections.getValue(state.process).stopService()
             }
 
             _run.value = if (results.isEmpty() && failures.isNotEmpty()) {

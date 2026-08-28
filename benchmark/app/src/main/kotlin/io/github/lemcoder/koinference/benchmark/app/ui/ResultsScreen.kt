@@ -1,16 +1,14 @@
 package io.github.lemcoder.koinference.benchmark.app.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -22,10 +20,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /**
- * What the run produced, as a table.
+ * What the run produced: speed and memory together.
  *
- * Scrolls sideways rather than wrapping: eight numeric columns do not fit a phone, and a wrapped
- * cell makes two rows look like one. Medians per row — see [ResultsTable].
+ * A card per row rather than a wide table. Eight numeric columns do not fit a phone, and the
+ * previous version put memory off the right-hand edge behind a horizontal scroll — where it may as
+ * well not have been recorded. On a phone, memory is often the number that decides whether a model
+ * ships, so it gets equal billing.
+ *
+ * Every figure is a median over the measured iterations; see [ResultsTable].
  */
 @Composable
 fun ResultsScreen(state: RunState.Finished, onDismiss: () -> Unit) {
@@ -41,12 +43,11 @@ fun ResultsScreen(state: RunState.Finished, onDismiss: () -> Unit) {
             )
         }
 
-        Row(modifier = Modifier.weight(1f).horizontalScroll(rememberScrollState())) {
-            Column {
-                HeaderRow()
-                HorizontalDivider()
-                LazyColumn { items(state.rows) { ResultRow(it) } }
-            }
+        LazyColumn(
+            modifier = Modifier.weight(1f).padding(top = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            items(state.rows) { ResultCard(it) }
         }
 
         OutlinedButton(
@@ -59,52 +60,73 @@ fun ResultsScreen(state: RunState.Finished, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun HeaderRow() {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Cell("engine", ENGINE, bold = true)
-        Cell("workload", WORKLOAD, bold = true)
-        Cell("tok/s", NUMBER, bold = true)
-        Cell("ttft ms", NUMBER, bold = true)
-        Cell("tokens", NUMBER, bold = true)
-        Cell("chunks", NUMBER, bold = true)
-        Cell("pss mb", NUMBER, bold = true)
-        Cell("note", NOTE, bold = true)
+private fun ResultCard(row: BenchmarkRow) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(row.engineId, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = row.workload,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Figure("tok/s", row.tokensPerSecond.oneDecimal())
+                Figure("ttft", row.ttftMs?.let { "${it.toInt()} ms" } ?: MISSING)
+                Figure("tokens", row.tokens?.toString() ?: MISSING)
+                Figure("chunks", row.chunks?.toString() ?: MISSING)
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                // Read in the engine's own process, which is what the process split is for: this
+                // is the model and its engine, not Compose and an HTTP server.
+                Figure("peak pss", row.peakPssMb.megabytes())
+                Figure("after load", row.weightsPssMb.megabytes())
+                Figure("after run", row.afterRunPssMb.megabytes())
+            }
+
+            row.note?.takeIf { it.isNotBlank() }?.let { note ->
+                Text(
+                    text = note,
+                    style = MaterialTheme.typography.bodySmall,
+                    // Red only for a failure: the harness's standing notes are remarks, and
+                    // colouring them as errors teaches the reader to ignore the colour.
+                    color = if (row.noteIsFailure) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ResultRow(row: BenchmarkRow) {
-    Row(
-        modifier = Modifier.padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Cell(row.engineId, ENGINE)
-        Cell(row.workload, WORKLOAD)
-        Cell(row.tokensPerSecond.oneDecimal(), NUMBER)
-        Cell(row.ttftMs.oneDecimal(), NUMBER)
-        Cell(row.tokens?.toString() ?: "—", NUMBER)
-        Cell(row.chunks?.toString() ?: "—", NUMBER)
-        Cell(row.peakPssMb.oneDecimal(), NUMBER)
-        Cell(row.note ?: "", NOTE)
+private fun Figure(label: String, value: String) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
     }
-}
-
-@Composable
-private fun Cell(text: String, width: Int, bold: Boolean = false) {
-    Text(
-        text = text,
-        modifier = Modifier.width(width.dp),
-        style = MaterialTheme.typography.bodySmall,
-        fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis,
-    )
 }
 
 /** An em dash, not a zero: a missing measurement and a measured zero are different facts. */
-private fun Double?.oneDecimal(): String = this?.let { "%.1f".format(it) } ?: "—"
+private fun Double?.oneDecimal(): String = this?.let { "%.1f".format(it) } ?: MISSING
 
-private const val ENGINE = 80
-private const val WORKLOAD = 140
-private const val NUMBER = 64
-private const val NOTE = 200
+private fun Double?.megabytes(): String = this?.let { "${it.toInt()} MB" } ?: MISSING
+
+private const val MISSING = "—"

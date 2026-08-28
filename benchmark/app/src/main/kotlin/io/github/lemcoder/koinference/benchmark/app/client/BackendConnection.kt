@@ -57,6 +57,18 @@ class BackendConnection(
         continuation.invokeOnCancellation { disconnect() }
     }
 
+    /**
+     * Unbinds *and* stops the service, so the engine's process goes away.
+     *
+     * Unbinding is not enough: the service was started as well as bound, so it stays up holding
+     * whatever the engine allocated. A benchmark that leaves two finished engines resident measures
+     * the third one under memory pressure it would not otherwise meet.
+     */
+    fun stopService() {
+        disconnect()
+        context.stopService(Intent(context, serviceClass))
+    }
+
     fun disconnect() {
         connection?.let { runCatching { context.unbindService(it) } }
         connection = null
