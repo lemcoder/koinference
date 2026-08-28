@@ -57,6 +57,36 @@ class CeraGenerationTest {
         }
     }
 
+    /**
+     * One chunk per token, so "chunks" and "tokens" cannot drift apart in a results file.
+     *
+     * Cera's default batches sixteen tokens per emission, which would make time to first chunk mean
+     * time to the sixteenth token on hardware fast enough for the flush timer not to fire first.
+     */
+    @Test
+    fun `streams one token per chunk`() {
+        val path = model ?: return
+
+        runBlocking {
+            val koi = Koinference(Cera, config = ModelConfig(maxOutputTokens = 32))
+            try {
+                val runtime = koi.load(path) as CeraTextRuntime
+                val parts = runtime.streamResponse("Count from one to twenty.").toList()
+                    .filterIsInstance<ResponsePart.Text>()
+                val tokens = runtime.countTokens(parts.joinToString("") { it.text })
+
+                // Not equality: a chunk carries whole tokens, and the tokenizer may merge a pair
+                // of them when it re-reads the finished text.
+                assertTrue(
+                    parts.size >= tokens - 2,
+                    "expected roughly one chunk per token, got ${parts.size} chunks for $tokens tokens",
+                )
+            } finally {
+                koi.unloadAll()
+            }
+        }
+    }
+
     @Test
     fun `counts tokens with the model's own tokenizer`() {
         val path = model ?: return

@@ -366,6 +366,12 @@ natives. No CMake, no cinterop, no C in `:backends:cera` at all.
 - **The 0.4.0 artifact is not the `main` branch.** `EngineConfig` takes `contextSize`, not
   `maxSeqLen`, and `GenerateOutput` carries token ids and a summary with no text field. Read the
   published jar with `javap`, not the checked-out source, before coding against it.
+- **`flushEveryTokens = 1`, against Cera's default of 16.** Otherwise a chunk is a burst and time
+  to first chunk is time to the *sixteenth* token: 13 chunks for 64 tokens on an M4, first at 60ms.
+  llama.cpp emits one token per chunk, so batching would make this engine's TTFT mean something
+  different from the others' in the same file. Costs nothing measurable (714ms against 720ms). On a
+  phone it changes nothing — decode is slower than the 50ms flush timer, so it already emitted per
+  token, which is why the device numbers were honest before this was noticed.
 - **A Cera session accumulates, so reset it per turn.** `appendText` adds to one conversation and a
   generation appends its own reply, so the same prompt asked four times re-prefills a growing
   history: 4.8s, 5.1s, 6.0s, 6.7s on an M4. `Session.reset()` exists and `CeraRuntime` calls it
@@ -557,6 +563,13 @@ a generated `equals` would call two identical replies different.
 `TokenCounting` is the only thing left in `runtime.text`, because a token is a text notion.
 
 ## A stream has to arrive in pieces, and that is asserted
+
+An engine's flush policy decides what a chunk *is*, and it is not always one token. Cera batches 16
+by default; the backend sets `flushEveryTokens = 1` so that a chunk is a token on every engine, and
+`tok/s` is unaffected either way because the harness counts tokens with the model's own tokenizer
+rather than counting emissions. What batching would corrupt is **TTFT**, which is why the setting
+matters: measured two ways on a Pixel 8a, Cera does 10.8 tok/s through a blocking generate with no
+chunks at all and 8.4 tok/s streamed, so the slowness is the decode and not the chunking.
 
 A binding that buffered a whole reply and delivered it in one chunk would satisfy every other
 property of streaming — the chunks concatenate, the text is right, the flow completes — while

@@ -41,6 +41,13 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
 
+        // No generated accessor: withDeviceTest creates this source set while this block configures.
+        getByName("androidDeviceTest").dependencies {
+            implementation(kotlin("test"))
+            implementation(libs.androidx.test.runner)
+            implementation(libs.androidx.test.junit)
+        }
+
         // The same generated binding on both legs, from two artifacts: the JVM one bundles desktop
         // natives, the Android one bundles jniLibs and JNA's @aar.
         jvmMain.dependencies {

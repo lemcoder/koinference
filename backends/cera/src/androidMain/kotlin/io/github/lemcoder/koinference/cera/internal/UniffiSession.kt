@@ -84,5 +84,17 @@ internal class UniffiSession(
         topP = options.topP?.toFloat() ?: 0.9f,
         minP = options.minP?.toFloat() ?: 0.05f,
         grammar = grammar,
+        // One token per emission, against Cera's default of 16.
+        //
+        // Otherwise a chunk is a burst and "time to first chunk" is time to the sixteenth token:
+        // on an M4 the default gives 13 chunks for 64 tokens with the first at 60ms, where per
+        // token it is the first token. llama.cpp emits one token per chunk and LiteRT-LM emits
+        // what it emits, so batching here would make this engine's TTFT mean something different
+        // from the others' in the same results file. It costs nothing measurable — 714ms against
+        // 720ms for the same 64 tokens — because the work is the decode, not the callback.
+        //
+        // On a phone it changes nothing: decode is slower than the 50ms flush timer, so Cera was
+        // already emitting per token there.
+        flushEveryTokens = 1u,
     )
 }
