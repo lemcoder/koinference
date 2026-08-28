@@ -476,6 +476,10 @@ lags the SoC badly enough to read identical across a 2x swing.
   JSON. Putting the runner in the app would put a binder round trip inside every timing and Compose
   inside every memory reading. `android:process` is fixed per manifest entry, which is why there is a
   service class per backend rather than one service told which engine to be.
+- **The app is drivable from a shell**: `BenchmarkService` takes `--es engines`, `--es model` and
+  the harness's own option names, runs the same `BenchmarkSession` the UI does, logs one `RESULT`
+  line per record under tag `koinference-benchmark`, and writes the merged results file. Use it for
+  anything repeatable; the screen is for one look at one device.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
 - **Give LiteRT-LM a writable `cacheDir` or it will not run a 1.2B model.** Without one it puts

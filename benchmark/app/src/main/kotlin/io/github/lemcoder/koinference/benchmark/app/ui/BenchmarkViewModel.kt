@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lemcoder.koinference.benchmark.app.client.BackendConnection
 import io.github.lemcoder.koinference.benchmark.app.client.BackendProcess
+import io.github.lemcoder.koinference.benchmark.app.client.BenchmarkSession
 import io.github.lemcoder.koinference.benchmark.app.net.WebServerController
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,10 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
     val serving: StateFlow<ServingState> = _serving.asStateFlow()
 
     private val server = WebServerController(context) { process -> connections.getValue(process) }
+
+    // The same orchestration BenchmarkService runs, so a tapped run and a scripted one cannot
+    // measure different things.
+    private val session = BenchmarkSession(context, connections)
 
     init {
         probeBackends()
@@ -100,25 +105,17 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
 
         _run.value = RunState.Running("starting")
         viewModelScope.launch {
-            val results = mutableListOf<String>()
-            val failures = mutableListOf<String>()
+            val targets = chosen.mapNotNull { state ->
+                state.selectedModel?.let { state.process to it }
+            }
 
-            for (state in chosen) {
-                val model = state.selectedModel ?: continue
-                _run.value = RunState.Running("${state.process.label}: loading ${File(model).name}")
-                runCatching {
-                    connections.getValue(state.process).runBenchmark(
-                        modelPath = model,
-                        options = SUITE,
-                        onProgress = { line -> _run.value = RunState.Running(line) },
-                    )
-                }.onSuccess { results += it }
-                    .onFailure { failures += "${state.process.label}: ${it.message}" }
+            val outcomes = session.run(targets, SUITE) { line ->
+                _run.value = RunState.Running(line)
+            }
 
-                // The finished engine's process goes away before the next one starts. Left alive it
-                // holds its weights, and the engine measured after it runs against that pressure:
-                // measured 2.4 tok/s for an engine that gives 12.2 alone on the same device.
-                connections.getValue(state.process).stopService()
+            val results = outcomes.mapNotNull { it.resultsJson }
+            val failures = outcomes.mapNotNull { outcome ->
+                outcome.failure?.let { "${outcome.process.label}: $it" }
             }
 
             _run.value = if (results.isEmpty() && failures.isNotEmpty()) {
