@@ -5,6 +5,7 @@ plugins {
     // A compiler plugin, not the kotlin-android plugin AGP rejects: without it @Serializable
     // classes compile but generate no serializer, and every `.serializer()` is unresolved.
     id("org.jetbrains.kotlin.plugin.serialization") version "2.3.10"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
 }
 
 // A real app, in its own build.
@@ -42,6 +43,15 @@ android {
         }
     }
 
+    // The prompt corpus is a fixture shared with the harness, packaged as an asset rather than
+    // copied: two files would be free to disagree about what "short_generation_v1" is.
+    sourceSets.getByName("main").assets.srcDir("../fixtures")
+
+    buildFeatures {
+        compose = true
+        aidl = true
+    }
+
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/INDEX.LIST")
     }
@@ -49,6 +59,9 @@ android {
 
 dependencies {
     implementation("io.github.lemcoder:koinference-benchmark-core")
+    implementation(platform("androidx.compose:compose-bom:2025.09.00"))
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.11.0")
 
     // CIO rather than Netty or OkHttp: no servlet stack, no reflection, and it is the engine
     // Ktor supports on Android without dragging in a JVM-only server.

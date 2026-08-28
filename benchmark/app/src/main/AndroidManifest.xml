@@ -23,17 +23,46 @@
         </activity>
 
         <!--
-          android:process=":inference" is the point of this whole module. A model's memory is
-          most of what anyone wants to measure, and in a shared process it arrives mixed with the
-          UI toolkit and whatever else the app is doing. Alone in its own process, PSS is the
-          model, the engine and a small HTTP server.
+          One process per engine, and that is the point of this module rather than a detail of it.
 
-          exported, so `adb shell am start-foreground-service` can drive it without the UI.
+          A model's memory is most of what anyone wants to measure, and in a shared process it
+          arrives mixed with Compose, Ktor and whatever else the app is holding. Alone,
+          `dumpsys meminfo` shows a line that is the model and its engine. It also means a native
+          crash — a CPU without the instructions ggml was compiled for, say — takes down one engine
+          instead of the app.
+
+          android:process is fixed per manifest entry, which is why there is a service class per
+          backend rather than one service told which engine to be.
         -->
         <service
-            android:name=".InferenceService"
+            android:name=".service.LlamaCppService"
+            android:exported="false"
+            android:process=":llamacpp"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference engine, started from the app" />
+        </service>
+
+        <service
+            android:name=".service.LiteRtLmService"
+            android:exported="false"
+            android:process=":litertlm"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference engine, started from the app" />
+        </service>
+
+        <!--
+          The HTTP server, in the app process rather than beside a model: it asks the engine process
+          for that process's memory, so serving cannot contaminate the numbers it reports.
+
+          exported, so a shell can start it without anyone tapping anything.
+        -->
+        <service
+            android:name=".net.WebServerService"
             android:exported="true"
-            android:process=":inference"
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
