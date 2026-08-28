@@ -223,6 +223,32 @@ out of the b10516 tree rather than guessed:
 Worth doing to *lower the floor* — an `armv8.0` tier would run on hardware that SIGILLs today. Not
 worth doing for speed: the table above is what the higher tiers are worth on this device.
 
+## Cera against llama.cpp, same weights
+
+Pixel 8a, `short_generation_v1`, 32-token budget, one warmup discarded and three measured, all three
+engines in one sitting through the app. llama.cpp and Cera read the *same* `LFM2.5-1.2B-Instruct-Q4_0.gguf`;
+LiteRT-LM reads its own int4 `.litertlm` of the same model.
+
+| engine | tok/s | ttft ms |
+|---|---|---|
+| llama.cpp | 31.0 | 388 |
+| LiteRT-LM | 24.9 | 442 |
+| Cera | 2.4 | 2092 |
+
+**Cera is roughly 13x slower here on identical weights, and this is not the ISA trap.** The obvious
+suspect was the one that cost this repository 2.6x already — a baseline ARM build with the
+dot-product kernels compiled out — and it is ruled out: the published `libcera_ffi.so` disassembles
+to 242 `sdot` and 24 `smmla`, so dotprod and i8mm are both in there.
+
+What has *not* been ruled out is thread placement, which is the other thing that cost this repository
+6.5x. llama.cpp reaches its number by pinning two big cores; Cera picks its own workers, was measured
+at ~3.1 cores busy, and exposes no thread or affinity knob through its bindings — so on a big.LITTLE
+phone it is likely decoding partly on A510s. That is a hypothesis, not a measurement: no experiment
+here has separated it from kernel maturity, and Cera 0.4.0 is an early release.
+
+Nothing about this makes the backend wrong; it makes the number worth re-taking against a later Cera
+and, if the bindings ever expose one, a thread count.
+
 ## GPU offload
 
 Off by default. Turn it on at build time and select it at run time:
