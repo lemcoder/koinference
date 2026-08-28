@@ -346,6 +346,29 @@ Gradle.
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
 
+## Cera
+
+A Rust GGUF engine, reached through its **published UniFFI/JNA Kotlin bindings** rather than a
+facade of ours — `com.hyeons-lab:cera-ffi-jvm` and `cera-ffi-android`, same generated API, different
+natives. No CMake, no cinterop, no C in `:backends:cera` at all.
+
+- **jvm and android only.** UniFFI's Kotlin bindings need a JVM and there is no Kotlin/Native one,
+  so the other targets are not declared. That is why `:benchmark:core`'s backend list is now
+  `expect fun benchmarkBackends()` — its macosArm64 leg cannot see Cera.
+- **The chat template is not optional, and its absence looks like a broken decoder.** Cera exposes
+  `applyChatTemplate` instead of applying it; handed raw text, LFM2.5 answers with token 540
+  repeated to the budget (`????????????????????????`). `UniffiSession.templated` builds the turn.
+- **Stream with the blocking `generateStreaming`, not `generateStreamingAsync`.** The async variant
+  delivered zero batches here; the blocking one works, on an IO thread, with `trySendBlocking` so a
+  fast model cannot overflow the channel and drop a chunk silently.
+- **`EngineConfig`'s `contextSize` of 0 means the model's full declared context**, which is what
+  `ModelConfig.contextTokens` of 0 already meant — the conventions agree, so nothing is translated.
+- **The 0.4.0 artifact is not the `main` branch.** `EngineConfig` takes `contextSize`, not
+  `maxSeqLen`, and `GenerateOutput` carries token ids and a summary with no text field. Read the
+  published jar with `javap`, not the checked-out source, before coding against it.
+- **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
+  caller means one specifically. See `docs/backends.md`.
+
 ## Performance on device
 
 `docs/performance.md` has the measurements. Two things that cost time to find:

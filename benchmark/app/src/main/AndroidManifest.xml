@@ -54,6 +54,16 @@
                 android:value="Benchmark inference engine, started from the app" />
         </service>
 
+        <service
+            android:name=".service.CeraService"
+            android:exported="false"
+            android:process=":cera"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference engine, started from the app" />
+        </service>
+
         <!--
           The HTTP server, in the app process rather than beside a model: it asks the engine process
           for that process's memory, so serving cannot contaminate the numbers it reports.

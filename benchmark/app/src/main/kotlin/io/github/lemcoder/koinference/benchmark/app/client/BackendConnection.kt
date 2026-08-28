@@ -158,9 +158,6 @@ class BackendConnection(
     }
 }
 
-/** The service reported a failure; the message is the engine's own words. */
-class BackendCallFailed(message: String) : RuntimeException(message)
-
 private fun Map<String, String>.toJsonObject(): String =
     entries.joinToString(prefix = "{", postfix = "}") { (key, value) ->
         "${key.jsonString()}:${value.jsonString()}"

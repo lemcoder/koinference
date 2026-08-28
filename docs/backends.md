@@ -150,6 +150,45 @@ numbered by declaration position, so deleting a function from the middle of the 
 every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` silently starts
 calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
 afternoon. Same rule as ever: **append new functions at the end.**
+## Three engines, and two of them read GGUF
+
+`:backends:cera` reaches a Rust engine through Cera's published UniFFI/JNA Kotlin bindings —
+`com.hyeons-lab:cera-ffi-jvm` and `cera-ffi-android`, one artifact per leg, differing only in which
+natives they package. There is no C facade, no CMake and no cinterop in that module: the binding is
+already Kotlin, so the whole backend is Kotlin.
+
+**It declares `jvm()` and `android` only.** UniFFI's Kotlin bindings need a JVM, Apple gets a
+separate Swift package, and there is no Kotlin/Native binding to consume — so those targets are not
+declared, rather than declared and left throwing. `:backends:litertlm` set the precedent for a
+backend covering a subset of the repository's targets. The knock-on is that `:benchmark:core`'s
+backend list had to become `expect fun benchmarkBackends()`, since its macosArm64 leg cannot see
+Cera: a genuine platform difference, answered per platform.
+
+`UniffiBridge` / `UniffiModel` / `UniffiSession` are byte-identical in `jvmMain` and `androidMain`,
+and stay that way. Same rule and same reason as `JniBridge.kt`: two copies of a file that only calls
+a generated API is cheaper than a source set that exists to deduplicate.
+
+**Cera and llama.cpp both claim `.gguf`.** `Koinference.backendFor` returns the first registered
+backend that handles a path, so registration order decides, and `backendById("cera")` is how a
+caller says which one it meant regardless of order. Deliberately not an error: an application that
+registers both and loads a GGUF should get one, and which one is a question only the caller can
+answer. The benchmark app sidesteps it entirely by picking an engine rather than a path.
+
+Two things about that engine cost an afternoon to find, and both are visible in `UniffiSession`:
+
+- **The chat template is not optional.** Cera exposes `applyChatTemplate` rather than applying it,
+  and an instruct model handed raw text answers with one token repeated to the budget — LFM2.5
+  emits `?` twenty-four times, which looks like a broken decoder rather than a missing template. The
+  turn is built in the binding, where the engine is.
+- **Streaming works through the blocking `generateStreaming`, not the async one.** The async variant
+  never delivered a batch here; the blocking one delivers them as they decode, so it runs on an IO
+  thread with `trySendBlocking` pushing back onto Cera's worker. Backpressure rather than `trySend`,
+  because a dropped chunk is a silently short reply.
+
+Constrained decoding is GBNF only. Cera's bindings expose no JSON-schema converter, so
+`GenerationConstraint.JsonSchema` throws rather than generating unconstrained text that looks like
+it honoured the schema.
+
 ## A backend may refuse the device it was installed on
 
 `:core` has no notion of device capability, and deliberately gained none: no

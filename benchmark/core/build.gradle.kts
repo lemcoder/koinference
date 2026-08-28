@@ -61,6 +61,11 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }
+        // Android only: Cera reaches its Rust engine through UniFFI over JNA, so it has no
+        // Kotlin/Native leg and cannot sit in commonMain beside the other two.
+        androidMain.dependencies {
+            api(project(":backends:cera"))
+        }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)

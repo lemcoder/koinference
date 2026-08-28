@@ -18,6 +18,7 @@ rootProject.name = "koinference"
 include(":core")
 include(":backends:llamacpp")
 include(":backends:litertlm")
+include(":backends:cera")
 include(":benchmark:core")
 
 // A separate build, not a module. Firebase Test Lab requires an app APK next to the test APK,

@@ -17,14 +17,18 @@ class EnginesTest {
 
     @Test
     fun everyRegisteredBackendIsBenchmarkable() {
-        assertEquals(benchmarkBackends.map { it.id }, availableEngines().map { it.id })
+        assertEquals(benchmarkBackends().map { it.id }, availableEngines().map { it.id })
     }
 
     @Test
     fun theOrderIsTheOneEngineAllRunsIn() {
         // The first engine in a process is the only one that sees an untouched heap and a cold
         // SoC, so this order is part of what a run means.
-        assertEquals(listOf("llama.cpp", "litert-lm"), benchmarkBackends.map { it.id })
+        //
+        // Only the first two are asserted: the list is per platform now, because Cera has no
+        // Kotlin/Native leg to be present on. What every platform must agree on is that llama.cpp
+        // goes first — it is also the engine that gets a `.gguf` asked for by path.
+        assertEquals(listOf("llama.cpp", "litert-lm"), benchmarkBackends().take(2).map { it.id })
     }
 
     @Test
