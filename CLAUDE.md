@@ -366,6 +366,12 @@ natives. No CMake, no cinterop, no C in `:backends:cera` at all.
 - **The 0.4.0 artifact is not the `main` branch.** `EngineConfig` takes `contextSize`, not
   `maxSeqLen`, and `GenerateOutput` carries token ids and a summary with no text field. Read the
   published jar with `javap`, not the checked-out source, before coding against it.
+- **A Cera session accumulates, so reset it per turn.** `appendText` adds to one conversation and a
+  generation appends its own reply, so the same prompt asked four times re-prefills a growing
+  history: 4.8s, 5.1s, 6.0s, 6.7s on an M4. `Session.reset()` exists and `CeraRuntime` calls it
+  before every turn, which flattens that to 4.4-4.7s. On device the growth eventually stalled a run
+  outright — the process sat at 0% CPU on `long_context_v1` after a 512-token workload. Multi-turn
+  chat over one Cera session is therefore not offered rather than offered wrongly.
 - **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
   caller means one specifically. See `docs/backends.md`.
 

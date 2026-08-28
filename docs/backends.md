@@ -185,6 +185,12 @@ Two things about that engine cost an afternoon to find, and both are visible in 
   thread with `trySendBlocking` pushing back onto Cera's worker. Backpressure rather than `trySend`,
   because a dropped chunk is a silently short reply.
 
+**A session accumulates, and `CeraRuntime` resets it before every turn.** `appendText` adds to one
+conversation and a generation appends its reply, so an unreset session answers the same question
+more slowly each time — 4.8s to 6.7s over four turns, and on device it eventually stalled a
+benchmark with the engine idle. Every call is an independent turn, which is what the other backends
+give and what a benchmark needs.
+
 Constrained decoding is GBNF only. Cera's bindings expose no JSON-schema converter, so
 `GenerationConstraint.JsonSchema` throws rather than generating unconstrained text that looks like
 it honoured the schema.

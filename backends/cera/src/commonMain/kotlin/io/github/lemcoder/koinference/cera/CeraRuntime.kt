@@ -57,7 +57,7 @@ class CeraRuntime internal constructor(
             withContext(Dispatchers.Default) {
                 // One part: this engine's text sessions emit text and nothing else. Cera can also
                 // decode audio, which would be a second part here and is not wired up.
-                listOf(ResponsePart.Text(session().generate(text, grammar)))
+                listOf(ResponsePart.Text(freshSession().generate(text, grammar)))
             }
         }
     }
@@ -71,7 +71,7 @@ class CeraRuntime internal constructor(
             val grammar = grammarFor(constraint)
             // Text only, so every chunk is one Text part. Wrapped here rather than in the binding,
             // which speaks Cera's language.
-            emitAll(session().stream(text, grammar).map(ResponsePart::Text))
+            emitAll(freshSession().stream(text, grammar).map(ResponsePart::Text))
         }
     }
 
@@ -122,8 +122,23 @@ class CeraRuntime internal constructor(
         model.close()
     }
 
-    private fun session(): CeraSession =
-        session ?: model.openSession(sessionOptions).also { session = it }
+    /**
+     * The session, emptied.
+     *
+     * Every call is an independent turn, which is what the other backends give and what a benchmark
+     * needs: a Cera session otherwise carries the previous prompt *and* the previous reply, so a
+     * fourth identical request re-prefills a conversation three turns long and reports the slowdown
+     * as the engine's. Multi-turn chat over one Cera session is not offered rather than offered
+     * wrongly.
+     */
+    private fun freshSession(): CeraSession {
+        val existing = session
+        if (existing != null) {
+            existing.reset()
+            return existing
+        }
+        return model.openSession(sessionOptions).also { session = it }
+    }
 
     private fun closeSession() {
         session?.close()

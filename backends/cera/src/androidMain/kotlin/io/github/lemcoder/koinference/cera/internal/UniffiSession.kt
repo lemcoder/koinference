@@ -23,6 +23,8 @@ internal class UniffiSession(
     private val options: CeraSessionOptions,
 ) : CeraSession {
 
+    override fun reset() = session.reset()
+
     override suspend fun generate(prompt: String, grammar: String?): String =
         withContext(Dispatchers.IO) {
             session.appendText(templated(prompt))

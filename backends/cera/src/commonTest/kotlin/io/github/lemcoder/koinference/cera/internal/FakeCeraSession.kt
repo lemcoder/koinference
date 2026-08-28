@@ -14,6 +14,13 @@ internal class FakeCeraSession(
     var closed = false
         private set
 
+    var resets = 0
+        private set
+
+    override fun reset() {
+        resets++
+    }
+
     override suspend fun generate(prompt: String, grammar: String?): String {
         prompts += prompt
         grammars += grammar

@@ -58,6 +58,23 @@ class CeraRuntimeTest {
     }
 
     @Test
+    fun `every turn starts from an empty context`() = runTest {
+        val runtime = runtime()
+
+        runtime.generateResponse("first")
+        runtime.generateResponse("second")
+        runtime.streamResponse("third").toList()
+
+        // One session, reset before each turn. A Cera session accumulates the prompt *and* the
+        // reply, so without this the fourth identical request re-prefills a three-turn
+        // conversation and reports the slowdown as the engine's: measured at 4.8s rising to 6.7s
+        // for the same prompt before this was fixed.
+        assertEquals(1, bridge.model.sessions.size)
+        // Two, not three: the first turn opens the session, which is already empty.
+        assertEquals(2, bridge.model.session.resets)
+    }
+
+    @Test
     fun `changing the sampler opens a new session and keeps the weights`() = runTest {
         val runtime = runtime()
         runtime.generateResponse("first")

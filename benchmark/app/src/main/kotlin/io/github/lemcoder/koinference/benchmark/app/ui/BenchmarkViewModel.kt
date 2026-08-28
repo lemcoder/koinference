@@ -160,13 +160,20 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
 
     private companion object {
         /**
-         * The on-device suite: short enough to sit through, long enough to mean something.
+         * The on-device suite: short enough to sit through with a phone in your hand.
          *
          * One warmup discarded and three measured, because LiteRT-LM's first generation on a fresh
-         * engine differs from every later one, and a 32-token budget so a run is minutes rather
-         * than an afternoon. The prompt set is the harness's default three.
+         * engine differs from every later one.
+         *
+         * **One workload, named explicitly.** The harness's default set includes
+         * `long_generation_v1`, whose budget floors at 512 tokens however small a `maxNewTokens`
+         * is asked for — correctly, since a long-generation workload capped at 32 measures
+         * something else. Three engines through that is over twenty minutes of decoding, which is
+         * a shell job rather than something to hold a phone through; `WebServerService` and the
+         * instrumentation runner are how a full sweep is driven.
          */
         val SUITE = mapOf(
+            "promptSet" to "short_generation_v1",
             "iterations" to "3",
             "warmup" to "1",
             "maxNewTokens" to "32",
