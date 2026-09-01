@@ -378,6 +378,20 @@ natives. No CMake, no cinterop, no C in `:backends:cera` at all.
   before every turn, which flattens that to 4.4-4.7s. On device the growth eventually stalled a run
   outright — the process sat at 0% CPU on `long_context_v1` after a 512-token workload. Multi-turn
   chat over one Cera session is therefore not offered rather than offered wrongly.
+- **An unreleased Cera can be measured without a Rust toolchain.** Its CI publishes the per-ABI
+  `.so` as a workflow artifact and the generated Kotlin binding is checked into the repo, so
+  `-PceraLocal=<dir>` swaps both in — `<dir>/kotlin/uniffi/cera_ffi/cera_ffi.kt` and
+  `<dir>/jniLibs/arm64-v8a/libcera_ffi.so`. They must come from the **same commit**: UniFFI
+  checksums the API, so a mismatched pair fails at load rather than misbehaving. The build refuses
+  to run if a sideloaded `.so` is staged without the flag, because packaging it beside the AAR's own
+  would measure the wrong binary silently.
+- **`main` was slower than 0.4.0 here, measured back to back** (2026-09-01, Pixel 8a,
+  LFM2.5-1.2B Q4_0): 9.1 tok/s blocking on the published 0.4.0 against 5.4 on `main`, and `main`
+  returned an *empty* reply for a 24-token budget where 0.4.0 answered. Both are `--release` with the
+  same profile — CI and publish differ only by `ffi-buffer`, which is Dart-only — so it is not a
+  build-flag artifact. Unreleased code, so this is a snapshot rather than a verdict; the point is
+  that the perf work landed since v0.4.0 targets Q4_K/Q5_K, prefill and GPU, and **nothing on
+  `main` mentions Q4_0**, which is what this repository benchmarks.
 - **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
   caller means one specifically. See `docs/backends.md`.
 
