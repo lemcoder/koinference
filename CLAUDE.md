@@ -414,6 +414,28 @@ Kotlin/Native artifact exists. Four facts cost time:
 - `LlmGenerationConfig.Builder`'s constructor is Kotlin-`internal` — public to `javap`, unusable
   from here. Check Kotlin metadata, not `javap`, before building against an AAR's API.
 
+## whisper.cpp
+
+Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth keeping:
+
+- **It needed no `:core` change.** `PromptPart.AudioFile` in, `ResponsePart.Text` out, through the
+  ordinary `GeneratingRuntime`. That is the parts-based seam finally meeting an engine of a
+  different modality rather than a fake.
+- **`Modality` is `TEXT`** — named for the output, so audio-in/text-out is a text engine.
+- **No session tier.** `whisper_full` carries nothing between calls. The other three all needed a
+  reset; this one has nothing to reset.
+- **The facade pushes segments into a queue from its own thread and Kotlin pulls**, like the
+  LiteRT-LM facade. A blocking transcription drains the same loop.
+- **WAV decoding is Kotlin** (`WavAudio`): 16-bit PCM at 16 kHz, stereo averaged, unknown chunks
+  walked past, everything else refused by name. A silent resample would transcribe as noise.
+- **Strings cross the JNI seam through out-buffers, never as `const char*`.** A returned pointer
+  arrives as an opaque `Long`; the generator does emit a `kniCString` helper, but the out-buffer is
+  what the rest of this repository does.
+- **An opaque `typedef struct X X;` lands under `cnames.structs`** for cinterop, not in the interop's
+  own package — "unresolved reference" for a type plainly in the header.
+- **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
+  in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
+
 ## Performance on device
 
 `docs/performance.md` has the measurements. Two things that cost time to find:

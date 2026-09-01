@@ -1,0 +1,2 @@
+headers = koinference_whisper.h
+package = koinference_whisper

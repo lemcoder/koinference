@@ -228,6 +228,42 @@ tokenizer — only a path it hands to native code — so `ExecuTorchTextRuntime`
 a number in that column that means something different from its neighbours. Chunks stand instead,
 and for this binding a chunk is a token.
 
+## whisper.cpp: audio in, and what that proved
+
+`:backends:whisper` is the second C-facade backend, built like `:backends:llamacpp` — CPM pins
+whisper.cpp, CMake owns the build, ART binds generated JNI bridges and Apple and Linux bind the same
+facade through cinterop.
+
+**It needed nothing added to `:core`, and that is the point of it.** A prompt has carried
+`PromptPart.AudioFile` since before any engine could read one, and a reply has been a list of
+`ResponsePart` since a model that interleaves speech with its transcript broke the older design.
+Speech to text is exactly that shape, so `WhisperTextRuntime` is a plain `GeneratingRuntime`: hand it
+audio, collect text. Until now the multimodal claim rested on `FakeOmniBackend` alone.
+
+`Modality` stays `TEXT`, because it is named for the **output**. An engine that reads audio and
+answers in words is a text engine, the same way a vision-language model is.
+
+**No session tier, and that is a fact rather than a shortcut.** `whisper_full` carries nothing
+between calls, so there is no state to reset — where the other three all turned out to carry a
+context further than intended. Inventing a tier to match their shape would be a tier that exists to
+look symmetrical.
+
+**The facade streams by pushing into a queue.** `whisper_full` is synchronous and reports segments
+through a callback as it runs, so the work goes on its own thread in C++ and Kotlin pulls — the same
+arrangement the LiteRT-LM facade uses, and for the same reason: no Kotlin on a thread it does not
+own. A blocking transcription drains that same loop, so there is one path.
+
+**WAV decoding is Kotlin.** Parsing and arithmetic are not reasons to write C, and this is the part
+most likely to meet a file nobody tried — a wrong conversion is silent and transcribes as noise.
+`WavAudio` reads 16-bit PCM at 16 kHz, averages stereo to mono, walks past chunks it does not know
+(ffmpeg writes `LIST` between `fmt` and `data`), and refuses anything else by name rather than
+resampling. Ten tests, no engine.
+
+Two things the seam's own rules caught during the build, both worth keeping: the generated bridges
+must be named `Jni*`/`Facade*` for `NativeSeamTest` to accept native symbols in them, and an opaque
+`typedef struct KoiwModel KoiwModel;` lands under `cnames.structs` for cinterop rather than beside the
+functions in the interop's package.
+
 ## A backend may refuse the device it was installed on
 
 `:core` has no notion of device capability, and deliberately gained none: no

@@ -1,0 +1,13 @@
+set(CPM_DOWNLOAD_VERSION 0.40.2)
+set(CPM_DOWNLOAD_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/CPM_${CPM_DOWNLOAD_VERSION}.cmake")
+
+if(NOT EXISTS ${CPM_DOWNLOAD_LOCATION})
+    message(STATUS "Downloading CPM.cmake v${CPM_DOWNLOAD_VERSION}...")
+    file(DOWNLOAD
+        "https://github.com/cpm-cmake/CPM.cmake/releases/download/v${CPM_DOWNLOAD_VERSION}/CPM.cmake"
+        ${CPM_DOWNLOAD_LOCATION}
+        EXPECTED_HASH SHA256=c8cdc32c03816538ce22781ed72964dc864b2a34a310d3b7104812a5ca2d835d
+    )
+endif()
+
+include(${CPM_DOWNLOAD_LOCATION})
