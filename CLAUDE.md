@@ -395,6 +395,25 @@ natives. No CMake, no cinterop, no C in `:backends:cera` at all.
 - **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
   caller means one specifically. See `docs/backends.md`.
 
+## ExecuTorch
+
+Consumed as a published AAR (`org.pytorch:executorch-android`), Android only — no JVM or
+Kotlin/Native artifact exists. Four facts cost time:
+
+- **The tokenizer is a second file.** `LlmModule(modelPath, tokenizerPath, temperature)`, so
+  `TokenizerFile` looks beside the `.pte`. Missing, it crashes in native code — hence the Kotlin
+  check that names what it looked for.
+- **`seqLen` is prompt + reply, not a token budget.** Passing `maxNewTokens` into it produced
+  `Max new tokens resolved: 0, given pos_ 53, num_prompt_tokens 22, max_context_len 128`. The budget
+  is enforced by counting emissions and calling `stop()`; one emission is one token on this binding.
+- **`resetContext()` before every turn.** The module carries `pos_` across generations, and the
+  second call fails outright rather than slowing down.
+- **No tokenizer is exposed, so there is no `TokenCounting`** and `tok/s` is empty for this engine.
+  Chunks are what it reports. Counting with a different tokenizer would make that column mean two
+  things.
+- `LlmGenerationConfig.Builder`'s constructor is Kotlin-`internal` — public to `javap`, unusable
+  from here. Check Kotlin metadata, not `javap`, before building against an AAR's API.
+
 ## Performance on device
 
 `docs/performance.md` has the measurements. Two things that cost time to find:

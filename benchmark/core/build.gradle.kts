@@ -65,6 +65,8 @@ kotlin {
         // Kotlin/Native leg and cannot sit in commonMain beside the other two.
         androidMain.dependencies {
             api(project(":backends:cera"))
+            // ExecuTorch publishes an Android AAR only, same as Cera.
+            api(project(":backends:executorch"))
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

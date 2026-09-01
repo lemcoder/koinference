@@ -195,6 +195,39 @@ Constrained decoding is GBNF only. Cera's bindings expose no JSON-schema convert
 `GenerationConstraint.JsonSchema` throws rather than generating unconstrained text that looks like
 it honoured the schema.
 
+## ExecuTorch, and the things one engine can refuse to tell you
+
+`:backends:executorch` consumes `org.pytorch:executorch-android`, whose `LlmModule` is Kotlin-facing
+with a push callback — so, like `:backends:cera`, it has no facade, no CMake and no C of its own. It
+declares `android` alone: there is no JVM or Kotlin/Native artifact to consume. It reads `.pte`,
+which nothing else claims, so the two-GGUF-engines problem does not arise for it.
+
+Four things about it are unlike the others, and each one is a decision rather than an oversight.
+
+**The vocabulary is not in the model.** `LlmModule` takes a program path *and* a tokenizer path,
+where every other backend here takes one path. `ModelConfig` is not gaining a second field for one
+engine's file layout, so `TokenizerFile` looks beside the `.pte` for `<model>.tokenizer.model`, then
+the bare `tokenizer.model` / `.bin` / `.json`. A model with no tokenizer fails in Kotlin naming
+every path it tried, because handing `LlmModule` a missing path crashes in native code instead.
+
+**`seqLen` is not a token budget.** It bounds prompt and reply together against the model's own
+context window, and passing a budget into it is how the first device run failed: `maxNewTokens=32`
+became `seqLen=32`, and ExecuTorch answered `Max new tokens resolved: 0, given pos_ 53,
+num_prompt_tokens 22, max_context_len 128`. The budget is enforced on our side instead, by counting
+emissions and calling `stop()` — sound here because this binding delivers one piece per token.
+`LlmGenerationConfig`, which does have a real `maxNewTokens`, cannot be built from outside the AAR:
+its `Builder` constructor is Kotlin-`internal`, so it is public only to `javap`.
+
+**The module carries its decoder position across generations**, exactly as a Cera session does, and
+with a harder failure: not a slowdown but `Max new tokens 0`. `resetContext()` is called before every
+turn.
+
+**It reports no token counts, and the harness leaves the column empty.** The AAR exposes no
+tokenizer — only a path it hands to native code — so `ExecuTorchTextRuntime` does not implement
+`TokenCounting` and `tok/s` is `—` for this engine. Counting with somebody else's tokenizer would put
+a number in that column that means something different from its neighbours. Chunks stand instead,
+and for this binding a chunk is a token.
+
 ## A backend may refuse the device it was installed on
 
 `:core` has no notion of device capability, and deliberately gained none: no

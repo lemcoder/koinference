@@ -19,6 +19,8 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
   Android.
 - `:backends:cera` — [Cera](https://github.com/hyeons-lab/cera) backend, a Rust GGUF engine reached
   through its published UniFFI Kotlin bindings. JVM and Android; no native build of our own.
+- `:backends:executorch` — [ExecuTorch](https://github.com/pytorch/executorch) backend over PyTorch's
+  published Android AAR. Reads `.pte`; Android only.
 
 `Koinference` is the entry point. Register the backends the application links, then load a model by
 path — which engine reads a container is the backend's own answer, so switching engines is changing

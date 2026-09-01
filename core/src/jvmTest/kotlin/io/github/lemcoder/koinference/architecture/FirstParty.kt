@@ -47,4 +47,18 @@ internal fun KoFileDeclaration.topLevelTypeNames(): List<String> =
 /** The file name, without its directories. */
 internal fun KoFileDeclaration.basename(): String =
     path.replace('\\', '/').substringAfterLast('/')
-internal val VENDORED = listOf("/.cpm/", "/build/", "/.prebuilt/", "/.gradle/", "/.codegraph/")
+/**
+ * Paths holding code this repository did not write.
+ *
+ * Downloads, build output, and `local-bindings/` — where a sideloaded engine's *generated* bindings
+ * are staged. UniFFI emits one 9,000-line file with 146 top-level types in it; judging that by the
+ * rules this repository holds its own code to would say nothing about this repository.
+ */
+internal val VENDORED = listOf(
+    "/.cpm/",
+    "/build/",
+    "/.prebuilt/",
+    "/.gradle/",
+    "/.codegraph/",
+    "/local-bindings/",
+)
