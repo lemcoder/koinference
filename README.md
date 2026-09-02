@@ -8,8 +8,9 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
   - `Backend` / `Koinference` / `ModelConfig` — pick an engine and configure it without naming
     its classes
   - `ModelLoader` (`load` / `unload` / `unloadAll`)
-  - `GeneratingRuntime` — one interface for every engine: `generateResponse` and `streamResponse`,
-    both answering in `ResponsePart`s
+  - `GeneratingRuntime` — one interface for every generating engine: `generateResponse` and
+    `streamResponse`, both answering in `ResponsePart`s
+  - `EmbeddingRuntime` — `embed(texts)` for models that produce vectors rather than replies
   - `ResponsePart` — `Text`, `Audio`, `Image`; a reply is a list of them, and a stream is a flow of
     them
   - `runtime.text.TokenCounting` — the model's own tokenizer, where the engine exposes one
@@ -31,7 +32,8 @@ the model file:
 ```kotlin
 val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(maxOutputTokens = 128))
 
-val runtime = koi.load("/models/model.gguf")
+// load returns the base ModelRuntime — the caller narrows to what it asked for.
+val runtime = koi.load("/models/model.gguf") as GeneratingRuntime
 
 val reply = runtime.generateResponse("What is the capital of France?")
     .filterIsInstance<ResponsePart.Text>()

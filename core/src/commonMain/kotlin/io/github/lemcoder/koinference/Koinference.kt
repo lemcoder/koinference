@@ -61,26 +61,33 @@ class Koinference(
     /**
      * Load [modelPath] with whichever registered backend reads it.
      *
-     * One method, because there is nothing to choose between: every generating runtime speaks
-     * [io.github.lemcoder.koinference.runtime.ResponsePart], and what a given model puts in a reply
-     * is its own business rather than a different type. Read [Backend.modalities] if you want to know
-     * before collecting.
+     * Returns the base [ModelRuntime], and the caller narrows it:
+     *
+     * ```kotlin
+     * val runtime = koi.load(path)
+     * (runtime as? GeneratingRuntime)?.generateResponse("hello")
+     * (runtime as? EmbeddingRuntime)?.embed(listOf("hello"))
+     * ```
+     *
+     * Not two load methods. This repository had `loadText` and `loadVision` once and removed them:
+     * a method per kind multiplies with every kind, and the pair was already wrong when one reply
+     * could hold text *and* audio. A loader genuinely cannot promise what it produced — the same
+     * `.gguf` path could be a chat model or an embedding model — so the narrowing belongs where the
+     * caller knows what it asked for. [Backend.modalities] says which kinds a backend produces
+     * without loading anything.
      *
      * Loading the same path twice returns the same runtime — the weights are read once.
      *
-     * @throws IllegalStateException if no registered backend reads this container, or if a backend's
-     *         loader returns something that does not generate. The first message names what is
-     *         registered, because the usual cause is a missing module rather than a bad path.
+     * @throws IllegalStateException if no registered backend reads this container. The message names
+     *         what is registered, because the usual cause is a missing module rather than a bad path.
      * @throws BackendUnsupportedException if the engine cannot run on this device. A backend that
      *         can be installed on hardware it cannot use throws this from its own loader, before
      *         anything native is called.
      */
-    suspend fun load(modelPath: String): GeneratingRuntime {
-        val backend = backendFor(modelPath)
+    suspend fun load(modelPath: String): ModelRuntime {
+        backendFor(modelPath)
             ?: error("No registered backend reads $modelPath. Registered: $backendIds")
-        val runtime = loaderFor(modelPath).load(modelPath)
-        return runtime as? GeneratingRuntime
-            ?: error("${backend.id} returned ${runtime::class.simpleName}, which does not generate")
+        return loaderFor(modelPath).load(modelPath)
     }
 
     /** Release the model at [modelPath]. Idempotent. */

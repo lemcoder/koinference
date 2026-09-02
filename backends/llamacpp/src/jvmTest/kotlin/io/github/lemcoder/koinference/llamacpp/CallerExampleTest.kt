@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.llamacpp
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import io.github.lemcoder.koinference.runtime.ResponsePart
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
@@ -29,7 +30,9 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.load(path)
+            // load returns the base ModelRuntime: the same path could be a chat model or an
+            // embedding model, and only the caller knows which it asked for.
+            val runtime = koi.load(path) as GeneratingRuntime
 
             val reply = runtime.generateResponse("What is the capital of France?")
                 .filterIsInstance<ResponsePart.Text>()
@@ -47,7 +50,7 @@ class CallerExampleTest {
 
         runBlocking {
             val koi = Koinference(LlamaCpp, config = ModelConfig(maxOutputTokens = 24))
-            val runtime = koi.load(path)
+            val runtime = koi.load(path) as GeneratingRuntime
 
             val parts = runtime.streamResponse("What is the capital of France?").toList()
             val text = parts.filterIsInstance<ResponsePart.Text>().map { it.text }

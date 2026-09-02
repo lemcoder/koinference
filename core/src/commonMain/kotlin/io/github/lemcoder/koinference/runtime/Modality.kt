@@ -16,4 +16,14 @@ enum class Modality {
     TEXT,
     IMAGE,
     AUDIO,
+
+    /**
+     * Vectors rather than content.
+     *
+     * The odd one out, and deliberately here rather than in a type of its own: this enum answers
+     * "what does asking this backend for something get you", and for an embedding model the answer
+     * is numbers. A backend declaring this implements
+     * [io.github.lemcoder.koinference.runtime.EmbeddingRuntime], not `GeneratingRuntime`.
+     */
+    EMBEDDING,
 }

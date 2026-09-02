@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.backend.ModelConfig
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -17,8 +18,8 @@ class KoinferenceTest {
 
     @Test
     fun loadsThroughWhicheverBackendReadsTheContainer() = runTest {
-        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
-        assertEquals("reply from /m/b.task", koi.load("/m/b.task").generateResponse("hi").text())
+        assertEquals("reply from /m/a.gguf", (koi.load("/m/a.gguf") as GeneratingRuntime).generateResponse("hi").text())
+        assertEquals("reply from /m/b.task", (koi.load("/m/b.task") as GeneratingRuntime).generateResponse("hi").text())
 
         // Each backend was asked for exactly one loader, and only when it was needed.
         assertEquals(1, gguf.loaders.size)
@@ -66,7 +67,7 @@ class KoinferenceTest {
         koi.load("/m/a.gguf")
         koi.unloadAll()
 
-        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
+        assertEquals("reply from /m/a.gguf", (koi.load("/m/a.gguf") as GeneratingRuntime).generateResponse("hi").text())
     }
 
     @Test

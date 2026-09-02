@@ -21,6 +21,7 @@ include(":backends:litertlm")
 include(":backends:cera")
 include(":backends:executorch")
 include(":backends:whisper")
+include(":backends:onnx")
 include(":benchmark:core")
 
 // A separate build, not a module. Firebase Test Lab requires an app APK next to the test APK,

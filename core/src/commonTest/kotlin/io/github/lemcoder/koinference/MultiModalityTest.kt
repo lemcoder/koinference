@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.prompt.PromptPart
+import io.github.lemcoder.koinference.runtime.GeneratingRuntime
 import io.github.lemcoder.koinference.runtime.Accelerator
 import io.github.lemcoder.koinference.runtime.AudioFormat
 import io.github.lemcoder.koinference.runtime.Modality
@@ -32,7 +33,7 @@ class MultiModalityTest {
 
     @Test
     fun aReplyCanInterleaveTextAndAudio() = runTest {
-        val reply = koi.load("/m/qwen.omni").generateResponse("say hello")
+        val reply = (koi.load("/m/qwen.omni") as GeneratingRuntime).generateResponse("say hello")
 
         // The ordering is the point: a shape that returned text and audio separately would lose it.
         assertEquals(
@@ -44,7 +45,7 @@ class MultiModalityTest {
 
     @Test
     fun interleavingSurvivesStreaming() = runTest {
-        val parts = koi.load("/m/qwen.omni").streamResponse("say hello").toList()
+        val parts = (koi.load("/m/qwen.omni") as GeneratingRuntime).streamResponse("say hello").toList()
 
         assertEquals(4, parts.size)
         val audio = parts.filterIsInstance<ResponsePart.Audio>()
@@ -54,7 +55,7 @@ class MultiModalityTest {
 
     @Test
     fun aTextOnlyEngineIsTheSameShapeWithOneKindOfPart() = runTest {
-        val reply = koi.load("/m/a.gguf").generateResponse("hi")
+        val reply = (koi.load("/m/a.gguf") as GeneratingRuntime).generateResponse("hi")
 
         // No special case anywhere: a text engine simply never emits anything but Text.
         assertTrue(reply.all { it is ResponsePart.Text })
@@ -65,8 +66,8 @@ class MultiModalityTest {
     fun oneLoadServesBothKindsOfModel() = runTest {
         // There is no loadText/loadVision to choose between, because there is nothing to choose:
         // every generating runtime speaks ResponsePart.
-        assertEquals("reply from /m/a.gguf", koi.load("/m/a.gguf").generateResponse("hi").text())
-        assertEquals("Hello there", koi.load("/m/qwen.omni").generateResponse("hi").text())
+        assertEquals("reply from /m/a.gguf", (koi.load("/m/a.gguf") as GeneratingRuntime).generateResponse("hi").text())
+        assertEquals("Hello there", (koi.load("/m/qwen.omni") as GeneratingRuntime).generateResponse("hi").text())
     }
 
     @Test
@@ -90,7 +91,7 @@ class MultiModalityTest {
     fun aPromptCanCarryAudioIntoAnOmniModel() = runTest {
         // PromptPart needed no change: it has carried AudioFile from the start, which is why the
         // input side was never the problem.
-        val reply = koi.load("/m/qwen.omni").generateResponse(
+        val reply = (koi.load("/m/qwen.omni") as GeneratingRuntime).generateResponse(
             listOf(PromptPart.Text("reply to this: "), PromptPart.AudioFile("/a/question.wav")),
         )
 
