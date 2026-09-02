@@ -12,6 +12,11 @@ import io.github.lemcoder.koinference.benchmark.app.client.BackendConnection
 import io.github.lemcoder.koinference.benchmark.app.client.BackendProcess
 import io.github.lemcoder.koinference.benchmark.app.client.BenchmarkSession
 import io.github.lemcoder.koinference.benchmark.app.ui.ResultsTable
+import io.github.lemcoder.koinference.benchmark.config.BenchmarkArguments
+import io.github.lemcoder.koinference.benchmark.engine.availableEngines
+import io.github.lemcoder.koinference.benchmark.prompts.PromptCorpus
+import io.github.lemcoder.koinference.benchmark.result.toJson
+import io.github.lemcoder.koinference.benchmark.runner.BenchmarkRunner
 import io.github.lemcoder.koinference.benchmark.platform.BenchmarkContext
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
@@ -69,6 +74,16 @@ class BenchmarkService : Service() {
         val outPath = intent.getStringExtra(EXTRA_OUT)
             ?: File(getExternalFilesDir(null), DEFAULT_OUT).absolutePath
 
+        // Android puts a service process that hosts no UI in /foreground, which is capped at cpus
+        // 0-7; only the process holding the visible Activity gets /top-app and the X3 prime core.
+        // This runs the engine here, in that process, to find out whether the prime core is worth
+        // the isolation it costs — the memory figures from such a run describe this process, Compose
+        // and all, so they are not comparable with a normal one.
+        if (intent.getBooleanExtra(EXTRA_IN_PROCESS, false)) {
+            runInProcess(processes.first(), modelPath, options, outPath)
+            return START_NOT_STICKY
+        }
+
         scope.launch {
             try {
                 val (targets, skipped) = session.resolveTargets(processes, modelPath)
@@ -108,6 +123,60 @@ class BenchmarkService : Service() {
 
         return START_NOT_STICKY
     }
+
+    /**
+     * Runs one engine here rather than in its own process, for the cpuset it buys.
+     *
+     * Deliberately not the normal path: everything the process split is for — a PSS reading that is
+     * the model and not the UI, a native crash that takes down one engine — is given up for it.
+     */
+    private fun runInProcess(
+        process: BackendProcess,
+        modelPath: String?,
+        options: Map<String, String>,
+        outPath: String,
+    ) {
+        scope.launch {
+            try {
+                log("in-process run: cpuset ${cpuset()}, allowed ${CpuAffinity.current()}")
+                options["affinity"]?.let { requested ->
+                    val mask = if (requested == "big") CpuAffinity.bigCoreMask() else requested
+                    mask?.let { log("affinity: ${CpuAffinity.apply(it).detail}") }
+                }
+
+                val model = modelPath ?: error("--es model is required for an in-process run")
+                val corpus = PromptCorpus.parse(assets.open("prompts.json").bufferedReader().readText())
+                val engineId = availableEngines().first { engine ->
+                    engine.id.equals(process.label, ignoreCase = true) ||
+                        process.label.contains(engine.id, ignoreCase = true) ||
+                        engine.id.contains(process.label.replace("-", ""), ignoreCase = true)
+                }.id
+
+                val config = BenchmarkArguments.toConfig(
+                    arguments = options + mapOf("engine" to engineId, "model" to model,
+                        "cacheDir" to cacheDir.absolutePath),
+                    corpusPromptIds = corpus.prompts.map { it.id },
+                    runIdFallback = "in-process-${System.currentTimeMillis()}",
+                )
+
+                val file = BenchmarkRunner(config, corpus, log = { line -> log(line) }).run()
+                ResultsTable.rows(listOf(file.toJson())).forEach { row ->
+                    log("RESULT ${row.engineId} ${row.workload} tok/s=${row.tokensPerSecond.format()} " +
+                        "ttft=${row.ttftMs.format()}ms tokens=${row.tokens} chunks=${row.chunks} " +
+                        "peakPss=${row.peakPssMb.format()}MB [in-process, memory not comparable]")
+                }
+                writeResults(outPath, listOf(file.toJson()))
+            } catch (failure: Throwable) {
+                log("in-process run failed: ${failure::class.java.simpleName}: ${failure.message}")
+            } finally {
+                log("done")
+                stopSelf()
+            }
+        }
+    }
+
+    private fun cpuset(): String =
+        runCatching { File("/proc/self/cpuset").readText().trim() }.getOrDefault("unknown")
 
     override fun onDestroy() {
         scope.cancel()
@@ -180,6 +249,9 @@ class BenchmarkService : Service() {
         const val EXTRA_ENGINES = "engines"
         const val EXTRA_MODEL = "model"
         const val EXTRA_OUT = "out"
+
+        /** Runs the engine in this process, for its cpuset. See [runInProcess]. */
+        const val EXTRA_IN_PROCESS = "inProcess"
 
         /** Keys handed straight to the harness's own argument parsing. */
         private val HARNESS_OPTIONS = listOf(

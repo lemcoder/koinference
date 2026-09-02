@@ -285,6 +285,40 @@ on four. ExecuTorch was losing more than that to little-core migration, so it wi
 it loses. Pinning also collapses ExecuTorch's spread — 3.3-7.9 unpinned against 8.1-8.7 pinned — the
 same steadying llama.cpp got.
 
+### The cpuset decides what a mask may even ask for
+
+Android places a process by state, and that cap sits above any affinity call:
+
+| process | cpuset | CPUs |
+|---|---|---|
+| the one hosting the visible Activity | `/top-app` | **0-8** |
+| a service process with no UI | `/foreground` | **0-7** |
+| background, restricted, isolated | `background` / `restricted` | **0-3** |
+
+`sched_setaffinity` only narrows within the group, so a service can never name the X3 prime core, and
+an **isolated** service would be worse rather than better — those groups cap at the little cluster.
+Changing groups means writing `/dev/cpuset/*/tasks`, which needs system privileges.
+
+Running the engine in the top-app process (`--ez inProcess true`, which needs the Activity visible)
+lifts the cap. ExecuTorch, same model and suite:
+
+| where, and what mask | tok/s | ttft |
+|---|---|---|
+| service `/foreground`, unpinned | 3.6 | 358 ms |
+| service `/foreground`, pinned 4-7 | 8.4 | 88 ms |
+| top-app, unpinned | 8.0 | 82 ms |
+| **top-app, pinned 4-8** | **10.7** | **63 ms** |
+| top-app, prime core alone (cpu8) | 4.9 | 166 ms |
+
+**The lever is "never touch the A510s", not "use the fastest core".** One prime core is worse than
+five fast ones — eight XNNPACK threads do not fit on one CPU — and simply being in `/top-app` is worth
+as much as pinning is inside `/foreground`.
+
+Speed and memory want opposite architectures here, which is worth saying plainly: the in-process
+figures carry Compose and Ktor in their PSS (563 MB against 475 MB), and that contamination is the
+whole reason the engines run in their own processes. `inProcess` is a measurement mode, not the
+default.
+
 **So it is opt-in per engine and off by default** (`--es affinity big`). A process-wide pin is not a
 free win, and "pin to the big cluster" is not advice that survives contact with a second engine.
 

@@ -454,6 +454,15 @@ ExecuTorch was losing more to little-core migration than it loses to contention,
 So it is opt-in and off by default. llama.cpp needs none of this — it takes a real mask through its
 facade, which is better than pinning a whole process.
 
+**A cpuset caps what affinity may ask for.** `/top-app` is 0-8, `/foreground` 0-7, background and
+restricted 0-3 — and a UI-less service process lands in `/foreground`, so it can never name the X3
+prime core however it is pinned. An **isolated** service is worse, not better: those groups are the
+little cluster. Only the process hosting the visible Activity is in `/top-app`, which is what
+`--ez inProcess true` exists to measure: ExecuTorch goes 3.6 tok/s (service, unpinned) to 10.7
+(top-app, pinned 4-8), while the prime core *alone* gives 4.9. The lever is avoiding the A510s, not
+finding the fastest core. Those runs carry Compose in their PSS, so it is a measurement mode rather
+than a default.
+
 **ExecuTorch exposes no thread knob and cannot be made to.** `libexecutorch.so` exports six symbols:
 `JNI_OnLoad` and five `AsrModule` entry points. The threadpool is hidden, the AAR ships no headers or
 static libs, and the release carries only a CMSIS pack — so a JNI shim of ours has nothing to bind
