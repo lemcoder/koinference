@@ -346,6 +346,161 @@ Gradle.
 smallest published one is SmolLM2-135M-Instruct at 136 MB — there is no `stories260K` equivalent,
 so generation tests are env-gated rather than run in CI.
 
+## Cera
+
+A Rust GGUF engine, reached through its **published UniFFI/JNA Kotlin bindings** rather than a
+facade of ours — `com.hyeons-lab:cera-ffi-jvm` and `cera-ffi-android`, same generated API, different
+natives. No CMake, no cinterop, no C in `:backends:cera` at all.
+
+- **jvm and android only.** UniFFI's Kotlin bindings need a JVM and there is no Kotlin/Native one,
+  so the other targets are not declared. That is why `:benchmark:core`'s backend list is now
+  `expect fun benchmarkBackends()` — its macosArm64 leg cannot see Cera.
+- **The chat template is not optional, and its absence looks like a broken decoder.** Cera exposes
+  `applyChatTemplate` instead of applying it; handed raw text, LFM2.5 answers with token 540
+  repeated to the budget (`????????????????????????`). `UniffiSession.templated` builds the turn.
+- **Stream with the blocking `generateStreaming`, not `generateStreamingAsync`.** The async variant
+  delivered zero batches here; the blocking one works, on an IO thread, with `trySendBlocking` so a
+  fast model cannot overflow the channel and drop a chunk silently.
+- **`EngineConfig`'s `contextSize` of 0 means the model's full declared context**, which is what
+  `ModelConfig.contextTokens` of 0 already meant — the conventions agree, so nothing is translated.
+- **The 0.4.0 artifact is not the `main` branch.** `EngineConfig` takes `contextSize`, not
+  `maxSeqLen`, and `GenerateOutput` carries token ids and a summary with no text field. Read the
+  published jar with `javap`, not the checked-out source, before coding against it.
+- **`flushEveryTokens = 1`, against Cera's default of 16.** Otherwise a chunk is a burst and time
+  to first chunk is time to the *sixteenth* token: 13 chunks for 64 tokens on an M4, first at 60ms.
+  llama.cpp emits one token per chunk, so batching would make this engine's TTFT mean something
+  different from the others' in the same file. Costs nothing measurable (714ms against 720ms). On a
+  phone it changes nothing — decode is slower than the 50ms flush timer, so it already emitted per
+  token, which is why the device numbers were honest before this was noticed.
+- **A Cera session accumulates, so reset it per turn.** `appendText` adds to one conversation and a
+  generation appends its own reply, so the same prompt asked four times re-prefills a growing
+  history: 4.8s, 5.1s, 6.0s, 6.7s on an M4. `Session.reset()` exists and `CeraRuntime` calls it
+  before every turn, which flattens that to 4.4-4.7s. On device the growth eventually stalled a run
+  outright — the process sat at 0% CPU on `long_context_v1` after a 512-token workload. Multi-turn
+  chat over one Cera session is therefore not offered rather than offered wrongly.
+- **An unreleased Cera can be measured without a Rust toolchain.** Its CI publishes the per-ABI
+  `.so` as a workflow artifact and the generated Kotlin binding is checked into the repo, so
+  `-PceraLocal=<dir>` swaps both in — `<dir>/kotlin/uniffi/cera_ffi/cera_ffi.kt` and
+  `<dir>/jniLibs/arm64-v8a/libcera_ffi.so`. They must come from the **same commit**: UniFFI
+  checksums the API, so a mismatched pair fails at load rather than misbehaving. The build refuses
+  to run if a sideloaded `.so` is staged without the flag, because packaging it beside the AAR's own
+  would measure the wrong binary silently.
+- **`main` was slower than 0.4.0 here, measured back to back** (2026-09-01, Pixel 8a,
+  LFM2.5-1.2B Q4_0): 9.1 tok/s blocking on the published 0.4.0 against 5.4 on `main`, and `main`
+  returned an *empty* reply for a 24-token budget where 0.4.0 answered. Both are `--release` with the
+  same profile — CI and publish differ only by `ffi-buffer`, which is Dart-only — so it is not a
+  build-flag artifact. Unreleased code, so this is a snapshot rather than a verdict; the point is
+  that the perf work landed since v0.4.0 targets Q4_K/Q5_K, prefill and GPU, and **nothing on
+  `main` mentions Q4_0**, which is what this repository benchmarks.
+- **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
+  caller means one specifically. See `docs/backends.md`.
+
+## ExecuTorch
+
+Consumed as a published AAR (`org.pytorch:executorch-android`), Android only — no JVM or
+Kotlin/Native artifact exists. Four facts cost time:
+
+- **The tokenizer is a second file.** `LlmModule(modelPath, tokenizerPath, temperature)`, so
+  `TokenizerFile` looks beside the `.pte`. Missing, it crashes in native code — hence the Kotlin
+  check that names what it looked for.
+- **`seqLen` is prompt + reply, not a token budget.** Passing `maxNewTokens` into it produced
+  `Max new tokens resolved: 0, given pos_ 53, num_prompt_tokens 22, max_context_len 128`. The budget
+  is enforced by counting emissions and calling `stop()`; one emission is one token on this binding.
+- **`resetContext()` before every turn.** The module carries `pos_` across generations, and the
+  second call fails outright rather than slowing down.
+- **No tokenizer is exposed, so there is no `TokenCounting`** and `tok/s` is empty for this engine.
+  Chunks are what it reports. Counting with a different tokenizer would make that column mean two
+  things.
+- `LlmGenerationConfig.Builder`'s constructor is Kotlin-`internal` — public to `javap`, unusable
+  from here. Check Kotlin metadata, not `javap`, before building against an AAR's API.
+
+## whisper.cpp
+
+Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth keeping:
+
+- **It needed no `:core` change.** `PromptPart.AudioFile` in, `ResponsePart.Text` out, through the
+  ordinary `GeneratingRuntime`. That is the parts-based seam finally meeting an engine of a
+  different modality rather than a fake.
+- **`Modality` is `TEXT`** — named for the output, so audio-in/text-out is a text engine.
+- **No session tier.** `whisper_full` carries nothing between calls. The other three all needed a
+  reset; this one has nothing to reset.
+- **The facade pushes segments into a queue from its own thread and Kotlin pulls**, like the
+  LiteRT-LM facade. A blocking transcription drains the same loop.
+- **WAV decoding is Kotlin** (`WavAudio`): 16-bit PCM at 16 kHz, stereo averaged, unknown chunks
+  walked past, everything else refused by name. A silent resample would transcribe as noise.
+- **Strings cross the JNI seam through out-buffers, never as `const char*`.** A returned pointer
+  arrives as an opaque `Long`; the generator does emit a `kniCString` helper, but the out-buffer is
+  what the rest of this repository does.
+- **An opaque `typedef struct X X;` lands under `cnames.structs`** for cinterop, not in the interop's
+  own package — "unresolved reference" for a type plainly in the header.
+- **The `.def` needs `headerFilter`, or cinterop walks into the system headers.** Without it the
+  generator emitted a ninth bridge for `__DARWIN_NULL`, which compiled on macOS and failed against
+  the NDK — and worse, would have made the bridge *numbering* differ per platform, which is an ABI.
+  Both other backends had the line; this one did not until it broke.
+- **whisper streams by 30-second window, not by segment.** All the segments of a window arrive when
+  that window finishes decoding: on a Pixel 8a, 12 segments from a minute of audio arrive with the
+  first at 5.2s of 13.4s. A clip shorter than one window arrives as a single burst however well the
+  facade streams, so an incrementality test needs more than 30 seconds of audio to mean anything.
+- **`toList()` before timestamping measures nothing.** The first device test recorded "first segment
+  at 13799ms, total 13799ms" and looked like broken streaming; it was collecting the whole flow and
+  then stamping arrivals. Use `collect`.
+- **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
+  in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
+
+## An engine process can be killed under you
+
+Android kills services on a **global** memory-pressure event, and a 1B GGUF whose peak PSS is ~5 GB
+invites it: logcat shows `Rescheduling restart of crashed service … LlamaCppService in 0ms for
+mem-pressure-event`, alongside the same line for Google's own services. Android then restarts the
+service, so what is left is a *fresh, idle* process — 68 MB, no engine threads, the model not in
+`/proc/<pid>/maps` — which reads like a hang inside the loader rather than a kill.
+
+Every call across the seam is oneway with a callback, so a dead process sends nothing back and the
+caller waits for a reply that cannot arrive. `BackendConnection` now fails everything pending when
+`onServiceDisconnected` fires, naming the process, because "generation failed" would send the reader
+looking in the wrong place.
+
+Two things this cost, worth remembering:
+
+- **logcat rotates fast on this device** — WifiHAL alone floods it — so evidence of a failure is gone
+  minutes later. Capture to a file with a tag filter (`adb logcat -v time koinference-benchmark:I
+  "*:S" > file`) before reproducing, rather than reading `logcat -d` afterwards.
+- **The same model loads fine through the instrumentation runner**, which is what proves the engine
+  and the file are not at fault. When the app path and the instrumentation path disagree, the app
+  path is the suspect.
+
+## Process affinity is per engine, not a rule
+
+`CpuAffinity` in the benchmark app pins every thread of a process from Java — no JNI. Two facts
+worth keeping:
+
+- **`taskset -ap <pid>` fails on Android**: the spawned child cannot read `/proc/<pid>/task/` of
+  another process under `hidepid`, same uid or not, and says "No such file or directory".
+  `/proc/self/task` is readable, so enumerate there and `taskset -p` each TID. New threads inherit
+  from their creator, so pin before the engine builds its pool.
+- **Asking for the big cluster gets less than asked**: cpus 4-8 requested, `4-7` granted — an app's
+  cpuset excludes the X3 prime core.
+
+**Measured three rounds each way, it helps one engine and ruins another**: ExecuTorch 3.6 to 8.4
+tok/s, Cera 11.4 down to 3.3. Both size their pools for nine CPUs and then contend on four;
+ExecuTorch was losing more to little-core migration than it loses to contention, and Cera was not.
+So it is opt-in and off by default. llama.cpp needs none of this — it takes a real mask through its
+facade, which is better than pinning a whole process.
+
+**A cpuset caps what affinity may ask for.** `/top-app` is 0-8, `/foreground` 0-7, background and
+restricted 0-3 — and a UI-less service process lands in `/foreground`, so it can never name the X3
+prime core however it is pinned. An **isolated** service is worse, not better: those groups are the
+little cluster. Only the process hosting the visible Activity is in `/top-app`, which is what
+`--ez inProcess true` exists to measure: ExecuTorch goes 3.6 tok/s (service, unpinned) to 10.7
+(top-app, pinned 4-8), while the prime core *alone* gives 4.9. The lever is avoiding the A510s, not
+finding the fastest core. Those runs carry Compose in their PSS, so it is a measurement mode rather
+than a default.
+
+**ExecuTorch exposes no thread knob and cannot be made to.** `libexecutorch.so` exports six symbols:
+`JNI_OnLoad` and five `AsrModule` entry points. The threadpool is hidden, the AAR ships no headers or
+static libs, and the release carries only a CMSIS pack — so a JNI shim of ours has nothing to bind
+to, by `dlsym` or by linking. Getting it would mean building ExecuTorch from source.
+
 ## Performance on device
 
 `docs/performance.md` has the measurements. Two things that cost time to find:
@@ -441,6 +596,10 @@ lags the SoC badly enough to read identical across a 2x swing.
   JSON. Putting the runner in the app would put a binder round trip inside every timing and Compose
   inside every memory reading. `android:process` is fixed per manifest entry, which is why there is a
   service class per backend rather than one service told which engine to be.
+- **The app is drivable from a shell**: `BenchmarkService` takes `--es engines`, `--es model` and
+  the harness's own option names, runs the same `BenchmarkSession` the UI does, logs one `RESULT`
+  line per record under tag `koinference-benchmark`, and writes the merged results file. Use it for
+  anything repeatable; the screen is for one look at one device.
 - **The device-test variant does not package `assets/`.** The prompt corpus is pushed to the
   device and passed with `-e promptFile` instead of being packaged.
 - **Give LiteRT-LM a writable `cacheDir` or it will not run a 1.2B model.** Without one it puts
@@ -528,6 +687,13 @@ a generated `equals` would call two identical replies different.
 `TokenCounting` is the only thing left in `runtime.text`, because a token is a text notion.
 
 ## A stream has to arrive in pieces, and that is asserted
+
+An engine's flush policy decides what a chunk *is*, and it is not always one token. Cera batches 16
+by default; the backend sets `flushEveryTokens = 1` so that a chunk is a token on every engine, and
+`tok/s` is unaffected either way because the harness counts tokens with the model's own tokenizer
+rather than counting emissions. What batching would corrupt is **TTFT**, which is why the setting
+matters: measured two ways on a Pixel 8a, Cera does 10.8 tok/s through a blocking generate with no
+chunks at all and 8.4 tok/s streamed, so the slowness is the decode and not the chunking.
 
 A binding that buffered a whole reply and delivered it in one chunk would satisfy every other
 property of streaming — the chunks concatenate, the text is right, the flow completes — while

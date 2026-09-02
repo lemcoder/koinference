@@ -242,6 +242,43 @@ An engine this device cannot run is shown disabled with the reason rather than h
 
 **Serve** picks one engine to put behind the HTTP server, for the Python clients below.
 
+### Driving it from a shell
+
+A matrix is a script, not a screen. `BenchmarkService` runs the same code the UI does — same
+orchestration, same suite, same one-engine-at-a-time — with no tapping:
+
+```bash
+adb shell am start-foreground-service \
+    -n io.github.lemcoder.koinference.benchmark.app/.service.BenchmarkService \
+    --es engines all \
+    --es model /data/local/tmp/koinference/LFM2.5-1.2B-Instruct-Q4_0.gguf \
+    --es promptSet short_generation_v1 \
+    --ei iterations 3 --ei warmup 1 --ei maxNewTokens 32
+
+adb logcat -s koinference-benchmark:I
+```
+
+```
+skipped LiteRT-LM: cannot read LFM2.5-1.2B-Instruct-Q4_0.gguf
+running [llama.cpp, Cera] with {promptSet=short_generation_v1, iterations=3, ...}
+RESULT llama.cpp short_generation_v1 tok/s=40.6 ttft=342.9ms tokens=32 chunks=32 peakPss=2861.5MB afterLoad=1339.8MB afterRun=35.6MB
+RESULT cera      short_generation_v1 tok/s=12.8 ttft=2042.3ms tokens=32 chunks=32 peakPss=718.1MB afterLoad=50.9MB afterRun=30.6MB
+results written to /storage/emulated/0/Android/data/.../files/benchmark-results.json
+```
+
+| extra | |
+|---|---|
+| `--es engines` | ids or labels, comma separated, or `all` (the default) |
+| `--es model` | optional; applies to every engine that can read that container. An engine that cannot is **skipped by name**, not silently — one GGUF runs on both GGUF engines and LiteRT-LM says why it sat out |
+| `--es out` | where to write the merged results; defaults to the app's external files dir |
+| everything else | handed to the harness untouched, so `promptSet`, `iterations`, `warmup`, `maxNewTokens`, `maxContextTokens`, `threads`, `seed` and the rest mean what they mean there |
+
+With no `--es model`, each engine takes the first model it can read from the search paths, so
+`--es engines litert-lm` alone is a complete run.
+
+Every record is logged as one `RESULT` line, so a scripted sweep needs no file pulled to be read —
+and the merged JSON is the harness's own schema, not a second one this app invented.
+
 ```bash
 adb install -r benchmark/app/build/outputs/apk/benchmark/koinference-benchmark-app-benchmark.apk
 adb push LFM2.5-1.2B-Instruct-Q4_0.gguf /data/local/tmp/koinference/

@@ -54,6 +54,41 @@
                 android:value="Benchmark inference engine, started from the app" />
         </service>
 
+        <service
+            android:name=".service.CeraService"
+            android:exported="false"
+            android:process=":cera"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference engine, started from the app" />
+        </service>
+
+        <service
+            android:name=".service.ExecuTorchService"
+            android:exported="false"
+            android:process=":executorch"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark inference engine, started from the app" />
+        </service>
+
+        <!--
+          The benchmark, driven from a shell rather than a screen: same matrix, no tapping.
+
+          exported, because being startable by `am start-foreground-service` is the entire point.
+          It runs in the app process and binds the engine services, exactly as the UI does.
+        -->
+        <service
+            android:name=".service.BenchmarkService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Benchmark run, started from a shell on a test device" />
+        </service>
+
         <!--
           The HTTP server, in the app process rather than beside a model: it asks the engine process
           for that process's memory, so serving cannot contaminate the numbers it reports.

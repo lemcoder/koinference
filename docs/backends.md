@@ -150,6 +150,120 @@ numbered by declaration position, so deleting a function from the middle of the 
 every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` silently starts
 calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
 afternoon. Same rule as ever: **append new functions at the end.**
+## Three engines, and two of them read GGUF
+
+`:backends:cera` reaches a Rust engine through Cera's published UniFFI/JNA Kotlin bindings —
+`com.hyeons-lab:cera-ffi-jvm` and `cera-ffi-android`, one artifact per leg, differing only in which
+natives they package. There is no C facade, no CMake and no cinterop in that module: the binding is
+already Kotlin, so the whole backend is Kotlin.
+
+**It declares `jvm()` and `android` only.** UniFFI's Kotlin bindings need a JVM, Apple gets a
+separate Swift package, and there is no Kotlin/Native binding to consume — so those targets are not
+declared, rather than declared and left throwing. `:backends:litertlm` set the precedent for a
+backend covering a subset of the repository's targets. The knock-on is that `:benchmark:core`'s
+backend list had to become `expect fun benchmarkBackends()`, since its macosArm64 leg cannot see
+Cera: a genuine platform difference, answered per platform.
+
+`UniffiBridge` / `UniffiModel` / `UniffiSession` are byte-identical in `jvmMain` and `androidMain`,
+and stay that way. Same rule and same reason as `JniBridge.kt`: two copies of a file that only calls
+a generated API is cheaper than a source set that exists to deduplicate.
+
+**Cera and llama.cpp both claim `.gguf`.** `Koinference.backendFor` returns the first registered
+backend that handles a path, so registration order decides, and `backendById("cera")` is how a
+caller says which one it meant regardless of order. Deliberately not an error: an application that
+registers both and loads a GGUF should get one, and which one is a question only the caller can
+answer. The benchmark app sidesteps it entirely by picking an engine rather than a path.
+
+Two things about that engine cost an afternoon to find, and both are visible in `UniffiSession`:
+
+- **The chat template is not optional.** Cera exposes `applyChatTemplate` rather than applying it,
+  and an instruct model handed raw text answers with one token repeated to the budget — LFM2.5
+  emits `?` twenty-four times, which looks like a broken decoder rather than a missing template. The
+  turn is built in the binding, where the engine is.
+- **Streaming works through the blocking `generateStreaming`, not the async one.** The async variant
+  never delivered a batch here; the blocking one delivers them as they decode, so it runs on an IO
+  thread with `trySendBlocking` pushing back onto Cera's worker. Backpressure rather than `trySend`,
+  because a dropped chunk is a silently short reply.
+
+**A session accumulates, and `CeraRuntime` resets it before every turn.** `appendText` adds to one
+conversation and a generation appends its reply, so an unreset session answers the same question
+more slowly each time — 4.8s to 6.7s over four turns, and on device it eventually stalled a
+benchmark with the engine idle. Every call is an independent turn, which is what the other backends
+give and what a benchmark needs.
+
+Constrained decoding is GBNF only. Cera's bindings expose no JSON-schema converter, so
+`GenerationConstraint.JsonSchema` throws rather than generating unconstrained text that looks like
+it honoured the schema.
+
+## ExecuTorch, and the things one engine can refuse to tell you
+
+`:backends:executorch` consumes `org.pytorch:executorch-android`, whose `LlmModule` is Kotlin-facing
+with a push callback — so, like `:backends:cera`, it has no facade, no CMake and no C of its own. It
+declares `android` alone: there is no JVM or Kotlin/Native artifact to consume. It reads `.pte`,
+which nothing else claims, so the two-GGUF-engines problem does not arise for it.
+
+Four things about it are unlike the others, and each one is a decision rather than an oversight.
+
+**The vocabulary is not in the model.** `LlmModule` takes a program path *and* a tokenizer path,
+where every other backend here takes one path. `ModelConfig` is not gaining a second field for one
+engine's file layout, so `TokenizerFile` looks beside the `.pte` for `<model>.tokenizer.model`, then
+the bare `tokenizer.model` / `.bin` / `.json`. A model with no tokenizer fails in Kotlin naming
+every path it tried, because handing `LlmModule` a missing path crashes in native code instead.
+
+**`seqLen` is not a token budget.** It bounds prompt and reply together against the model's own
+context window, and passing a budget into it is how the first device run failed: `maxNewTokens=32`
+became `seqLen=32`, and ExecuTorch answered `Max new tokens resolved: 0, given pos_ 53,
+num_prompt_tokens 22, max_context_len 128`. The budget is enforced on our side instead, by counting
+emissions and calling `stop()` — sound here because this binding delivers one piece per token.
+`LlmGenerationConfig`, which does have a real `maxNewTokens`, cannot be built from outside the AAR:
+its `Builder` constructor is Kotlin-`internal`, so it is public only to `javap`.
+
+**The module carries its decoder position across generations**, exactly as a Cera session does, and
+with a harder failure: not a slowdown but `Max new tokens 0`. `resetContext()` is called before every
+turn.
+
+**It reports no token counts, and the harness leaves the column empty.** The AAR exposes no
+tokenizer — only a path it hands to native code — so `ExecuTorchTextRuntime` does not implement
+`TokenCounting` and `tok/s` is `—` for this engine. Counting with somebody else's tokenizer would put
+a number in that column that means something different from its neighbours. Chunks stand instead,
+and for this binding a chunk is a token.
+
+## whisper.cpp: audio in, and what that proved
+
+`:backends:whisper` is the second C-facade backend, built like `:backends:llamacpp` — CPM pins
+whisper.cpp, CMake owns the build, ART binds generated JNI bridges and Apple and Linux bind the same
+facade through cinterop.
+
+**It needed nothing added to `:core`, and that is the point of it.** A prompt has carried
+`PromptPart.AudioFile` since before any engine could read one, and a reply has been a list of
+`ResponsePart` since a model that interleaves speech with its transcript broke the older design.
+Speech to text is exactly that shape, so `WhisperTextRuntime` is a plain `GeneratingRuntime`: hand it
+audio, collect text. Until now the multimodal claim rested on `FakeOmniBackend` alone.
+
+`Modality` stays `TEXT`, because it is named for the **output**. An engine that reads audio and
+answers in words is a text engine, the same way a vision-language model is.
+
+**No session tier, and that is a fact rather than a shortcut.** `whisper_full` carries nothing
+between calls, so there is no state to reset — where the other three all turned out to carry a
+context further than intended. Inventing a tier to match their shape would be a tier that exists to
+look symmetrical.
+
+**The facade streams by pushing into a queue.** `whisper_full` is synchronous and reports segments
+through a callback as it runs, so the work goes on its own thread in C++ and Kotlin pulls — the same
+arrangement the LiteRT-LM facade uses, and for the same reason: no Kotlin on a thread it does not
+own. A blocking transcription drains that same loop, so there is one path.
+
+**WAV decoding is Kotlin.** Parsing and arithmetic are not reasons to write C, and this is the part
+most likely to meet a file nobody tried — a wrong conversion is silent and transcribes as noise.
+`WavAudio` reads 16-bit PCM at 16 kHz, averages stereo to mono, walks past chunks it does not know
+(ffmpeg writes `LIST` between `fmt` and `data`), and refuses anything else by name rather than
+resampling. Ten tests, no engine.
+
+Two things the seam's own rules caught during the build, both worth keeping: the generated bridges
+must be named `Jni*`/`Facade*` for `NativeSeamTest` to accept native symbols in them, and an opaque
+`typedef struct KoiwModel KoiwModel;` lands under `cnames.structs` for cinterop rather than beside the
+functions in the interop's package.
+
 ## A backend may refuse the device it was installed on
 
 `:core` has no notion of device capability, and deliberately gained none: no

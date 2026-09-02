@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.lemcoder.koinference.benchmark.app.client.BackendConnection
 import io.github.lemcoder.koinference.benchmark.app.client.BackendProcess
+import io.github.lemcoder.koinference.benchmark.app.client.BenchmarkSession
 import io.github.lemcoder.koinference.benchmark.app.net.WebServerController
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +43,10 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
     val serving: StateFlow<ServingState> = _serving.asStateFlow()
 
     private val server = WebServerController(context) { process -> connections.getValue(process) }
+
+    // The same orchestration BenchmarkService runs, so a tapped run and a scripted one cannot
+    // measure different things.
+    private val session = BenchmarkSession(context, connections)
 
     init {
         probeBackends()
@@ -100,20 +105,17 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
 
         _run.value = RunState.Running("starting")
         viewModelScope.launch {
-            val results = mutableListOf<String>()
-            val failures = mutableListOf<String>()
+            val targets = chosen.mapNotNull { state ->
+                state.selectedModel?.let { state.process to it }
+            }
 
-            for (state in chosen) {
-                val model = state.selectedModel ?: continue
-                _run.value = RunState.Running("${state.process.label}: loading ${File(model).name}")
-                runCatching {
-                    connections.getValue(state.process).runBenchmark(
-                        modelPath = model,
-                        options = SUITE,
-                        onProgress = { line -> _run.value = RunState.Running(line) },
-                    )
-                }.onSuccess { results += it }
-                    .onFailure { failures += "${state.process.label}: ${it.message}" }
+            val outcomes = session.run(targets, SUITE) { line ->
+                _run.value = RunState.Running(line)
+            }
+
+            val results = outcomes.mapNotNull { it.resultsJson }
+            val failures = outcomes.mapNotNull { outcome ->
+                outcome.failure?.let { "${outcome.process.label}: $it" }
             }
 
             _run.value = if (results.isEmpty() && failures.isNotEmpty()) {
@@ -160,13 +162,20 @@ class BenchmarkViewModel(private val context: Context) : ViewModel() {
 
     private companion object {
         /**
-         * The on-device suite: short enough to sit through, long enough to mean something.
+         * The on-device suite: short enough to sit through with a phone in your hand.
          *
          * One warmup discarded and three measured, because LiteRT-LM's first generation on a fresh
-         * engine differs from every later one, and a 32-token budget so a run is minutes rather
-         * than an afternoon. The prompt set is the harness's default three.
+         * engine differs from every later one.
+         *
+         * **One workload, named explicitly.** The harness's default set includes
+         * `long_generation_v1`, whose budget floors at 512 tokens however small a `maxNewTokens`
+         * is asked for — correctly, since a long-generation workload capped at 32 measures
+         * something else. Three engines through that is over twenty minutes of decoding, which is
+         * a shell job rather than something to hold a phone through; `WebServerService` and the
+         * instrumentation runner are how a full sweep is driven.
          */
         val SUITE = mapOf(
+            "promptSet" to "short_generation_v1",
             "iterations" to "3",
             "warmup" to "1",
             "maxNewTokens" to "32",

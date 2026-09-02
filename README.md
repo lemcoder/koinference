@@ -17,6 +17,12 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
+- `:backends:cera` — [Cera](https://github.com/hyeons-lab/cera) backend, a Rust GGUF engine reached
+  through its published UniFFI Kotlin bindings. JVM and Android; no native build of our own.
+- `:backends:executorch` — [ExecuTorch](https://github.com/pytorch/executorch) backend over PyTorch's
+  published Android AAR. Reads `.pte`; Android only.
+- `:backends:whisper` — [whisper.cpp](https://github.com/ggml-org/whisper.cpp) backend over a C
+  facade. **Audio in, text out**, through the same `GeneratingRuntime` as everything else.
 
 `Koinference` is the entry point. Register the backends the application links, then load a model by
 path — which engine reads a container is the backend's own answer, so switching engines is changing

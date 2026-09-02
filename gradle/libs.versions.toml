@@ -14,10 +14,19 @@ androidMinSdk = "24"
 # claiming devices nobody is shipping to. The CPU is still checked at run time, because API level
 # does not imply dotprod. See docs/performance.md.
 androidMinSdkLlamaCpp = "31"
+# Cera, a Rust GGUF engine reached through its published UniFFI/JNA Kotlin bindings. Two artifacts
+# rather than one because the natives differ: the JVM jar carries desktop libraries, the AAR carries
+# jniLibs and JNA's @aar dispatch.
+cera = "0.4.0"
+# ExecuTorch's Android AAR: PyTorch's on-device runtime, with a Kotlin-facing LlmModule.
+executorch = "1.4.0"
 androidxTest = "1.7.0"
 androidxJunit = "1.3.0"
 
 [libraries]
+cera-ffi-jvm = { module = "com.hyeons-lab:cera-ffi-jvm", version.ref = "cera" }
+cera-ffi-android = { module = "com.hyeons-lab:cera-ffi-android", version.ref = "cera" }
+executorch-android = { module = "org.pytorch:executorch-android", version.ref = "executorch" }
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
