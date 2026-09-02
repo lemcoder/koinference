@@ -22,7 +22,14 @@ internal class LlmModuleSession(
     private val options: ExecuTorchSessionOptions,
 ) : ExecuTorchSession {
 
+    /** The last reply and what the engine said it cost, so [generatedTokens] can answer for it. */
+    private var lastReply: String? = null
+    private var lastTokens: Int? = null
+
     override fun reset() = module.resetContext()
+
+    override fun generatedTokens(text: String): Int? =
+        lastTokens.takeIf { lastReply == text }
 
     /** Drains the same loop [stream] pulls from, so there is one decode path and not two. */
     override suspend fun generate(prompt: String): String =
@@ -30,21 +37,30 @@ internal class LlmModuleSession(
 
     override fun stream(prompt: String): Flow<String> = channelFlow {
         // ExecuTorch delivers one piece per generated token, so counting emissions is how the
-        // budget is enforced — there is no tokenizer here to count with, and seqLen means something
-        // else.
+        // budget is enforced — seqLen means something else entirely.
         var produced = 0
+        val reply = StringBuilder()
 
         val callback = object : LlmCallback {
             override fun onResult(result: String) {
                 if (options.maxOutputTokens in 1..produced) return
                 produced++
+                reply.append(result)
                 trySendBlocking(result)
                 if (options.maxOutputTokens in 1..produced) module.stop()
             }
 
-            // Timings and token counts from the engine, deliberately unused: the harness measures,
-            // so a second set of numbers here would only be comparable with itself.
-            override fun onStats(stats: String) = Unit
+            /**
+             * The engine's own account of the generation, as JSON.
+             *
+             * Its *timings* are ignored — the harness owns the clock, and a second set of numbers
+             * would only be comparable with itself. Its token count is kept, because this binding
+             * exposes no tokenizer and this is the same tokenizer's count of the same reply.
+             */
+            override fun onStats(stats: String) {
+                lastReply = reply.toString()
+                lastTokens = ExecuTorchStats.generatedTokens(stats)
+            }
         }
 
         withContext(Dispatchers.IO) {

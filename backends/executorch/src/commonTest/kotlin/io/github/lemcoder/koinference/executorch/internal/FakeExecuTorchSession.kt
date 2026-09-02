@@ -25,15 +25,23 @@ internal class FakeExecuTorchSession(
 
     override suspend fun generate(prompt: String): String {
         prompts += prompt
-        return reply(prompt)
+        return reply(prompt).also { lastReply = it }
     }
 
     override fun stream(prompt: String): Flow<String> = flow {
         prompts += prompt
         // In pieces: a binding that emitted one chunk would satisfy every other property of
         // streaming while making time to first token equal total latency.
-        reply(prompt).chunked(3).forEach { emit(it) }
+        val text = reply(prompt)
+        lastReply = text
+        text.chunked(3).forEach { emit(it) }
     }
+
+    /** One token per whitespace word of the last reply; the point is that the runtime asks. */
+    override fun generatedTokens(text: String): Int? =
+        text.split(" ").count { it.isNotBlank() }.takeIf { text == lastReply }
+
+    private var lastReply: String? = null
 
     override fun cancel() {
         cancelled = true

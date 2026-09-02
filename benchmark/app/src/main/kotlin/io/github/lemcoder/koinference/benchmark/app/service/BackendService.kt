@@ -83,6 +83,18 @@ abstract class BackendService : Service() {
         override fun runBenchmark(modelPath: String, configJson: String, callback: IBenchmarkCallback) {
             scope.launch {
                 try {
+                    // Before anything loads: engine threads inherit the mask from whoever creates
+                    // them, so applying it afterwards would leave the pool where it already is.
+                    optionsOf(configJson)["affinity"]?.let { requested ->
+                        val mask = if (requested == "big") CpuAffinity.bigCoreMask() else requested
+                        if (mask == null) {
+                            log("affinity: no big cluster found on this device")
+                        } else {
+                            val outcome = CpuAffinity.apply(mask)
+                            log("affinity: ${outcome.detail}")
+                        }
+                    }
+
                     val corpus = PromptCorpus.parse(assets.open(PROMPTS_ASSET).bufferedReader().readText())
                     val config = BenchmarkArguments.toConfig(
                         arguments = optionsOf(configJson) + mapOf(

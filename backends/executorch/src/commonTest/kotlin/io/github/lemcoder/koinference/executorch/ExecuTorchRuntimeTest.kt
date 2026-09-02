@@ -91,6 +91,25 @@ class ExecuTorchRuntimeTest {
     }
 
     @Test
+    fun `counts the tokens the engine reported for its own reply`() = runTest {
+        val runtime = runtime()
+        val reply = runtime.generateResponse("hello").text()
+
+        // The engine's own tokenizer counted this; the harness divides by it.
+        assertEquals(3, runtime.countTokens(reply))
+    }
+
+    @Test
+    fun `refuses to count any other text`() = runTest {
+        val runtime = runtime()
+        runtime.generateResponse("hello")
+
+        // Negative is the harness's "this engine did not say", which is the truth here: ExecuTorch
+        // exposes no tokenizer to count a prompt with.
+        assertTrue(runtime.countTokens("some other text") < 0)
+    }
+
+    @Test
     fun `an unloaded runtime refuses to be used`() = runTest {
         val loader = loader()
         val runtime = loader.load("/m/a.pte")

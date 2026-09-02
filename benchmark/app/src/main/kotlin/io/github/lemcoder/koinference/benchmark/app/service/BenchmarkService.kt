@@ -183,6 +183,9 @@ class BenchmarkService : Service() {
 
         /** Keys handed straight to the harness's own argument parsing. */
         private val HARNESS_OPTIONS = listOf(
+            // Ours, not the harness's: it ignores keys it does not know, and the engine service
+            // reads this one before it loads anything.
+            "affinity",
             "promptSet", "iterations", "warmup", "maxNewTokens", "maxContextTokens",
             "threads", "temperature", "topK", "topP", "seed", "modelId", "quantization", "runId",
         )

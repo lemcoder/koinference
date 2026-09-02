@@ -436,6 +436,29 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
 - **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
   in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
 
+## Process affinity is per engine, not a rule
+
+`CpuAffinity` in the benchmark app pins every thread of a process from Java — no JNI. Two facts
+worth keeping:
+
+- **`taskset -ap <pid>` fails on Android**: the spawned child cannot read `/proc/<pid>/task/` of
+  another process under `hidepid`, same uid or not, and says "No such file or directory".
+  `/proc/self/task` is readable, so enumerate there and `taskset -p` each TID. New threads inherit
+  from their creator, so pin before the engine builds its pool.
+- **Asking for the big cluster gets less than asked**: cpus 4-8 requested, `4-7` granted — an app's
+  cpuset excludes the X3 prime core.
+
+**Measured three rounds each way, it helps one engine and ruins another**: ExecuTorch 3.6 to 8.4
+tok/s, Cera 11.4 down to 3.3. Both size their pools for nine CPUs and then contend on four;
+ExecuTorch was losing more to little-core migration than it loses to contention, and Cera was not.
+So it is opt-in and off by default. llama.cpp needs none of this — it takes a real mask through its
+facade, which is better than pinning a whole process.
+
+**ExecuTorch exposes no thread knob and cannot be made to.** `libexecutorch.so` exports six symbols:
+`JNI_OnLoad` and five `AsrModule` entry points. The threadpool is hidden, the AAR ships no headers or
+static libs, and the release carries only a CMSIS pack — so a JNI shim of ours has nothing to bind
+to, by `dlsym` or by linking. Getting it would mean building ExecuTorch from source.
+
 ## Performance on device
 
 `docs/performance.md` has the measurements. Two things that cost time to find:

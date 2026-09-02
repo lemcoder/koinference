@@ -249,6 +249,45 @@ here has separated it from kernel maturity, and Cera 0.4.0 is an early release.
 Nothing about this makes the backend wrong; it makes the number worth re-taking against a later Cera
 and, if the bindings ever expose one, a thread count.
 
+## Pinning a process, for engines with no thread knob
+
+llama.cpp takes a CPU mask through its facade, and that is where its 6.5x came from. Cera and
+ExecuTorch expose no threading control at all: Cera's bindings have no such field, and ExecuTorch's
+`libexecutorch.so` exports six symbols — `JNI_OnLoad` and five `AsrModule` entry points — with the
+threadpool hidden, so there is nothing for a shim to bind to.
+
+What is still reachable is the *process*. `CpuAffinity` in the benchmark app pins every thread to the
+fast clusters, from Java, with no native code:
+
+- `taskset -ap <pid>` **does not work on Android.** The child process cannot read
+  `/proc/<pid>/task/` of another process under `hidepid`, even at the same uid, and reports "No such
+  file or directory" — which reads like the process is gone rather than unreadable.
+- `/proc/self/task` *is* readable, so it enumerates there and pins each TID with `taskset -p`. That
+  needs no `/proc` access from the child at all. Threads created later inherit from their creator, so
+  pinning before the engine builds its pool covers the pool.
+- The mask is read from sysfs, not hardcoded. Asking for cpus 4-8 on a Pixel 8a yields `4-7`: **the
+  X3 prime core is refused**, because the app's cpuset excludes it.
+
+**It helps one engine and ruins the other.** Three rounds, order flipped each round, 45 s of cooldown
+before every run, `short_generation_v1`:
+
+| engine | affinity off | affinity on | ttft off → on |
+|---|---|---|---|
+| ExecuTorch (stories110M) | 3.6 tok/s | **8.4** | 358 → 88 ms |
+| Cera (LFM2.5-1.2B Q4_0) | **11.4** tok/s | 3.3 | 2139 → 1205 ms |
+
+Per round, with no crossover: ExecuTorch 3.3 / 3.9 / 3.6 against 8.5 / 8.7 / 8.1; Cera 11.9 / 10.9 /
+11.4 against 3.4 / 3.0 / 3.3.
+
+Prefill improves for both — it is compute-bound and likes the fast cores. Decode splits, and the
+mechanism is oversubscription: both engines size their pools for a nine-CPU machine and then contend
+on four. ExecuTorch was losing more than that to little-core migration, so it wins; Cera was not, so
+it loses. Pinning also collapses ExecuTorch's spread — 3.3-7.9 unpinned against 8.1-8.7 pinned — the
+same steadying llama.cpp got.
+
+**So it is opt-in per engine and off by default** (`--es affinity big`). A process-wide pin is not a
+free win, and "pin to the big cluster" is not advice that survives contact with a second engine.
+
 ## GPU offload
 
 Off by default. Turn it on at build time and select it at run time:

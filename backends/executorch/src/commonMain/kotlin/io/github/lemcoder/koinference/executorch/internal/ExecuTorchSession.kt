@@ -25,6 +25,16 @@ internal interface ExecuTorchSession {
 
     fun stream(prompt: String): Flow<String>
 
+    /**
+     * How many tokens the engine reports it produced for [text], or null if that was not the reply
+     * it last produced.
+     *
+     * ExecuTorch exposes no tokenizer to count arbitrary text with — but it does report what its own
+     * tokenizer produced, through `LlmCallback.onStats`. That is the same quantity the harness wants
+     * and the only text it ever asks about.
+     */
+    fun generatedTokens(text: String): Int?
+
     /** Ends an in-flight generation. The module survives; the next call starts a fresh one. */
     fun cancel()
 

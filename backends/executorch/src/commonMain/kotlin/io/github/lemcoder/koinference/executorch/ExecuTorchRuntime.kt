@@ -104,6 +104,22 @@ class ExecuTorchRuntime internal constructor(
         }
     }
 
+    /**
+     * Tokens the engine reported for the reply it last produced; -1 for any other text.
+     *
+     * Narrower than the contract's "tokens in [text]", and deliberately so. ExecuTorch's binding
+     * exposes no tokenizer to count arbitrary text with — it reports, through `onStats`, what its
+     * own tokenizer produced for the generation just finished. That is the same quantity the other
+     * backends compute by re-tokenizing a reply, so a `tok/s` column stays comparable; it simply
+     * cannot be asked about a prompt.
+     *
+     * -1 rather than an exception because the harness already reads a negative count as "this engine
+     * did not say", which is exactly what it means here.
+     */
+    override suspend fun countTokens(text: String): Int = guard.whileOpen {
+        session().generatedTokens(text) ?: -1
+    }
+
     internal suspend fun close() = guard.close {
         closeSession()
         model.close()
