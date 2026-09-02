@@ -49,14 +49,36 @@ class WhisperTranscriptionTest {
         runBlocking {
             val koi = Koinference(Whisper)
             try {
-                val segments = koi.load(modelPath)
-                    .streamResponse(listOf(PromptPart.AudioFile(wavPath)))
-                    .toList()
-                    .filterIsInstance<ResponsePart.Text>()
-                    .map { it.text }
+                val started = System.nanoTime()
+                val arrivals = mutableListOf<Double>()
+                val segments = mutableListOf<String>()
+
+                koi.load(modelPath).streamResponse(listOf(PromptPart.AudioFile(wavPath)))
+                    .collect { part ->
+                        if (part is ResponsePart.Text) {
+                            arrivals += (System.nanoTime() - started) / 1e6
+                            segments += part.text
+                        }
+                    }
+
+                val total = (System.nanoTime() - started) / 1e6
+                println(
+                    "whisper streamed ${segments.size} segments over ${total.toInt()}ms; " +
+                        "arrivals ${arrivals.map { it.toInt() }}",
+                )
 
                 assertTrue(segments.isNotEmpty(), "expected at least one segment")
-                println("whisper streamed ${segments.size} segments: ${segments.joinToString("|") { it.trim() }}")
+                // The point of the queue in the facade: a segment reaches the caller while whisper
+                // is still working on the rest. Arriving together would satisfy "more than one
+                // chunk" while making time to first segment equal total latency.
+                if (segments.size > 1) {
+                    val first = arrivals.first()
+                    assertTrue(
+                        first < total * 0.9,
+                        "first segment at ${first.toInt()}ms of ${total.toInt()}ms — that is a " +
+                            "buffer being flushed, not a stream",
+                    )
+                }
             } finally {
                 koi.unloadAll()
             }

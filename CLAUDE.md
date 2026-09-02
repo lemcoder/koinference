@@ -433,6 +433,17 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
   what the rest of this repository does.
 - **An opaque `typedef struct X X;` lands under `cnames.structs`** for cinterop, not in the interop's
   own package — "unresolved reference" for a type plainly in the header.
+- **The `.def` needs `headerFilter`, or cinterop walks into the system headers.** Without it the
+  generator emitted a ninth bridge for `__DARWIN_NULL`, which compiled on macOS and failed against
+  the NDK — and worse, would have made the bridge *numbering* differ per platform, which is an ABI.
+  Both other backends had the line; this one did not until it broke.
+- **whisper streams by 30-second window, not by segment.** All the segments of a window arrive when
+  that window finishes decoding: on a Pixel 8a, 12 segments from a minute of audio arrive with the
+  first at 5.2s of 13.4s. A clip shorter than one window arrives as a single burst however well the
+  facade streams, so an incrementality test needs more than 30 seconds of audio to mean anything.
+- **`toList()` before timestamping measures nothing.** The first device test recorded "first segment
+  at 13799ms, total 13799ms" and looked like broken streaming; it was collecting the whole flow and
+  then stamping arrivals. Use `collect`.
 - **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
   in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
 
