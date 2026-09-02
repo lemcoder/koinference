@@ -31,6 +31,16 @@ class BackendConnection(
     private var service: IBackendService? = null
     private var connection: ServiceConnection? = null
 
+    /**
+     * How to fail each call that is waiting on the engine.
+     *
+     * An engine process can die under it — Android kills services on a memory-pressure event, and a
+     * 1B model at 5 GB of PSS invites exactly that. The calls are oneway with a callback, so nothing
+     * comes back from a dead process and the caller waits for a reply that cannot arrive: the app
+     * looked hung for as long as anyone was willing to watch it. These are resumed instead.
+     */
+    private val pending = java.util.Collections.synchronizedList(mutableListOf<(Throwable) -> Unit>())
+
     /** Binds, and suspends until the service is there. Idempotent. */
     suspend fun connect(): IBackendService = service ?: suspendCancellableCoroutine { continuation ->
         val serviceConnection = object : ServiceConnection {
@@ -43,6 +53,7 @@ class BackendConnection(
             override fun onServiceDisconnected(name: ComponentName) {
                 // The engine process died; the next call binds again rather than using a stale proxy.
                 service = null
+                failPending("the ${serviceClass.simpleName} process died before it answered")
             }
         }
         connection = serviceConnection
@@ -67,6 +78,27 @@ class BackendConnection(
     fun stopService() {
         disconnect()
         context.stopService(Intent(context, serviceClass))
+    }
+
+    /**
+     * Fails everything waiting, once.
+     *
+     * The message names the process rather than the call, because the cause is almost never the
+     * call: `dumpsys` and logcat will show "Rescheduling restart of crashed service ... for
+     * mem-pressure-event", and a caller reading only "generation failed" would go looking in the
+     * wrong place.
+     */
+    private fun failPending(reason: String) {
+        val failures = synchronized(pending) { pending.toList().also { pending.clear() } }
+        failures.forEach { fail -> fail(BackendCallFailed(reason)) }
+    }
+
+    private fun <T> registerPending(continuation: kotlinx.coroutines.CancellableContinuation<T>) {
+        val fail: (Throwable) -> Unit = { failure ->
+            if (continuation.isActive) continuation.resumeWithException(failure)
+        }
+        synchronized(pending) { pending.add(fail) }
+        continuation.invokeOnCancellation { synchronized(pending) { pending.remove(fail) } }
     }
 
     fun disconnect() {
@@ -97,6 +129,7 @@ class BackendConnection(
     ): String {
         val service = connect()
         return suspendCancellableCoroutine { continuation ->
+        registerPending(continuation)
         val callback = object : IBenchmarkCallback.Stub() {
             override fun onProgress(message: String) = onProgress(message)
 
@@ -115,6 +148,7 @@ class BackendConnection(
     suspend fun load(modelPath: String, options: Map<String, String>): String {
         val service = connect()
         return suspendCancellableCoroutine { continuation ->
+            registerPending(continuation)
             service.load(modelPath, options.toJsonObject(), statusCallback(continuation::resume) {
                 continuation.resumeWithException(BackendCallFailed(it))
             })

@@ -436,6 +436,28 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
 - **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
   in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
 
+## An engine process can be killed under you
+
+Android kills services on a **global** memory-pressure event, and a 1B GGUF whose peak PSS is ~5 GB
+invites it: logcat shows `Rescheduling restart of crashed service … LlamaCppService in 0ms for
+mem-pressure-event`, alongside the same line for Google's own services. Android then restarts the
+service, so what is left is a *fresh, idle* process — 68 MB, no engine threads, the model not in
+`/proc/<pid>/maps` — which reads like a hang inside the loader rather than a kill.
+
+Every call across the seam is oneway with a callback, so a dead process sends nothing back and the
+caller waits for a reply that cannot arrive. `BackendConnection` now fails everything pending when
+`onServiceDisconnected` fires, naming the process, because "generation failed" would send the reader
+looking in the wrong place.
+
+Two things this cost, worth remembering:
+
+- **logcat rotates fast on this device** — WifiHAL alone floods it — so evidence of a failure is gone
+  minutes later. Capture to a file with a tag filter (`adb logcat -v time koinference-benchmark:I
+  "*:S" > file`) before reproducing, rather than reading `logcat -d` afterwards.
+- **The same model loads fine through the instrumentation runner**, which is what proves the engine
+  and the file are not at fault. When the app path and the instrumentation path disagree, the app
+  path is the suspect.
+
 ## Process affinity is per engine, not a rule
 
 `CpuAffinity` in the benchmark app pins every thread of a process from Java — no JNI. Two facts

@@ -223,6 +223,27 @@ out of the b10516 tree rather than guessed:
 Worth doing to *lower the floor* — an `armv8.0` tier would run on hardware that SIGILLs today. Not
 worth doing for speed: the table above is what the higher tiers are worth on this device.
 
+## Four engines, one set of weights
+
+Llama-3.2-1B-Instruct on a Pixel 8a, `short_generation_v1`, one engine per instrumentation run —
+each engine reading its own 4-bit build of the same model:
+
+| engine | build | tok/s | ttft | peak PSS |
+|---|---|---|---|---|
+| ExecuTorch | SpinQuant INT4 `.pte` | **26.7** | **254 ms** | 1232 MB |
+| llama.cpp | Q4_K_M GGUF | 25.9 | 2208 ms | 4961 MB |
+| Cera | Q4_K_M GGUF | 10.8 | 3058 ms | 916 MB |
+
+**ExecuTorch's earlier numbers were about the model, not the engine.** Measured on stories110M — a
+110M-parameter *fp32* export — it looked like 3.6 tok/s and an engine with a threading problem. On a
+properly quantized 1B export it edges llama.cpp on throughput, is nine times faster to first token,
+and holds a quarter of the memory. The lesson is the older one from this file, in a new place: a
+benchmark of a badly chosen artifact measures the artifact.
+
+Not identical arithmetic: SpinQuant INT4 against Q4_K_M is each engine's own 4-bit path, and
+llama.cpp's peak PSS is partly mmap accounting rather than demand. The weights and the architecture
+are the same, which is what the earlier comparison could not say at all.
+
 ## Cera against llama.cpp, same weights
 
 Pixel 8a, `short_generation_v1`, 32-token budget, one warmup discarded and three measured, all three
