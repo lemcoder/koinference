@@ -201,7 +201,8 @@ def l2_normalise(vec: list[float]) -> list[float]:
 
 
 def embed_all(endpoint: Endpoint, ids: list[str], texts: list[str], *, batch_size: int,
-              timeout: float, cache: pathlib.Path | None, tag: str) -> dict[str, list[float]]:
+              timeout: float, cache: pathlib.Path | None, tag: str,
+              max_chars: int = 0) -> dict[str, list[float]]:
     """Embed every text, batched, L2-normalised, cached by (tag, endpoint, id-set) to disk.
 
     The finished cache is keyed on the exact id order so a changed corpus never silently reuses
@@ -235,7 +236,11 @@ def embed_all(endpoint: Endpoint, ids: list[str], texts: list[str], *, batch_siz
             chunk = [(did, txt) for did, txt in zip(ids[i:i + batch_size], texts[i:i + batch_size])
                      if did not in result]
             if chunk:
-                vecs = embed_batch(endpoint, [t for _, t in chunk], timeout)
+                # bge-class encoders cap at 512 tokens; a llama-server embedding endpoint 500s on a
+                # sequence longer than its context rather than truncating, so cap client-side. A
+                # generous default (0 = off) leaves long-context APIs like text-embedding-3 alone.
+                payload_texts = [t[:max_chars] if max_chars else t for _, t in chunk]
+                vecs = embed_batch(endpoint, payload_texts, timeout)
                 for (did, _), vec in zip(chunk, vecs):
                     unit = l2_normalise(vec)
                     result[did] = unit
@@ -365,15 +370,15 @@ def score_query(ranked: list[str], rels: dict[str, int]) -> dict[str, float]:
 
 
 def evaluate(endpoint: Endpoint, dataset: Dataset, *, batch_size: int, timeout: float,
-             cache: pathlib.Path | None) -> dict:
+             cache: pathlib.Path | None, max_chars: int = 0) -> dict:
     corpus_ids = list(dataset.corpus)
     corpus_vecs = embed_all(endpoint, corpus_ids, [dataset.corpus[d] for d in corpus_ids],
                             batch_size=batch_size, timeout=timeout, cache=cache,
-                            tag=f"{dataset.name}.corpus")
+                            tag=f"{dataset.name}.corpus", max_chars=max_chars)
     query_ids = list(dataset.queries)
     query_vecs = embed_all(endpoint, query_ids, [dataset.queries[q] for q in query_ids],
                            batch_size=batch_size, timeout=timeout, cache=cache,
-                           tag=f"{dataset.name}.queries")
+                           tag=f"{dataset.name}.queries", max_chars=max_chars)
 
     dim = len(next(iter(corpus_vecs.values())))
     totals: dict[str, float] = {}
@@ -438,6 +443,10 @@ def main() -> None:
                         help="cap corpus size (keeps every judged doc); use it to keep big "
                              "datasets phone-sized")
     parser.add_argument("--split", default="test")
+    parser.add_argument("--max-input-chars", type=int, default=0,
+                        help="truncate each input to this many chars before embedding "
+                             "(0 = off); use ~2000 for a bge llama-server, which 500s on "
+                             "sequences over its 512-token context")
     parser.add_argument("--out", type=pathlib.Path, default=None,
                         help="write the full results JSON to this path (a .json file)")
     args = parser.parse_args()
@@ -452,7 +461,7 @@ def main() -> None:
         print(f"  corpus {len(dataset.corpus)}, queries {len(dataset.queries)}", file=sys.stderr)
         for endpoint in endpoints:
             result = evaluate(endpoint, dataset, batch_size=args.batch_size,
-                              timeout=args.timeout, cache=cache)
+                              timeout=args.timeout, cache=cache, max_chars=args.max_input_chars)
             results.append(result)
 
     print_table(results)

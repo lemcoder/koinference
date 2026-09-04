@@ -156,7 +156,7 @@ def rag_prompt(question: str, passages: list[str]) -> str:
 
 def run(embed_endpoints: list[embed_eval.Endpoint], chat_endpoint: embed_eval.Endpoint,
         corpus: dict[str, str], qas: list[dict], *, top_k: int, batch_size: int, timeout: float,
-        cache: pathlib.Path | None) -> list[dict]:
+        cache: pathlib.Path | None, max_chars: int = 0) -> list[dict]:
     corpus_ids = list(corpus)
     question_texts = [qa["question"] for qa in qas]
 
@@ -181,10 +181,12 @@ def run(embed_endpoints: list[embed_eval.Endpoint], chat_endpoint: embed_eval.En
         print(f"  rag[{embed_endpoint.label}]: embedding corpus + questions", file=sys.stderr)
         corpus_vecs = embed_eval.embed_all(
             embed_endpoint, corpus_ids, [corpus[d] for d in corpus_ids],
-            batch_size=batch_size, timeout=timeout, cache=cache, tag="squad.corpus")
+            batch_size=batch_size, timeout=timeout, cache=cache, tag="squad.corpus",
+            max_chars=max_chars)
         query_vecs = embed_eval.embed_all(
             embed_endpoint, [qa["id"] for qa in qas], question_texts,
-            batch_size=batch_size, timeout=timeout, cache=cache, tag="squad.queries")
+            batch_size=batch_size, timeout=timeout, cache=cache, tag="squad.queries",
+            max_chars=max_chars)
 
         em = f1 = 0.0
         hits = 0
@@ -235,6 +237,9 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=200, help="number of questions (SQuAD dev)")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--max-input-chars", type=int, default=0,
+                        help="truncate passages/questions before embedding (0 = off); "
+                             "~2000 for a bge llama-server embedding endpoint")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--out", type=pathlib.Path, default=None)
     args = parser.parse_args()
@@ -247,7 +252,8 @@ def main() -> None:
     print(f"  corpus {len(corpus)} passages, {len(qas)} answerable questions", file=sys.stderr)
 
     results = run(embed_endpoints, chat_endpoint, corpus, qas,
-                  top_k=args.top_k, batch_size=args.batch_size, timeout=args.timeout, cache=cache)
+                  top_k=args.top_k, batch_size=args.batch_size, timeout=args.timeout, cache=cache,
+                  max_chars=args.max_input_chars)
     print_table(results)
 
     if args.out:

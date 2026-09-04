@@ -17,7 +17,56 @@ variable; leave it empty for the phone, which has no auth). Stdlib only — no `
 `datasets` or `beir`; datasets download as plain files and vector maths is pure Python, which is
 fine at BEIR-subset sizes because the run is dominated by embedding over HTTP.
 
-## Serving the phone
+## Two ways to serve the "local" side
+
+The harnesses only speak the OpenAI-compatible HTTP API — they never drive the Android app. So the
+local model is whatever OpenAI-compatible server you point them at:
+
+- **`llama-server` on the desktop (recommended for quality).** RAG accuracy depends only on the
+  model + quantisation, not the hardware, so the same GGUF behind `llama-server` gives the same
+  answers as the phone — with clean endpoints, no app-service juggling, and no one-model limit.
+  Use this to compare a local model against a frontier one.
+- **The phone (for on-device latency).** Only needed when the *hardware* is the thing under test;
+  for answer accuracy it adds nothing over `llama-server` and costs the model-swap dance below.
+
+### llama-server (no app, no device, no key for the local half)
+
+```bash
+# chat model on 8081, embedding model on 8082 -- two OpenAI-compatible servers
+llama-server -m LFM2.5-1.2B-Instruct-Q4_0.gguf   --host 127.0.0.1 --port 8081 -c 4096 --no-webui &
+llama-server -m bge-small-en-v1.5-q8_0.gguf --embedding --pooling cls \
+             --host 127.0.0.1 --port 8082 -b 8192 -ub 8192 --no-webui &
+
+python3 benchmark/analysis/rag_eval.py \
+  --embed-endpoint "local-bge|http://127.0.0.1:8082/v1|bge-small|" \
+  --chat-endpoint  "local-lfm2|http://127.0.0.1:8081/v1|lfm2|" \
+  --limit 300 --top-k 5 --max-input-chars 2000
+```
+
+`-b 8192 -ub 8192` on the embedding server: `llama-server` embeds a whole request in one forward
+pass bounded by `n_batch` (default 2048) and 500s when a batch of passages exceeds it.
+`--max-input-chars 2000` caps each input to bge's 512-token window, which `llama-server` does not
+truncate on its own (a longer sequence than its context is a 500). Neither flag is needed for
+text-embedding-3, which batches server-side and takes 8k tokens.
+
+**Local model + RAG vs frontier**, one fixed embedder so only the chat model varies:
+
+```bash
+export OPENAI_API_KEY=sk-...
+# frontier chat, local model chat -- run twice, same --embed-endpoint, compare the tables
+for CHAT in "local-lfm2|http://127.0.0.1:8081/v1|lfm2|" \
+            "gpt|https://api.openai.com/v1|gpt-4o-mini|OPENAI_API_KEY"; do
+  python3 benchmark/analysis/rag_eval.py \
+    --embed-endpoint "oai-small|https://api.openai.com/v1|text-embedding-3-small|OPENAI_API_KEY" \
+    --chat-endpoint "$CHAT" --limit 300 --top-k 5
+done
+```
+
+The local model's closed-book row is the "small model alone" baseline; its rag row against the
+frontier model's closed-book row is the headline — does on-device RAG match a frontier model's cold
+knowledge.
+
+## Serving the phone (on-device latency)
 
 The phone's Ktor server (`benchmark:app`, `WebServerService`) serves `/v1/embeddings` **and**
 `/v1/chat/completions`, but it holds **one** model at a time. So:
