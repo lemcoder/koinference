@@ -75,10 +75,17 @@ if (KOI_VULKAN)
         file(GLOB _koi_ndk_glslc "${CMAKE_ANDROID_NDK}/shader-tools/*/glslc")
         list(GET _koi_ndk_glslc 0 _koi_glslc)
         set(Vulkan_GLSLC_EXECUTABLE "${_koi_glslc}" CACHE FILEPATH "" FORCE)
-        # Globbed rather than composed from a triple variable: which one the toolchain file sets
-        # has moved between NDK and CMake versions, and there is exactly one match per ABI.
+        # The sysroot holds one lib dir per ABI (aarch64-linux-android, x86_64-linux-android, …),
+        # so the glob has to name the current ABI's arch dir — a bare `*` matches every ABI and
+        # `list(GET 0)` picks aarch64 alphabetically, which links the arm64 libvulkan.so into an
+        # x86_64 build: "incompatible with elf_x86_64". The arch dir is the toolchain triple;
+        # which variable carries it has moved between NDK/CMake versions, so try both.
+        set(_koi_vk_arch "${CMAKE_LIBRARY_ARCHITECTURE}")
+        if (_koi_vk_arch STREQUAL "")
+            set(_koi_vk_arch "${ANDROID_LLVM_TRIPLE}")
+        endif()
         file(GLOB _koi_vulkan_lib
-             "${CMAKE_SYSROOT}/usr/lib/*/${KOI_VULKAN_API}/libvulkan.so")
+             "${CMAKE_SYSROOT}/usr/lib/${_koi_vk_arch}/${KOI_VULKAN_API}/libvulkan.so")
         list(LENGTH _koi_vulkan_lib _koi_vulkan_lib_count)
         if (_koi_vulkan_lib_count EQUAL 0)
             message(FATAL_ERROR
@@ -203,6 +210,13 @@ endif()
 
 target_link_libraries(koinference-facade
     PUBLIC llama ${KOI_COMMON_TARGET})
+
+# Route llama.cpp/ggml diagnostics to logcat (see koi_model_load). Without this the seam discards
+# them, which hid ggml-vulkan finding no device and silently falling back to the CPU — a GPU run
+# that was CPU all along, invisible until the GPU power rail was measured.
+if (ANDROID)
+    target_link_libraries(koinference-facade PUBLIC log)
+endif()
 
 # ── JNI stub ─────────────────────────────────────────────────────────────────
 # The Konan plugin generates the bridge sources from facade/koinference_facade.h
