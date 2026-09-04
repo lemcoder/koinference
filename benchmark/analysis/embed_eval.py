@@ -204,9 +204,15 @@ def embed_all(endpoint: Endpoint, ids: list[str], texts: list[str], *, batch_siz
               timeout: float, cache: pathlib.Path | None, tag: str) -> dict[str, list[float]]:
     """Embed every text, batched, L2-normalised, cached by (tag, endpoint, id-set) to disk.
 
-    The cache is keyed on the exact id order so a changed corpus never silently reuses stale
-    vectors; a mismatch just re-embeds. Vectors are stored raw little-endian float32 next to a
+    The finished cache is keyed on the exact id order so a changed corpus never silently reuses
+    stale vectors; a mismatch just re-embeds. Vectors are stored raw little-endian float32 next to a
     JSON id list, because 5k*384 floats as JSON is 40 MB and as f32 is 7.5.
+
+    Progress is checkpointed per batch to a `.partial.jsonl` sidecar, because a phone under memory
+    pressure kills its engine mid-run and the whole USB link can drop -- both happened here, and
+    without a checkpoint 40 minutes of embedding is lost. On restart the already-embedded ids are
+    loaded from the sidecar and only the rest are sent; when every id is present the canonical cache
+    is written and the sidecar removed.
     """
     if cache is not None:
         vecs = _cache_load(cache, tag, endpoint, ids)
@@ -214,20 +220,40 @@ def embed_all(endpoint: Endpoint, ids: list[str], texts: list[str], *, batch_siz
             print(f"    [{endpoint.label}] {tag}: {len(ids)} cached", file=sys.stderr)
             return vecs
 
+    wanted = set(ids)
     result: dict[str, list[float]] = {}
+    if cache is not None:
+        result = {k: v for k, v in _partial_load(cache, tag, endpoint).items() if k in wanted}
+        if result:
+            print(f"    [{endpoint.label}] {tag}: resuming, {len(result)}/{len(ids)} done",
+                  file=sys.stderr)
+
+    partial = None if cache is None else _partial_open(cache, tag, endpoint)
     start = time.perf_counter()
-    for i in range(0, len(texts), batch_size):
-        chunk_ids = ids[i:i + batch_size]
-        chunk_txt = texts[i:i + batch_size]
-        vecs = embed_batch(endpoint, chunk_txt, timeout)
-        for did, vec in zip(chunk_ids, vecs):
-            result[did] = l2_normalise(vec)
-        done = min(i + batch_size, len(texts))
-        print(f"\r    [{endpoint.label}] {tag}: {done}/{len(texts)} "
-              f"({done / (time.perf_counter() - start):.0f}/s)", end="", file=sys.stderr)
-    print(file=sys.stderr)
+    try:
+        for i in range(0, len(texts), batch_size):
+            chunk = [(did, txt) for did, txt in zip(ids[i:i + batch_size], texts[i:i + batch_size])
+                     if did not in result]
+            if chunk:
+                vecs = embed_batch(endpoint, [t for _, t in chunk], timeout)
+                for (did, _), vec in zip(chunk, vecs):
+                    unit = l2_normalise(vec)
+                    result[did] = unit
+                    if partial is not None:
+                        _partial_append(partial, did, unit)
+                if partial is not None:
+                    partial.flush()
+            done = min(i + batch_size, len(texts))
+            print(f"\r    [{endpoint.label}] {tag}: {done}/{len(texts)} "
+                  f"({done / (time.perf_counter() - start):.0f}/s)", end="", file=sys.stderr)
+        print(file=sys.stderr)
+    finally:
+        if partial is not None:
+            partial.close()
+
     if cache is not None:
         _cache_store(cache, tag, endpoint, ids, result)
+        _partial_paths(cache, tag, endpoint).unlink(missing_ok=True)
     return result
 
 
@@ -259,6 +285,43 @@ def _cache_store(cache: pathlib.Path, tag: str, endpoint: Endpoint, ids: list[st
     for did in ids:
         flat += struct.pack(f"<{len(vecs[did])}f", *vecs[did])
     vec_path.write_bytes(bytes(flat))
+
+
+# Resume sidecar: one line per embedded id, `id<TAB>base64(le-float32)`. Appended per batch and
+# flushed, so a kill loses at most the batch in flight. A truncated last line (process killed
+# mid-write) is dropped on load; the id just re-embeds.
+
+def _partial_paths(cache: pathlib.Path, tag: str, endpoint: Endpoint) -> pathlib.Path:
+    id_path, _ = _cache_paths(cache, tag, endpoint)
+    return id_path.with_suffix(".partial.jsonl")
+
+
+def _partial_load(cache: pathlib.Path, tag: str, endpoint: Endpoint) -> dict[str, list[float]]:
+    path = _partial_paths(cache, tag, endpoint)
+    if not path.exists():
+        return {}
+    out: dict[str, list[float]] = {}
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if "\t" not in line or not line.endswith("\n"):
+                continue  # truncated final line from a killed process
+            did, b64 = line.rstrip("\n").split("\t", 1)
+            try:
+                raw = base64.b64decode(b64)
+                out[did] = list(struct.unpack(f"<{len(raw) // 4}f", raw))
+            except (ValueError, struct.error):
+                continue
+    return out
+
+
+def _partial_open(cache: pathlib.Path, tag: str, endpoint: Endpoint):
+    cache.mkdir(parents=True, exist_ok=True)
+    return _partial_paths(cache, tag, endpoint).open("a", encoding="utf-8")
+
+
+def _partial_append(handle, did: str, vec: list[float]) -> None:
+    b64 = base64.b64encode(struct.pack(f"<{len(vec)}f", *vec)).decode("ascii")
+    handle.write(f"{did}\t{b64}\n")
 
 
 # ── ranking + metrics ────────────────────────────────────────────────────────
