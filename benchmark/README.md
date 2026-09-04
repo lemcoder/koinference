@@ -306,6 +306,7 @@ adb shell am start-foreground-service \
 |---|---|
 | `GET /v1/models` | the loaded model, with its engine and path |
 | `POST /v1/chat/completions` | with `"stream": true` for SSE, without it for one JSON reply |
+| `POST /v1/embeddings` | vectors from an ONNX encoder, for RAG work |
 | `GET /healthz` | liveness |
 | `GET /koinference/device` | the device as the harness's own probe reports it |
 | `GET /koinference/memory` | PSS/native/Java heap **of the engine's process**, asked for over the binder |
@@ -318,7 +319,46 @@ curl http://<device-ip>:8080/v1/chat/completions \
   -d '{"model":"LFM2.5-1.2B-Instruct-Q4_0","messages":[{"role":"user","content":"Say hello."}],"stream":true}'
 ```
 
-`usage` is deliberately absent from responses. Filling it in would mean counting SSE events and
+### Embeddings, for RAG
+
+Serve an ONNX encoder instead of a chat model and the same server answers OpenAI's embeddings
+endpoint, so a retrieval harness written against OpenAI or OpenRouter runs against a phone by
+changing `base_url` and nothing else:
+
+```bash
+adb push bge-small-en-v1.5/onnx/model.onnx /data/local/tmp/koinference/bge-small.onnx
+adb push bge-small-en-v1.5/vocab.txt       /data/local/tmp/koinference/
+adb push bge-small-en-v1.5/1_Pooling/config.json /data/local/tmp/koinference/1_Pooling/
+
+adb shell am start-foreground-service \
+    -n io.github.lemcoder.koinference.benchmark.app/.net.WebServerService \
+    --es backend ONNX --es modelPath /data/local/tmp/koinference/bge-small.onnx
+```
+
+```bash
+curl http://<device-ip>:8080/v1/embeddings -H 'Content-Type: application/json' \
+  -d '{"input": ["a dog runs in the park", "quantum chromodynamics"]}'
+```
+
+The graph carries no vocabulary and no pooling mode, so both are found beside it — `vocab.txt`, and
+`1_Pooling/config.json` for whether the model pools the `[CLS]` position (BGE) or the mean (most
+sentence-transformers models). Push them or the load fails naming what it looked for.
+
+Four things about the response are worth knowing, because each is a way a client breaks:
+
+- **`encoding_format: base64` is honoured**, and it matters: the official Python client asks for
+  base64 by default when numpy is installed, so a float-only server fails against the very clients
+  this is for.
+- **`usage` counts with the model's own vocabulary**, not characters, so it is comparable with
+  OpenAI's.
+- **Vectors are L2-normalised**, so a dot product is a cosine.
+- **`dimensions` is refused rather than approximated.** OpenAI's newer models truncate; ours cannot,
+  and answering with a differently-sized vector would be worse than an error.
+
+Asking an embedding model for a chat completion — or the reverse — is a 400 naming the mismatch,
+not a closed connection.
+
+`usage` is deliberately absent from chat responses. Filling it in would mean counting SSE events and
 calling them tokens, which is the one thing this project keeps refusing to do.
 
 **The server binds `0.0.0.0` with no authentication.** Anyone who can reach the device can drive

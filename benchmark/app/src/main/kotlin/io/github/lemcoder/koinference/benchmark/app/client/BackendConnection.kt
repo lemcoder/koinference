@@ -114,6 +114,30 @@ class BackendConnection(
 
     suspend fun modelPaths(): List<String> = connect().modelPaths()
 
+    /** Vectors for [texts]: flattened, their width, and the tokens they cost. */
+    suspend fun embed(texts: List<String>): Triple<FloatArray, Int, Int> {
+        val service = connect()
+        return suspendCancellableCoroutine { continuation ->
+            registerPending(continuation)
+            service.embed(
+                texts.toTypedArray(),
+                object : io.github.lemcoder.koinference.benchmark.app.IEmbeddingCallback.Stub() {
+                    override fun onEmbeddings(flat: FloatArray, dimensions: Int, promptTokens: Int) {
+                        if (continuation.isActive) {
+                            continuation.resume(Triple(flat, dimensions, promptTokens))
+                        }
+                    }
+
+                    override fun onFailed(message: String) {
+                        if (continuation.isActive) {
+                            continuation.resumeWithException(BackendCallFailed(message))
+                        }
+                    }
+                },
+            )
+        }
+    }
+
     /** The engine process's memory, as JSON. Read there, where a model is what the numbers mean. */
     suspend fun processMemory(): String = connect().processMemory()
 

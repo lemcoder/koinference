@@ -1,6 +1,7 @@
 package io.github.lemcoder.koinference.benchmark.app;
 
 import io.github.lemcoder.koinference.benchmark.app.IBenchmarkCallback;
+import io.github.lemcoder.koinference.benchmark.app.IEmbeddingCallback;
 import io.github.lemcoder.koinference.benchmark.app.IGenerationCallback;
 import io.github.lemcoder.koinference.benchmark.app.IStatusCallback;
 
@@ -45,6 +46,14 @@ interface IBackendService {
 
     /** Generate from the loaded model. Fails if nothing is loaded. */
     oneway void generate(String requestJson, IGenerationCallback callback);
+
+    /**
+     * Embeds [texts] with the loaded model.
+     *
+     * Fails when the loaded model generates rather than embeds — the two are different runtimes and
+     * a caller asking the wrong one should hear about it.
+     */
+    oneway void embed(in String[] texts, IEmbeddingCallback callback);
 
     /**
      * This process's own memory, as JSON.

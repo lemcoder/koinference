@@ -447,6 +447,22 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
 - **Binding files must be named `Jni*` or `Facade*`**, or `NativeSeamTest` refuses the native symbols
   in them. Splitting one file into bridge/model is also what `OneTypePerFileTest` wants.
 
+## Embeddings over the OpenAI API
+
+`/v1/embeddings` serves an ONNX encoder from the same server as chat, so a RAG harness written
+against OpenAI or OpenRouter runs against a phone by changing `base_url`. Four compatibility facts,
+each learned the hard way once:
+
+- **kotlinx omits defaults**, which silently dropped OpenAI's `"object": "list"` and
+  `"object": "embedding"` discriminators. `encodeDefaults = true` on the server's `Json`.
+- **`encoding_format: base64` is not optional in practice** — the official Python client requests it
+  by default when numpy is present. Little-endian float32, base64.
+- **An exception escaping a Ktor route closes the connection with no body**, which a client reports
+  as a network error rather than a 400. Asking an embedding model to chat now answers with the
+  mismatch named.
+- **Token-id `input` is refused, not mis-served.** Ids from somebody else's tokenizer would embed as
+  nonsense while looking like a successful request.
+
 ## An engine process can be killed under you
 
 Android kills services on a **global** memory-pressure event, and a 1B GGUF whose peak PSS is ~5 GB

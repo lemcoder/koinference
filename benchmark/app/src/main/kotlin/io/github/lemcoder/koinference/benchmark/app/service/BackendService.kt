@@ -13,6 +13,7 @@ import io.github.lemcoder.koinference.backend.BackendUnsupportedException
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.benchmark.app.IBackendService
 import io.github.lemcoder.koinference.benchmark.app.IBenchmarkCallback
+import io.github.lemcoder.koinference.benchmark.app.IEmbeddingCallback
 import io.github.lemcoder.koinference.benchmark.app.IGenerationCallback
 import io.github.lemcoder.koinference.benchmark.app.IStatusCallback
 import io.github.lemcoder.koinference.benchmark.config.BenchmarkArguments
@@ -149,6 +150,23 @@ abstract class BackendService : Service() {
                     model.generate(requestJson, callback)
                 } catch (failure: Throwable) {
                     log("generate failed", failure)
+                    runCatching { callback.onFailed(describe(failure)) }
+                }
+            }
+        }
+
+        override fun embed(texts: Array<String>, callback: IEmbeddingCallback) {
+            scope.launch {
+                val model = served
+                if (model == null) {
+                    runCatching { callback.onFailed("no model loaded on ${backend.id}") }
+                    return@launch
+                }
+                try {
+                    val (flat, width, tokens) = model.embed(texts.toList())
+                    callback.onEmbeddings(flat, width, tokens)
+                } catch (failure: Throwable) {
+                    log("embed failed", failure)
                     runCatching { callback.onFailed(describe(failure)) }
                 }
             }

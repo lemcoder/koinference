@@ -5,8 +5,11 @@ import io.github.lemcoder.koinference.backend.Backend
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.benchmark.app.IGenerationCallback
 import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.EmbeddingRuntime
 import io.github.lemcoder.koinference.runtime.GenerationConstraint
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.ModelRuntime
+import io.github.lemcoder.koinference.runtime.text.TokenCounting
 import io.github.lemcoder.koinference.runtime.GenerationParameters
 import io.github.lemcoder.koinference.runtime.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
@@ -28,10 +31,19 @@ import kotlinx.serialization.json.put
  */
 class ServedModel private constructor(
     private val koi: Koinference,
-    private val runtime: GeneratingRuntime,
+    private val runtime: ModelRuntime,
     private val modelPath: String,
     private val loadMs: Double,
 ) {
+
+    /** Vectors, when the loaded model embeds; null when it generates. */
+    private val embedder: EmbeddingRuntime? = runtime as? EmbeddingRuntime
+
+    /** Replies, when the loaded model generates; null when it embeds. */
+    private val generator: GeneratingRuntime? = runtime as? GeneratingRuntime
+
+    /** What this model does, for `/v1/models` and for refusing the wrong request clearly. */
+    val kind: String = if (embedder != null) "embedding" else "generation"
 
     val modelId: String = File(modelPath).nameWithoutExtension
 
@@ -48,14 +60,38 @@ class ServedModel private constructor(
      * has nowhere to put it — the drop happens here, where it is visible, rather than behind a
      * convenience on the runtime.
      */
+    /**
+     * Embeds [texts], returning the vectors flattened with their width.
+     *
+     * Flat because that is how they cross the binder; see `IEmbeddingCallback`.
+     */
+    suspend fun embed(texts: List<String>): Triple<FloatArray, Int, Int> {
+        val embedding = embedder
+            ?: error("$modelId generates text; it has no embeddings to give")
+
+        val vectors = embedding.embed(texts)
+        val width = embedding.dimensions
+        val flat = FloatArray(vectors.size * width)
+        vectors.forEachIndexed { row, vector -> vector.copyInto(flat, row * width) }
+
+        // The model's own tokenizer where it has one, so `usage` means what OpenAI's means rather
+        // than being a character count wearing a token's name.
+        val tokens = (embedding as? TokenCounting)?.let { counter ->
+            texts.sumOf { counter.countTokens(it) }
+        } ?: 0
+
+        return Triple(flat, width, tokens)
+    }
+
     suspend fun generate(requestJson: String, callback: IGenerationCallback) {
+        val generating = generator ?: error("$modelId embeds text; it has no reply to generate")
         val request = Json.parseToJsonElement(requestJson).jsonObject
         val prompt = request["prompt"]?.jsonPrimitive?.contentOrNull.orEmpty()
         val schema = request["schema"]?.jsonPrimitive?.contentOrNull
 
         var chunks = 0
         val text = StringBuilder()
-        runtime.streamResponse(prompt, schema?.let { GenerationConstraint.JsonSchema(it) })
+        generating.streamResponse(prompt, schema?.let { GenerationConstraint.JsonSchema(it) })
             .collect { part ->
                 if (part is ResponsePart.Text) {
                     chunks++
@@ -102,7 +138,9 @@ class ServedModel private constructor(
             )
 
             val start = System.nanoTime()
-            val runtime = koi.load(modelPath)
+            // The base ModelRuntime: which kind it is decides what this can serve, and the caller
+            // asking for the wrong one is told rather than given nonsense.
+            val runtime: ModelRuntime = koi.load(modelPath)
             val loadMs = (System.nanoTime() - start) / 1_000_000.0
 
             return ServedModel(koi, runtime, modelPath, loadMs)
