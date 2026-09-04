@@ -26,3 +26,9 @@ xcuserdata
 
 # Benchmark output: regenerated per run, and stale the moment anything is tuned.
 results/
+
+# Embedding-eval caches and downloaded datasets (benchmark/analysis)
+.beir/
+.squad/
+.embcache/
+__pycache__/
