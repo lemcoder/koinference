@@ -28,3 +28,9 @@ xcuserdata
 results/
 backends/cera/src/androidMain/jniLibs/
 backends/cera/local-bindings/
+
+# Embedding-eval caches and downloaded datasets (benchmark/analysis)
+.beir/
+.squad/
+.embcache/
+__pycache__/
