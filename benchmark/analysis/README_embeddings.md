@@ -60,6 +60,9 @@ python3 benchmark/analysis/embed_eval.py \
   fewer distractors and inflates every metric — good for a quick smoke test, wrong for comparison.
 - Corpus and query embeddings are cached under `--cache-dir` per `(dataset, model)`, keyed on the
   exact id set, so a rerun re-ranks in seconds and never re-embeds. `--no-cache` disables it.
+- Progress is checkpointed per batch, so a phone kill or a dropped USB link mid-run loses at most
+  one batch — rerun the same command and it resumes from where it stopped. (Both failure modes
+  happen on a memory-pressured device; this is not hypothetical.)
 - Phone throughput is ~2-3 long docs/s (bge-small, 512-token abstracts, CPU), so full `scifact`
   is ~40 min the first time and instant after. Queries are short and run ~15/s.
 
