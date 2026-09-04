@@ -81,6 +81,15 @@ kotlin {
                         // library fails to dlopen on device: UnsatisfiedLinkError, every call.
                         arguments.add("-DGGML_OPENMP=OFF")
 
+                        // GPU offload via Vulkan (the Mali path; OpenCL's ggml backend is
+                        // Adreno-tuned). Opt-in with -PkoiVulkan: it moves the API floor to 28 and
+                        // costs ~500 MB PSS, so the default AAR stays CPU-only at minSdk 31.
+                        // Selected at run time by RuntimeSettings(accelerator = Accelerator.GPU);
+                        // a CPU-only build ignores that request rather than failing.
+                        if (project.hasProperty("koiVulkan")) {
+                            arguments.add("-DKOI_VULKAN=ON")
+                        }
+
                         abi("arm64-v8a") { preset.set("androidNativeArm64") }
                         abi("x86_64") { preset.set("androidNativeX64") }
                     }
