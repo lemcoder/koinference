@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.backend
 
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 
 /**

@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
 import io.github.lemcoder.koinference.backend.BackendUnsupportedException
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4

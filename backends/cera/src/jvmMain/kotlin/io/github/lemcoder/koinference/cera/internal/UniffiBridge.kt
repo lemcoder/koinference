@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.cera.internal
 
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import uniffi.cera_ffi.BackendPreference
 import uniffi.cera_ffi.CeraEngine
 import uniffi.cera_ffi.EngineConfig

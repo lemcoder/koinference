@@ -1,8 +1,8 @@
 package io.github.lemcoder.koinference.benchmark.engine
 
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.backend.Backend
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.backend.SamplingKnob

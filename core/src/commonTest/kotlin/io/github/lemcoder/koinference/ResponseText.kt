@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference
 
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 
 /**
  * The text of a reply, for tests that assert on it.

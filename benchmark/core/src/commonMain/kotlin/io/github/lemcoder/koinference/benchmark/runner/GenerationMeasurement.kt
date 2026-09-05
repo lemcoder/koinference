@@ -1,7 +1,7 @@
 package io.github.lemcoder.koinference.benchmark.runner
 
 import io.github.lemcoder.koinference.benchmark.platform.PlatformProbe
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import kotlinx.coroutines.flow.Flow
 
 /**

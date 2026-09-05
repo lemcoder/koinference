@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.whisper
 
-import io.github.lemcoder.koinference.runtime.Modality
+import io.github.lemcoder.koinference.runtime.media.Modality
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

@@ -9,9 +9,9 @@ import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.runtime.text.TokenCounting
 

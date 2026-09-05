@@ -297,7 +297,10 @@ transitively from `api(libs.litertlm.android)` — which was true of the SDK leg
 deletion by two releases. There is no Maven runtime dependency now.
 
 **Types are grouped into sub-packages, and a package is not a pile.** `:core` is `backend` /
-`runtime` / `prompt`; `:benchmark:core` is `config` / `result` / `engine` / `platform` / `prompts` /
+`runtime` / `prompt`, and `runtime` itself splits into `runtime.generation` (`GenerationParameters`,
+`GenerationConstraint`, `Accelerator`), `runtime.media` (`ResponsePart`, `AudioFormat`,
+`ImageFormat`, `Modality`) and `runtime.text` (`TokenCounting`), leaving the runtimes and their
+guard/settings in `runtime`; `:benchmark:core` is `config` / `result` / `engine` / `platform` / `prompts` /
 `runner`; the app's OpenAI DTOs are `app.api`. `PackageLayoutTest` checks that a package matches its
 directory and that no single directory holds more than twenty files — a loose cap, there to catch
 the next dumping ground rather than to force a split at a number. It counts by package *and* source

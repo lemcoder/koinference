@@ -1,9 +1,9 @@
 package io.github.lemcoder.koinference.litertlm
 
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.backend.ModelConfig
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.litertlm.internal.DEFAULT_TEMPERATURE

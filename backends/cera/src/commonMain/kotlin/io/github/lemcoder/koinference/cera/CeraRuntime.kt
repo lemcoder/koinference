@@ -6,9 +6,9 @@ import io.github.lemcoder.koinference.cera.internal.CeraModelOptions
 import io.github.lemcoder.koinference.cera.internal.CeraSession
 import io.github.lemcoder.koinference.cera.internal.CeraSessionOptions
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlinx.coroutines.Dispatchers

@@ -2,7 +2,7 @@ package io.github.lemcoder.koinference.whisper
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test

@@ -2,7 +2,7 @@ package io.github.lemcoder.koinference.whisper
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.whisper.internal.AudioBytes
 import io.github.lemcoder.koinference.whisper.internal.WhisperBridge
 import io.github.lemcoder.koinference.whisper.internal.WhisperModelOptions

@@ -2,11 +2,11 @@ package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.AudioFormat
+import io.github.lemcoder.koinference.runtime.media.AudioFormat
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf

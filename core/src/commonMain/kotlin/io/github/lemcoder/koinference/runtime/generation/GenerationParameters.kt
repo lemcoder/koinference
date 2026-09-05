@@ -1,4 +1,4 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.generation
 
 /**
  * Sampling knobs, all optional: null leaves the backend's own default in place rather than

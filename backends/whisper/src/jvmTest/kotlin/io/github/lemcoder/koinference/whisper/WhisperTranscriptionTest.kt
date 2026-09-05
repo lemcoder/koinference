@@ -3,7 +3,7 @@ package io.github.lemcoder.koinference.whisper
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test

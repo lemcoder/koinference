@@ -8,9 +8,9 @@ import io.github.lemcoder.koinference.onnx.internal.Pooling
 import io.github.lemcoder.koinference.onnx.internal.PoolingMode
 import io.github.lemcoder.koinference.onnx.internal.TokenBatch
 import io.github.lemcoder.koinference.onnx.internal.WordPiece
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.runtime.EmbeddingRuntime
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.runtime.text.TokenCounting

@@ -3,7 +3,7 @@ package io.github.lemcoder.koinference.benchmark.engine
 import io.github.lemcoder.koinference.benchmark.config.BenchmarkModelConfig
 import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import kotlinx.coroutines.flow.Flow
 
 /**

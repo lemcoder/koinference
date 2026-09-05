@@ -5,7 +5,7 @@ import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
-import io.github.lemcoder.koinference.runtime.Modality
+import io.github.lemcoder.koinference.runtime.media.Modality
 
 /**
  * llama.cpp, as something a [io.github.lemcoder.koinference.Koinference] can hold.
