@@ -683,6 +683,25 @@ lags the SoC badly enough to read identical across a 2x swing.
   access problem. Unused now, but check the Kotlin metadata before concluding a member is
   inaccessible.
 
+## No `Flow` (or any coroutine reactive type) in the public API
+
+This is a KMP library, so the public API is consumed from Swift/ObjC (Kotlin/Native) and Java, not
+only Kotlin — and `Flow`, `StateFlow`, `SharedFlow` and `Channel` do not bridge to those cleanly
+(Swift needs SKIE or a hand-written wrapper; Java gets a raw reactive type it cannot collect
+idiomatically). So the public surface uses **suspend functions and callbacks**, never a reactive
+type. A streamed result is a callback — `(ResponsePart) -> Unit`, or a small listener interface —
+not a `Flow`. A Kotlin consumer who wants a `Flow` wraps the callback with `callbackFlow { … }` in
+one line; that adaptation belongs on the *consumer* side, once, not baked into every platform's view
+of the API. The same goes for observing connection liveness: a callback (`onDeath`), not a
+`StateFlow<ConnectionState>` — the consumer `callbackFlow`s it if a screen needs to react.
+
+`Flow`/`Channel` inside `internal` code and between the facade and Kotlin is fine — the rule is about
+the *published* surface only.
+
+**The current streaming API predates this rule and violates it:** `GeneratingRuntime.streamResponse`
+returns `Flow<ResponsePart>`, and every backend runtime does the same. That is the migration target,
+not an exception — it moves to a callback when the `Model`/`Connection` seam lands.
+
 ## A reply is a list of parts, and there is no shortcut to its text
 
 `GeneratingRuntime` is the only generating interface, and both of its methods answer in
