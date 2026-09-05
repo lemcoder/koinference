@@ -23,6 +23,23 @@
 #include <sched.h>
 #endif
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+// Forward llama.cpp/ggml diagnostics to logcat under tag koinference-ggml. Registered once, lazily,
+// from koi_model_load — the load is where "ggml_vulkan: Found N devices" and "offloaded N/M layers"
+// are printed, which is the only way to tell a working GPU offload from a silent CPU fallback.
+static void koi_android_log(ggml_log_level level, const char* text, void* /*user*/) {
+    int prio = ANDROID_LOG_INFO;
+    if (level == GGML_LOG_LEVEL_ERROR)      prio = ANDROID_LOG_ERROR;
+    else if (level == GGML_LOG_LEVEL_WARN)  prio = ANDROID_LOG_WARN;
+    __android_log_write(prio, "koinference-ggml", text ? text : "");
+}
+static void koi_install_android_log() {
+    static bool once = false;
+    if (!once) { llama_log_set(koi_android_log, nullptr); once = true; }
+}
+#endif
+
 static constexpr int   DEFAULT_N_CTX     = 4096;
 static constexpr int   DEFAULT_N_PREDICT = 512;
 static constexpr float DEFAULT_TEMP      = 0.8f;
@@ -121,6 +138,9 @@ const char* koi_system_info(void) {
 
 KoiModel* koi_model_load(const char* path, int n_gpu_layers) {
     if (!path) return nullptr;
+#if defined(__ANDROID__)
+    koi_install_android_log();
+#endif
     llama_model_params params = llama_model_default_params();
     params.n_gpu_layers = (n_gpu_layers < 0) ? 0 : n_gpu_layers;
     llama_model* m = llama_model_load_from_file(path, params);
