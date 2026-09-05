@@ -8,8 +8,9 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
   - `Backend` / `Koinference` / `ModelConfig` — pick an engine and configure it without naming
     its classes
   - `ModelLoader` (`load` / `unload` / `unloadAll`)
-  - `GeneratingRuntime` — one interface for every engine: `generateResponse` and `streamResponse`,
-    both answering in `ResponsePart`s
+  - `GeneratingRuntime` — one interface for every generating engine: `generateResponse` and
+    `streamResponse`, both answering in `ResponsePart`s
+  - `EmbeddingRuntime` — `embed(texts)` for models that produce vectors rather than replies
   - `ResponsePart` — `Text`, `Audio`, `Image`; a reply is a list of them, and a stream is a flow of
     them
   - `runtime.text.TokenCounting` — the model's own tokenizer, where the engine exposes one
@@ -17,6 +18,12 @@ Kotlin Multiplatform wrapper interfaces for inference runtimes.
 - `:backends:llamacpp` — `llama.cpp` backend, driving a C facade from every target.
 - `:backends:litertlm` — LiteRT-LM backend over Google's prebuilt runtime. macOS arm64 and
   Android.
+- `:backends:cera` — [Cera](https://github.com/hyeons-lab/cera) backend, a Rust GGUF engine reached
+  through its published UniFFI Kotlin bindings. JVM and Android; no native build of our own.
+- `:backends:executorch` — [ExecuTorch](https://github.com/pytorch/executorch) backend over PyTorch's
+  published Android AAR. Reads `.pte`; Android only.
+- `:backends:whisper` — [whisper.cpp](https://github.com/ggml-org/whisper.cpp) backend over a C
+  facade. **Audio in, text out**, through the same `GeneratingRuntime` as everything else.
 
 `Koinference` is the entry point. Register the backends the application links, then load a model by
 path — which engine reads a container is the backend's own answer, so switching engines is changing
@@ -25,7 +32,8 @@ the model file:
 ```kotlin
 val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(maxOutputTokens = 128))
 
-val runtime = koi.load("/models/model.gguf")
+// load returns the base ModelRuntime — the caller narrows to what it asked for.
+val runtime = koi.load("/models/model.gguf") as GeneratingRuntime
 
 val reply = runtime.generateResponse("What is the capital of France?")
     .filterIsInstance<ResponsePart.Text>()

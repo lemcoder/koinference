@@ -25,12 +25,21 @@ object ResultsTable {
             ttftMs = samples.mapNotNull { it.ttftMs }.median(),
             tokens = samples.mapNotNull { it.generatedTokens }.map { it.toDouble() }.median()?.toInt(),
             chunks = samples.map { it.chunks.toDouble() }.median()?.toInt(),
-            peakPssMb = record.memory?.peakPssKb?.let { it / 1024.0 },
+            peakPssMb = record.memory?.peakPssKb?.mb(),
+            weightsPssMb = record.memory?.let { memory ->
+                val before = memory.beforeInitPssKb
+                val afterLoad = memory.afterLoadPssKb
+                if (before != null && afterLoad != null) (afterLoad - before).mb() else null
+            },
+            afterRunPssMb = record.memory?.afterRunPssKb?.mb(),
             note = record.failureReason
                 ?: record.notes.firstOrNull()
                 ?: if (record.status != BenchmarkStatus.SUCCESS) record.status.name else null,
+            noteIsFailure = record.failureReason != null || record.status != BenchmarkStatus.SUCCESS,
         )
     }
+
+    private fun Long.mb(): Double = this / 1024.0
 
     private fun List<Double>.median(): Double? {
         if (isEmpty()) return null

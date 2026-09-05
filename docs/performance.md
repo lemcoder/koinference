@@ -223,6 +223,126 @@ out of the b10516 tree rather than guessed:
 Worth doing to *lower the floor* — an `armv8.0` tier would run on hardware that SIGILLs today. Not
 worth doing for speed: the table above is what the higher tiers are worth on this device.
 
+## Four engines, one set of weights
+
+Llama-3.2-1B-Instruct on a Pixel 8a, `short_generation_v1`, one engine per instrumentation run —
+each engine reading its own 4-bit build of the same model:
+
+| engine | build | tok/s | ttft | peak PSS |
+|---|---|---|---|---|
+| ExecuTorch | SpinQuant INT4 `.pte` | **26.7** | **254 ms** | 1232 MB |
+| llama.cpp | Q4_K_M GGUF | 25.9 | 2208 ms | 4961 MB |
+| Cera | Q4_K_M GGUF | 10.8 | 3058 ms | 916 MB |
+
+**ExecuTorch's earlier numbers were about the model, not the engine.** Measured on stories110M — a
+110M-parameter *fp32* export — it looked like 3.6 tok/s and an engine with a threading problem. On a
+properly quantized 1B export it edges llama.cpp on throughput, is nine times faster to first token,
+and holds a quarter of the memory. The lesson is the older one from this file, in a new place: a
+benchmark of a badly chosen artifact measures the artifact.
+
+Not identical arithmetic: SpinQuant INT4 against Q4_K_M is each engine's own 4-bit path, and
+llama.cpp's peak PSS is partly mmap accounting rather than demand. The weights and the architecture
+are the same, which is what the earlier comparison could not say at all.
+
+## Cera against llama.cpp, same weights
+
+Pixel 8a, `short_generation_v1`, 32-token budget, one warmup discarded and three measured, all three
+engines in one sitting through the app. llama.cpp and Cera read the *same* `LFM2.5-1.2B-Instruct-Q4_0.gguf`;
+LiteRT-LM reads its own int4 `.litertlm` of the same model.
+
+| engine | tok/s | ttft ms |
+|---|---|---|
+| llama.cpp | 31.0 | 388 |
+| LiteRT-LM | 24.9 | 442 |
+| Cera | 2.4 | 2092 |
+
+**Cera is roughly 13x slower here on identical weights, and this is not the ISA trap.** The obvious
+suspect was the one that cost this repository 2.6x already — a baseline ARM build with the
+dot-product kernels compiled out — and it is ruled out: the published `libcera_ffi.so` disassembles
+to 242 `sdot` and 24 `smmla`, so dotprod and i8mm are both in there.
+
+What has *not* been ruled out is thread placement, which is the other thing that cost this repository
+6.5x. llama.cpp reaches its number by pinning two big cores; Cera picks its own workers, was measured
+at ~3.1 cores busy, and exposes no thread or affinity knob through its bindings — so on a big.LITTLE
+phone it is likely decoding partly on A510s. That is a hypothesis, not a measurement: no experiment
+here has separated it from kernel maturity, and Cera 0.4.0 is an early release.
+
+Nothing about this makes the backend wrong; it makes the number worth re-taking against a later Cera
+and, if the bindings ever expose one, a thread count.
+
+## Pinning a process, for engines with no thread knob
+
+llama.cpp takes a CPU mask through its facade, and that is where its 6.5x came from. Cera and
+ExecuTorch expose no threading control at all: Cera's bindings have no such field, and ExecuTorch's
+`libexecutorch.so` exports six symbols — `JNI_OnLoad` and five `AsrModule` entry points — with the
+threadpool hidden, so there is nothing for a shim to bind to.
+
+What is still reachable is the *process*. `CpuAffinity` in the benchmark app pins every thread to the
+fast clusters, from Java, with no native code:
+
+- `taskset -ap <pid>` **does not work on Android.** The child process cannot read
+  `/proc/<pid>/task/` of another process under `hidepid`, even at the same uid, and reports "No such
+  file or directory" — which reads like the process is gone rather than unreadable.
+- `/proc/self/task` *is* readable, so it enumerates there and pins each TID with `taskset -p`. That
+  needs no `/proc` access from the child at all. Threads created later inherit from their creator, so
+  pinning before the engine builds its pool covers the pool.
+- The mask is read from sysfs, not hardcoded. Asking for cpus 4-8 on a Pixel 8a yields `4-7`: **the
+  X3 prime core is refused**, because the app's cpuset excludes it.
+
+**It helps one engine and ruins the other.** Three rounds, order flipped each round, 45 s of cooldown
+before every run, `short_generation_v1`:
+
+| engine | affinity off | affinity on | ttft off → on |
+|---|---|---|---|
+| ExecuTorch (stories110M) | 3.6 tok/s | **8.4** | 358 → 88 ms |
+| Cera (LFM2.5-1.2B Q4_0) | **11.4** tok/s | 3.3 | 2139 → 1205 ms |
+
+Per round, with no crossover: ExecuTorch 3.3 / 3.9 / 3.6 against 8.5 / 8.7 / 8.1; Cera 11.9 / 10.9 /
+11.4 against 3.4 / 3.0 / 3.3.
+
+Prefill improves for both — it is compute-bound and likes the fast cores. Decode splits, and the
+mechanism is oversubscription: both engines size their pools for a nine-CPU machine and then contend
+on four. ExecuTorch was losing more than that to little-core migration, so it wins; Cera was not, so
+it loses. Pinning also collapses ExecuTorch's spread — 3.3-7.9 unpinned against 8.1-8.7 pinned — the
+same steadying llama.cpp got.
+
+### The cpuset decides what a mask may even ask for
+
+Android places a process by state, and that cap sits above any affinity call:
+
+| process | cpuset | CPUs |
+|---|---|---|
+| the one hosting the visible Activity | `/top-app` | **0-8** |
+| a service process with no UI | `/foreground` | **0-7** |
+| background, restricted, isolated | `background` / `restricted` | **0-3** |
+
+`sched_setaffinity` only narrows within the group, so a service can never name the X3 prime core, and
+an **isolated** service would be worse rather than better — those groups cap at the little cluster.
+Changing groups means writing `/dev/cpuset/*/tasks`, which needs system privileges.
+
+Running the engine in the top-app process (`--ez inProcess true`, which needs the Activity visible)
+lifts the cap. ExecuTorch, same model and suite:
+
+| where, and what mask | tok/s | ttft |
+|---|---|---|
+| service `/foreground`, unpinned | 3.6 | 358 ms |
+| service `/foreground`, pinned 4-7 | 8.4 | 88 ms |
+| top-app, unpinned | 8.0 | 82 ms |
+| **top-app, pinned 4-8** | **10.7** | **63 ms** |
+| top-app, prime core alone (cpu8) | 4.9 | 166 ms |
+
+**The lever is "never touch the A510s", not "use the fastest core".** One prime core is worse than
+five fast ones — eight XNNPACK threads do not fit on one CPU — and simply being in `/top-app` is worth
+as much as pinning is inside `/foreground`.
+
+Speed and memory want opposite architectures here, which is worth saying plainly: the in-process
+figures carry Compose and Ktor in their PSS (563 MB against 475 MB), and that contamination is the
+whole reason the engines run in their own processes. `inProcess` is a measurement mode, not the
+default.
+
+**So it is opt-in per engine and off by default** (`--es affinity big`). A process-wide pin is not a
+free win, and "pin to the big cluster" is not advice that survives contact with a second engine.
+
 ## GPU offload
 
 Off by default. Turn it on at build time and select it at run time:

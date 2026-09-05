@@ -13,6 +13,7 @@ import io.github.lemcoder.koinference.backend.BackendUnsupportedException
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.benchmark.app.IBackendService
 import io.github.lemcoder.koinference.benchmark.app.IBenchmarkCallback
+import io.github.lemcoder.koinference.benchmark.app.IEmbeddingCallback
 import io.github.lemcoder.koinference.benchmark.app.IGenerationCallback
 import io.github.lemcoder.koinference.benchmark.app.IStatusCallback
 import io.github.lemcoder.koinference.benchmark.config.BenchmarkArguments
@@ -83,6 +84,18 @@ abstract class BackendService : Service() {
         override fun runBenchmark(modelPath: String, configJson: String, callback: IBenchmarkCallback) {
             scope.launch {
                 try {
+                    // Before anything loads: engine threads inherit the mask from whoever creates
+                    // them, so applying it afterwards would leave the pool where it already is.
+                    optionsOf(configJson)["affinity"]?.let { requested ->
+                        val mask = if (requested == "big") CpuAffinity.bigCoreMask() else requested
+                        if (mask == null) {
+                            log("affinity: no big cluster found on this device")
+                        } else {
+                            val outcome = CpuAffinity.apply(mask)
+                            log("affinity: ${outcome.detail}")
+                        }
+                    }
+
                     val corpus = PromptCorpus.parse(assets.open(PROMPTS_ASSET).bufferedReader().readText())
                     val config = BenchmarkArguments.toConfig(
                         arguments = optionsOf(configJson) + mapOf(
@@ -137,6 +150,23 @@ abstract class BackendService : Service() {
                     model.generate(requestJson, callback)
                 } catch (failure: Throwable) {
                     log("generate failed", failure)
+                    runCatching { callback.onFailed(describe(failure)) }
+                }
+            }
+        }
+
+        override fun embed(texts: Array<String>, callback: IEmbeddingCallback) {
+            scope.launch {
+                val model = served
+                if (model == null) {
+                    runCatching { callback.onFailed("no model loaded on ${backend.id}") }
+                    return@launch
+                }
+                try {
+                    val (flat, width, tokens) = model.embed(texts.toList())
+                    callback.onEmbeddings(flat, width, tokens)
+                } catch (failure: Throwable) {
+                    log("embed failed", failure)
                     runCatching { callback.onFailed(describe(failure)) }
                 }
             }

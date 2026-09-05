@@ -21,6 +21,8 @@ includeBuild("../..") {
     dependencySubstitution {
         substitute(module("io.github.lemcoder:koinference-benchmark-core"))
             .using(project(":benchmark:core"))
+        substitute(module("io.github.lemcoder:koinference-onnx"))
+            .using(project(":backends:onnx"))
     }
 }
 

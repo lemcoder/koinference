@@ -26,6 +26,8 @@ xcuserdata
 
 # Benchmark output: regenerated per run, and stale the moment anything is tuned.
 results/
+backends/cera/src/androidMain/jniLibs/
+backends/cera/local-bindings/
 
 # Embedding-eval caches and downloaded datasets (benchmark/analysis)
 .beir/

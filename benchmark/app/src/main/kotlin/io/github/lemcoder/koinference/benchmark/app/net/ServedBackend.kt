@@ -20,6 +20,14 @@ interface ServedBackend {
     /** Reply text as it arrives. Buffering here would make time to first token equal total latency. */
     fun stream(prompt: String, schema: String?): Flow<String>
 
+    /**
+     * Embeds [texts]: the vectors flattened, their width, and the tokens they cost.
+     *
+     * Flat because that is how they cross the binder — a List<FloatArray> would be marshalled
+     * element by element, which is the worst possible shape for a batch of 384-wide vectors.
+     */
+    suspend fun embed(texts: List<String>): Triple<FloatArray, Int, Int>
+
     /** The engine process's memory, as JSON. Read there, not here — see IBackendService. */
     suspend fun processMemory(): String
 }

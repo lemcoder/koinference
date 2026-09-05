@@ -1,6 +1,9 @@
 package io.github.lemcoder.koinference.benchmark.app.client
 
+import io.github.lemcoder.koinference.benchmark.app.service.CeraService
+import io.github.lemcoder.koinference.benchmark.app.service.ExecuTorchService
 import io.github.lemcoder.koinference.benchmark.app.service.LiteRtLmService
+import io.github.lemcoder.koinference.benchmark.app.service.OnnxService
 import io.github.lemcoder.koinference.benchmark.app.service.LlamaCppService
 
 /**
@@ -15,4 +18,9 @@ import io.github.lemcoder.koinference.benchmark.app.service.LlamaCppService
 enum class BackendProcess(val label: String, val serviceClass: Class<*>) {
     LLAMA_CPP("llama.cpp", LlamaCppService::class.java),
     LITE_RT_LM("LiteRT-LM", LiteRtLmService::class.java),
+    CERA("Cera", CeraService::class.java),
+    EXECUTORCH("ExecuTorch", ExecuTorchService::class.java),
+
+    /** Embeddings rather than replies: it serves `/v1/embeddings`, not `/v1/chat/completions`. */
+    ONNX("ONNX", OnnxService::class.java),
 }

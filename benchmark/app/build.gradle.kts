@@ -59,6 +59,7 @@ android {
 
 dependencies {
     implementation("io.github.lemcoder:koinference-benchmark-core")
+    implementation("io.github.lemcoder:koinference-onnx")
     implementation(platform("androidx.compose:compose-bom:2025.09.00"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.11.0")

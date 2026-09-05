@@ -15,5 +15,8 @@ class BinderServedBackend(
 
     override fun stream(prompt: String, schema: String?): Flow<String> = connection.generate(prompt, schema)
 
+    override suspend fun embed(texts: List<String>): Triple<FloatArray, Int, Int> =
+        connection.embed(texts)
+
     override suspend fun processMemory(): String = connection.processMemory()
 }
