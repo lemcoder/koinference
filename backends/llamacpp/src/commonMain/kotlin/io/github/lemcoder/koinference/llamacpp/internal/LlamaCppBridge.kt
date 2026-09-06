@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
  *
  * Same shape as `:backends:litertlm`'s bridge, on purpose — see `docs/backends.md`. Interfaces
  * rather than top-level `expect fun`s so that everything in
- * [io.github.lemcoder.koinference.llamacpp.LlamaCppRuntime] can be exercised without a model:
+ * [io.github.lemcoder.koinference.llamacpp.LlamaCppGeneratingConnection] can be exercised without a model:
  * an `expect` declaration can only be produced by a platform, so with one at the seam the
  * session rebuild, the reload on a backend change and the unload-during-generation race are all
  * unreachable from a test.

@@ -10,8 +10,8 @@ import io.github.lemcoder.koinference.runtime.media.Modality
  * ONNX Runtime, as something a [io.github.lemcoder.koinference.Koinference] can hold.
  *
  * The embedding leg. It produces vectors rather than replies, so what it loads is an
- * [OnnxEmbeddingRuntime] and a caller narrows to
- * [io.github.lemcoder.koinference.runtime.EmbeddingRuntime] rather than to `GeneratingRuntime`.
+ * [OnnxEmbeddingConnection] and a caller narrows to
+ * [io.github.lemcoder.koinference.runtime.EmbeddingConnection] rather than to `GeneratingConnection`.
  */
 object Onnx : Backend {
 

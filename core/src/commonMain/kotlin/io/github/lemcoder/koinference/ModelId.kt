@@ -1,5 +1,7 @@
 package io.github.lemcoder.koinference
 
+import kotlin.jvm.JvmInline
+
 /**
  * An opaque handle to a model loaded into memory by [Koinference.loadModel].
  *

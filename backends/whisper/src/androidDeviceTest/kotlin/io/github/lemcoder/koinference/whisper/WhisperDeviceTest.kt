@@ -1,4 +1,5 @@
 package io.github.lemcoder.koinference.whisper
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.prompt.PromptPart
@@ -36,8 +37,8 @@ class WhisperDeviceTest {
         runBlocking {
             val koi = Koinference(Whisper)
             try {
-                val text = koi.load(model)
-                    .generateResponse(listOf(PromptPart.AudioFile(audio)))
+                val text = (koi.openConnection(koi.loadModel(model)) as GeneratingConnection)
+                    .generateAll(listOf(PromptPart.AudioFile(audio)))
                     .filterIsInstance<ResponsePart.Text>()
                     .joinToString("") { it.text }
 
@@ -67,8 +68,8 @@ class WhisperDeviceTest {
                 // collect, not toList: toList waits for the whole flow before returning, so every
                 // arrival would be stamped after the last one and "first" would equal "total" by
                 // construction. That is what this test claimed the first time it was written.
-                koi.load(model).streamResponse(listOf(PromptPart.AudioFile(longAudio)))
-                    .collect { part ->
+                (koi.openConnection(koi.loadModel(model)) as GeneratingConnection)
+                    .generate(listOf(PromptPart.AudioFile(longAudio))) { part ->
                         if (part is ResponsePart.Text) {
                             if (firstSegmentMs < 0) firstSegmentMs = (System.nanoTime() - started) / 1e6
                             segments += part.text
