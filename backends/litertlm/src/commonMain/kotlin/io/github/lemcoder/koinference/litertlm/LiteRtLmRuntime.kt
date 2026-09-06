@@ -1,11 +1,11 @@
 package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge

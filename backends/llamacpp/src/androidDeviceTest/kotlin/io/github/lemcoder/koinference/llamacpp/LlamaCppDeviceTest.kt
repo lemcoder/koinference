@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals

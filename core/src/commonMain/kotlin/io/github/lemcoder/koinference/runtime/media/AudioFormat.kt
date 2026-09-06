@@ -1,4 +1,4 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.media
 
 /** Encodings a backend may hand back. Add one when a backend produces it, not before. */
 enum class AudioFormat {

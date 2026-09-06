@@ -1,4 +1,5 @@
 package io.github.lemcoder.koinference.runtime
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 
 /**
  * A loaded model, and the settings it was loaded with.

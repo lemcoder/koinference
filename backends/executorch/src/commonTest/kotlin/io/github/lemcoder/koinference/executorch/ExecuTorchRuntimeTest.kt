@@ -3,10 +3,10 @@ package io.github.lemcoder.koinference.executorch
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.executorch.internal.FakeExecuTorchBridge
 import io.github.lemcoder.koinference.executorch.internal.FakeSystemFiles
-import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlin.test.Test
 import kotlin.test.assertEquals

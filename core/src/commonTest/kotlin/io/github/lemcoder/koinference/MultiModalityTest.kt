@@ -2,10 +2,10 @@ package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
-import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.runtime.AudioFormat
-import io.github.lemcoder.koinference.runtime.Modality
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
+import io.github.lemcoder.koinference.runtime.media.AudioFormat
+import io.github.lemcoder.koinference.runtime.media.Modality
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest

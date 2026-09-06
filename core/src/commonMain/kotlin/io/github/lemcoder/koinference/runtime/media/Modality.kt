@@ -1,4 +1,4 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.media
 
 /**
  * What a backend's runtimes produce.

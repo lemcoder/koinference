@@ -6,9 +6,9 @@ import io.github.lemcoder.koinference.executorch.internal.ExecuTorchModelOptions
 import io.github.lemcoder.koinference.executorch.internal.ExecuTorchSession
 import io.github.lemcoder.koinference.executorch.internal.ExecuTorchSessionOptions
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.GenerationConstraint
-import io.github.lemcoder.koinference.runtime.GenerationParameters
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import io.github.lemcoder.koinference.runtime.RuntimeGuard
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +42,7 @@ class ExecuTorchRuntime internal constructor(
      * anything else rather than accepting it and changing nothing.
      */
     override val runtimeSettings: RuntimeSettings
-        get() = RuntimeSettings(io.github.lemcoder.koinference.runtime.Accelerator.CPU)
+        get() = RuntimeSettings(io.github.lemcoder.koinference.runtime.generation.Accelerator.CPU)
 
     private var session: ExecuTorchSession? = null
 
@@ -97,7 +97,7 @@ class ExecuTorchRuntime internal constructor(
 
     override suspend fun updateRuntimeSettings(settings: RuntimeSettings) {
         guard.whileOpen {
-            check(settings.accelerator == io.github.lemcoder.koinference.runtime.Accelerator.CPU) {
+            check(settings.accelerator == io.github.lemcoder.koinference.runtime.generation.Accelerator.CPU) {
                 "ExecuTorch runs where the .pte was exported to run; ${settings.accelerator} " +
                     "cannot be chosen at load time"
             }

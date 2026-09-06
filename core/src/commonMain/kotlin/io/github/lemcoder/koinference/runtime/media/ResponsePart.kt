@@ -1,4 +1,4 @@
-package io.github.lemcoder.koinference.runtime
+package io.github.lemcoder.koinference.runtime.media
 
 /**
  * One piece of a reply.

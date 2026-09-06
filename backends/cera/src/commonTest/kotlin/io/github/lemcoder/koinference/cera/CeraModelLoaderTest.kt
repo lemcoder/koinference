@@ -2,8 +2,8 @@ package io.github.lemcoder.koinference.cera
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.cera.internal.FakeCeraBridge
-import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlin.test.Test
 import kotlin.test.assertEquals

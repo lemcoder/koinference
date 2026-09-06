@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 

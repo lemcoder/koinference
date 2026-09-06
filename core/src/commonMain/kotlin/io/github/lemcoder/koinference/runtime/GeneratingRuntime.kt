@@ -1,4 +1,6 @@
 package io.github.lemcoder.koinference.runtime
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
+import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
 
 import io.github.lemcoder.koinference.prompt.PromptPart
 import io.github.lemcoder.koinference.prompt.promptOf

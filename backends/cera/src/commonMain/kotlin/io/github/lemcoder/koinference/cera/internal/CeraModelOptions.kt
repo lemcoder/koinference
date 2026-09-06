@@ -1,6 +1,6 @@
 package io.github.lemcoder.koinference.cera.internal
 
-import io.github.lemcoder.koinference.runtime.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
 
 /**
  * What loading weights needs.

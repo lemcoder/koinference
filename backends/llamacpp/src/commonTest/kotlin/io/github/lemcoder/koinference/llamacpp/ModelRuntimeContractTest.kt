@@ -4,8 +4,8 @@ import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.llamacpp.internal.CpuPlacementPolicy
 import io.github.lemcoder.koinference.llamacpp.internal.FakeLlamaCppBridge
 import io.github.lemcoder.koinference.llamacpp.internal.MutableMachine
-import io.github.lemcoder.koinference.runtime.Accelerator
-import io.github.lemcoder.koinference.runtime.GenerationParameters
+import io.github.lemcoder.koinference.runtime.generation.Accelerator
+import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.ModelRuntime
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import kotlinx.coroutines.test.runTest

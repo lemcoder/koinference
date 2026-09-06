@@ -4,7 +4,7 @@ import io.github.lemcoder.koinference.backend.Backend
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.backend.SamplingKnob
-import io.github.lemcoder.koinference.runtime.Modality
+import io.github.lemcoder.koinference.runtime.media.Modality
 
 /** A backend that hands out fake runtimes, so the entry point can be tested without an engine. */
 internal class FakeBackend(

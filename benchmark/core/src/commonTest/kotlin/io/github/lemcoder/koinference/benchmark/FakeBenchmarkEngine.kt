@@ -5,7 +5,7 @@ import io.github.lemcoder.koinference.benchmark.config.SamplingConfig
 import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.benchmark.engine.BenchmarkInferenceEngine
 import io.github.lemcoder.koinference.benchmark.engine.GenerationRequest
-import io.github.lemcoder.koinference.runtime.ResponsePart
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 
