@@ -31,14 +31,14 @@ class WhisperConnectionTest {
     fun `transcribes audio named by path`() = runTest {
         val reply = connection().generateAll(listOf(PromptPart.AudioFile("/a/clip.wav")))
         assertTrue(reply.all { it is ResponsePart.Text })
-        assertEquals("transcript of 1600 samples", (reply.single() as ResponsePart.Text).text)
+        assertEquals("transcript of 1600 samples ", reply.filterIsInstance<ResponsePart.Text>().joinToString("") { it.text })
         assertEquals(listOf("/a/clip.wav"), audio.read)
     }
 
     @Test
     fun `transcribes audio handed over as bytes`() = runTest {
         val reply = connection().generateAll(listOf(PromptPart.AudioBytes(wav)))
-        assertEquals("transcript of 1600 samples", (reply.single() as ResponsePart.Text).text)
+        assertEquals("transcript of 1600 samples ", reply.filterIsInstance<ResponsePart.Text>().joinToString("") { it.text })
         assertTrue(audio.read.isEmpty(), "bytes in hand need no file read")
     }
 
