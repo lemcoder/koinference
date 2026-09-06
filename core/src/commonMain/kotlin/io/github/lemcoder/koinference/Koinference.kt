@@ -6,6 +6,9 @@ import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
 import io.github.lemcoder.koinference.runtime.ModelRuntime
 import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.Connection
+import io.github.lemcoder.koinference.runtime.KoinferenceException
+import io.github.lemcoder.koinference.runtime.internal.RuntimeConnection
 
 /**
  * The entry point: the backends an application was built with, and the models loaded through them.
@@ -98,6 +101,85 @@ class Koinference(
     /** Release every model this instance loaded. Idempotent; the instance stays usable. */
     suspend fun unloadAll() {
         loaders.values.forEach { it.unloadAll() }
+    }
+
+    // ── Model / Connection seam (spike) ─────────────────────────────────────────
+    // Splits load into two: loadModel puts weights in RAM and hands back a ModelId; openConnection
+    // opens a usage over that id and returns a Flow-free, callback-streaming Connection. A
+    // connection's teardown is close(); markClosed is gone, because releasing the weights is
+    // unloadModel's job now, not a connection's. See docs/backends.md and CLAUDE.md's public-API rule.
+
+    private class LoadedModel(
+        val modelPath: String,
+        val runtime: ModelRuntime,
+        val connections: MutableList<RuntimeConnection> = mutableListOf(),
+    )
+
+    private val loadedModels = mutableMapOf<ModelId, LoadedModel>()
+    private var modelCounter = 0
+
+    /**
+     * Load [modelPath] into memory and return a handle to it. The weights, not a usage: nothing
+     * decodes until a [Connection] is opened over the returned id.
+     *
+     * @throws KoinferenceException.LoadFailed if no backend reads it or the load itself fails.
+     */
+    suspend fun loadModel(modelPath: String): ModelId {
+        val runtime = try {
+            load(modelPath)
+        } catch (failure: KoinferenceException) {
+            throw failure
+        } catch (failure: Throwable) {
+            throw KoinferenceException.LoadFailed("Could not load $modelPath: ${failure.message}", failure)
+        }
+        val id = ModelId("${backendFor(modelPath)?.id ?: "model"}-${modelCounter++}")
+        loadedModels[id] = LoadedModel(modelPath, runtime)
+        return id
+    }
+
+    /**
+     * Open a connection over a loaded model.
+     *
+     * [onDeath] is the out-of-band channel: it fires only when the connection dies with no call in
+     * flight — the model unloaded under it, or (once wired to the process seam) the engine killed.
+     * Failures of a call you await are thrown from that call instead. A consumer who wants to observe
+     * liveness as a stream wraps [onDeath] with `callbackFlow { }`.
+     *
+     * @throws KoinferenceException.UnknownModel if [id] is not loaded.
+     * @throws KoinferenceException.Unsupported if the model does not generate.
+     */
+    fun openConnection(
+        id: ModelId,
+        onDeath: (KoinferenceException) -> Unit = {},
+    ): Connection {
+        val model = loadedModels[id] ?: throw KoinferenceException.UnknownModel(id)
+        val generating = model.runtime as? GeneratingRuntime
+            ?: throw KoinferenceException.Unsupported(
+                "The model $id does not generate; a connection is opened only over a generating model")
+        val connection = RuntimeConnection(
+            modelId = id,
+            runtime = generating,
+            onDeath = onDeath,
+            onClose = { closed -> model.connections.remove(closed) },
+        )
+        model.connections += connection
+        return connection
+    }
+
+    /**
+     * Unload the model behind [id]. Refuses while connections are open unless [force] is set, in
+     * which case each open connection is told its model went away (via `onDeath`) before the weights
+     * are released. Idempotent.
+     */
+    suspend fun unloadModel(id: ModelId, force: Boolean = false) {
+        val model = loadedModels[id] ?: return
+        if (model.connections.isNotEmpty() && !force) {
+            throw KoinferenceException.LoadFailed(
+                "$id still has ${model.connections.size} open connection(s); close them or unload with force")
+        }
+        model.connections.toList().forEach { it.die(KoinferenceException.ModelUnloaded(id)) }
+        loadedModels.remove(id)
+        unload(model.modelPath)
     }
 
     private fun loaderFor(modelPath: String): ModelLoader {
