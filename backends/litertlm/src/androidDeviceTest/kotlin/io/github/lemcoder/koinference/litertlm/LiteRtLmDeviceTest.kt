@@ -178,7 +178,7 @@ class LiteRtLmDeviceTest {
                 val schema =
                     """{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}"""
                 val reply = runtime.generateAll(
-                    prompt = "Name a capital city.",
+                    prompt = promptOf("Name a capital city."),
                     constraint = GenerationConstraint.JsonSchema(schema),
                 ).text()
                 // Proves llguidance is present in the AAR's runtime, not only in the Apple
