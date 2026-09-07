@@ -16,6 +16,9 @@ package io.github.lemcoder.koinference.runtime
  */
 interface Connection {
 
+    /** Whether [close] (or an out-of-band death) has torn this connection down. */
+    val isClosed: Boolean
+
     /** Full teardown of this connection's context. Idempotent; other connections are unaffected. */
     suspend fun close()
 }

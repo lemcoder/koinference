@@ -29,6 +29,8 @@ class OnnxEmbeddingConnection internal constructor(
 
     private val guard = ConnectionGuard { target }
 
+    override val isClosed: Boolean get() = guard.isClosed
+
     override suspend fun embed(texts: List<String>): List<FloatArray> {
         if (texts.isEmpty()) return emptyList()
         val encoded = texts.map { WordPiece.encode(it, vocabulary, maxTokens) }

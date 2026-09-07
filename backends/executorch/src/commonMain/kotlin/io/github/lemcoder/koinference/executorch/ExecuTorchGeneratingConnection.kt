@@ -35,6 +35,8 @@ class ExecuTorchGeneratingConnection internal constructor(
     private var session: ExecuTorchSession? = null
     private val guard = ConnectionGuard { target }
 
+    override val isClosed: Boolean get() = guard.isClosed
+
     override suspend fun generate(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,

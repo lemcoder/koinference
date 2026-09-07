@@ -30,6 +30,8 @@ class CeraGeneratingConnection internal constructor(
     private var session: CeraSession? = null
     private val guard = ConnectionGuard { target }
 
+    override val isClosed: Boolean get() = guard.isClosed
+
     override suspend fun generate(
         prompt: List<PromptPart>,
         constraint: GenerationConstraint?,

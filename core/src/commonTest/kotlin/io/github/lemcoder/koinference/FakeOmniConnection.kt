@@ -15,6 +15,8 @@ internal class FakeOmniConnection(
 
     private var closed = false
 
+    override val isClosed: Boolean get() = closed
+
     override var generationParameters: GenerationParameters = parameters
         private set
 

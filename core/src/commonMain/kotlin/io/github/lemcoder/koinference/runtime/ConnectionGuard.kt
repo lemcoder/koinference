@@ -24,6 +24,9 @@ class ConnectionGuard(private val describeTarget: () -> String) {
     private val lock = Mutex()
     private var closed = false
 
+    /** Whether [close] has run. */
+    val isClosed: Boolean get() = closed
+
     /** Runs [block] with exclusive access, or fails if this connection has been closed. */
     suspend fun <T> whileOpen(block: suspend () -> T): T = lock.withLock {
         if (closed) throw KoinferenceException.ConnectionClosed(describeTarget())

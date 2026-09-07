@@ -116,22 +116,13 @@ class Koinference(
         onDeath: (KoinferenceException) -> Unit = {},
     ): Connection {
         val loaded = byId[id] ?: throw KoinferenceException.UnknownModel(id)
-        val raw = loaded.model.open()
-        val tracked = Tracked(raw, onDeath)
-        loaded.connections += tracked
-        val untrack: suspend () -> Unit = { loaded.connections.remove(tracked) }
-        // Wrap only to untrack on close, preserving the narrowable subtype via delegation.
-        return when (raw) {
-            is GeneratingConnection -> object : GeneratingConnection by raw {
-                override suspend fun close() { raw.close(); untrack() }
-            }
-            is EmbeddingConnection -> object : EmbeddingConnection by raw {
-                override suspend fun close() { raw.close(); untrack() }
-            }
-            else -> object : Connection by raw {
-                override suspend fun close() { raw.close(); untrack() }
-            }
-        }
+        val connection = loaded.model.open()
+        // Returned as-is, not wrapped: a wrapper implements only the base Connection, so the caller
+        // could not narrow to GeneratingConnection/EmbeddingConnection or a backend's own type (say
+        // LiteRtLmGeneratingConnection.resetConversation). Liveness is tracked via Connection.isClosed
+        // instead of by intercepting close.
+        loaded.connections += Tracked(connection, onDeath)
+        return connection
     }
 
     /**
@@ -141,11 +132,12 @@ class Koinference(
      */
     suspend fun unloadModel(id: ModelId, force: Boolean = false) {
         val loaded = byId[id] ?: return
-        if (loaded.connections.isNotEmpty() && !force) {
+        val open = loaded.connections.filter { !it.connection.isClosed }
+        if (open.isNotEmpty() && !force) {
             throw KoinferenceException.LoadFailed(
-                "$id still has ${loaded.connections.size} open connection(s); close them or unload with force")
+                "$id still has ${open.size} open connection(s); close them or unload with force")
         }
-        loaded.connections.toList().forEach { tracked ->
+        open.forEach { tracked ->
             tracked.connection.close()
             tracked.onDeath(KoinferenceException.ModelUnloaded(id))
         }
