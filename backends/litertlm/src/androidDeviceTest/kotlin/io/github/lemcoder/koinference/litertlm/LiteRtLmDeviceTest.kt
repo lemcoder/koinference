@@ -1,11 +1,13 @@
 package io.github.lemcoder.koinference.litertlm
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
+import io.github.lemcoder.koinference.prompt.promptOf
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import kotlin.test.Test
@@ -115,11 +117,12 @@ class LiteRtLmDeviceTest {
         runBlocking {
             val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir, maxOutputTokens = 24, // Greedy, so the two calls are answering identically rather than by luck.
                 parameters = GenerationParameters(temperature = 0.0, seed = 42)))
-            val runtime = loader.load(modelPath)
+            val runtime = loader.load(modelPath).open() as LiteRtLmGeneratingConnection
             try {
-                val streamed = runtime.streamResponse("Say hello.").toList().textParts()
+                val streamed = mutableListOf<String>()
+                runtime.generate("Say hello.") { if (it is ResponsePart.Text) streamed += it.text }
                 runtime.resetConversation()
-                val blocking = runtime.generateResponse("Say hello.").text()
+                val blocking = runtime.generateAll("Say hello.").text()
 
                 Log.i(
                     "koinference-benchmark",
@@ -154,9 +157,9 @@ class LiteRtLmDeviceTest {
                 // template — LFM2.5 rejects one, SmolLM2 takes it — and this test is about
                 // generation working on device at all.
                 val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir))
-            val runtime = loader.load(modelPath)
+            val runtime = loader.load(modelPath).open() as LiteRtLmGeneratingConnection
             try {
-                val reply = runtime.generateResponse("Say hello.").text()
+                val reply = runtime.generateAll("Say hello.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unload(modelPath)
@@ -170,12 +173,12 @@ class LiteRtLmDeviceTest {
 
         runBlocking {
             val loader = LiteRtLmModelLoader(ModelConfig(cacheDir = cacheDir))
-            val runtime = loader.load(modelPath)
+            val runtime = loader.load(modelPath).open() as LiteRtLmGeneratingConnection
             try {
                 val schema =
                     """{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}"""
-                val reply = runtime.generateResponse(
-                    prompt = "Name a capital city.",
+                val reply = runtime.generateAll(
+                    prompt = promptOf("Name a capital city."),
                     constraint = GenerationConstraint.JsonSchema(schema),
                 ).text()
                 // Proves llguidance is present in the AAR's runtime, not only in the Apple

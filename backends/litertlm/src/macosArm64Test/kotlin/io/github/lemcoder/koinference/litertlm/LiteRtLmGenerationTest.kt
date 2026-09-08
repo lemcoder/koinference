@@ -1,4 +1,7 @@
 package io.github.lemcoder.koinference.litertlm
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
+import io.github.lemcoder.koinference.prompt.promptOf
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.generation.GenerationConstraint
@@ -38,7 +41,7 @@ class LiteRtLmGenerationTest {
             // and this test is about generation working at all. See [systemPromptEitherWorksOrSaysWhy].
             val loader = LiteRtLmModelLoader()
             try {
-                val reply = loader.load(path).generateResponse("Say hello.").text()
+                val reply = (loader.load(path).open() as LiteRtLmGeneratingConnection).generateAll("Say hello.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unloadAll()
@@ -55,8 +58,8 @@ class LiteRtLmGenerationTest {
             try {
                 val schema =
                     """{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}"""
-                val reply = loader.load(path).generateResponse(
-                    prompt = "Name a capital city.",
+                val reply = (loader.load(path).open() as LiteRtLmGeneratingConnection).generateAll(
+                    prompt = promptOf("Name a capital city."),
                     constraint = GenerationConstraint.JsonSchema(schema),
                 ).text()
 
@@ -91,7 +94,7 @@ class LiteRtLmGenerationTest {
             val replies = (1..2).map {
                 val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(seed = 42, temperature = 1.0, topK = 40)))
                 try {
-                    loader.load(path).generateResponse("Name a colour.").text()
+                    (loader.load(path).open() as LiteRtLmGeneratingConnection).generateAll("Name a colour.").text()
                 } finally {
                     loader.unloadAll()
                 }
@@ -116,7 +119,7 @@ class LiteRtLmGenerationTest {
         runBlocking {
             val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0)))
             try {
-                val reply = loader.load(path).generateResponse("Name a colour.").text()
+                val reply = (loader.load(path).open() as LiteRtLmGeneratingConnection).generateAll("Name a colour.").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
                 loader.unloadAll()
@@ -144,14 +147,14 @@ class LiteRtLmGenerationTest {
         runBlocking {
             val loader = LiteRtLmModelLoader(ModelConfig(parameters = GenerationParameters(temperature = 0.0), threads = 1))
             try {
-                val runtime = loader.load(path)
+                val runtime = loader.load(path).open() as LiteRtLmGeneratingConnection
                 // Discarded: the first generation on a fresh engine is the odd one out.
-                runtime.generateResponse("Name a colour.").text()
+                runtime.generateAll("Name a colour.").text()
 
                 runtime.resetConversation()
-                val second = runtime.generateResponse("Name a colour.").text()
+                val second = runtime.generateAll("Name a colour.").text()
                 runtime.resetConversation()
-                val third = runtime.generateResponse("Name a colour.").text()
+                val third = runtime.generateAll("Name a colour.").text()
 
                 assertEquals(second, third, "reopened conversations should answer identically")
             } finally {
@@ -176,7 +179,7 @@ class LiteRtLmGenerationTest {
         runBlocking {
             val loader = LiteRtLmModelLoader(ModelConfig(systemPrompt = "You are terse."))
             try {
-                val outcome = runCatching { loader.load(path).generateResponse("Say hello.").text() }
+                val outcome = runCatching { (loader.load(path).open() as LiteRtLmGeneratingConnection).generateAll("Say hello.").text() }
                 outcome.onSuccess { reply ->
                     assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
                 }.onFailure { failure ->

@@ -1,33 +1,31 @@
 package io.github.lemcoder.koinference.backend
 
-import io.github.lemcoder.koinference.runtime.ModelRuntime
+import io.github.lemcoder.koinference.runtime.Model
 
 /**
- * Owns loaded models and hands out runtimes over them.
+ * Owns loaded weights and hands out [Model]s over them.
  *
- * A loader is a resource: every runtime it returns holds native memory that outlives the
- * Kotlin object graph, so dropping the last reference to a loader without unloading leaks
- * whatever it still holds. There is no finalizer to fall back on — [unloadAll] is the way out
- * when the caller no longer tracks individual paths.
+ * A loader is a resource: every model it returns holds native memory that outlives the Kotlin
+ * object graph, so dropping the last reference to a loader without unloading leaks whatever it still
+ * holds. There is no finalizer — [unloadAll] is the way out when the caller no longer tracks paths.
  */
 interface ModelLoader {
-    /**
-     * Load [modelPath], or return the runtime already loaded for it.
-     *
-     * Returns the base [ModelRuntime]. A loader that only loads weights cannot promise what can be
-     * done with them — an embedding-only model has no generation to offer — so
-     * [io.github.lemcoder.koinference.Koinference.load] is what narrows this to a
-     * [io.github.lemcoder.koinference.runtime.GeneratingRuntime], with a message naming the backend
-     * rather than a ClassCastException.
-     *
-     * Safe to call concurrently for the same path: the weights are loaded once and every
-     * caller gets the same runtime.
-     */
-    suspend fun load(modelPath: String): ModelRuntime
 
-    /** Release the runtime for [modelPath], if any. Idempotent. */
+    /**
+     * Load [modelPath], or return the [Model] already loaded for it.
+     *
+     * Returns the weights, not a usage of them — a [io.github.lemcoder.koinference.runtime.Connection]
+     * is opened over the model. A loader cannot promise what the weights can do, so the caller narrows
+     * the connection the model opens, not the model.
+     *
+     * Safe to call concurrently for the same path: the weights are loaded once and every caller gets
+     * the same [Model].
+     */
+    suspend fun load(modelPath: String): Model
+
+    /** Release the model for [modelPath], if any. Idempotent. */
     suspend fun unload(modelPath: String)
 
-    /** Release every runtime this loader holds. Idempotent; the loader stays usable. */
+    /** Release every model this loader holds. Idempotent; the loader stays usable. */
     suspend fun unloadAll()
 }

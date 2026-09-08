@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.executorch
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.runtime.Model
 import io.github.lemcoder.koinference.executorch.internal.ExecuTorchBridge
 import io.github.lemcoder.koinference.executorch.internal.ExecuTorchModelOptions
 import io.github.lemcoder.koinference.executorch.internal.ExecuTorchSessionOptions
@@ -27,31 +28,31 @@ class ExecuTorchModelLoader internal constructor(
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
-    private val runtimes = mutableMapOf<String, ExecuTorchRuntime>()
+    private val models = mutableMapOf<String, ExecuTorchLoadedModel>()
 
     private val lock = Mutex()
 
-    override suspend fun load(modelPath: String): ExecuTorchTextRuntime {
+    override suspend fun load(modelPath: String): Model {
         require(modelPath.endsWith(".pte")) {
             "ExecuTorch loader expects a .pte model path, got: $modelPath"
         }
 
         return lock.withLock {
-            runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
+            models[modelPath] ?: newModel(modelPath).also { models[modelPath] = it }
         }
     }
 
     override suspend fun unload(modelPath: String) {
-        val runtime = lock.withLock { runtimes.remove(modelPath) }
-        runtime?.close()
+        val model = lock.withLock { models.remove(modelPath) }
+        model?.close()
     }
 
     override suspend fun unloadAll() {
-        val all = lock.withLock { runtimes.values.toList().also { runtimes.clear() } }
+        val all = lock.withLock { models.values.toList().also { models.clear() } }
         all.forEach { it.close() }
     }
 
-    private suspend fun newRuntime(modelPath: String): ExecuTorchRuntime {
+    private suspend fun newModel(modelPath: String): ExecuTorchLoadedModel {
         // Found here rather than inside the bridge, so the failure is a Kotlin exception naming the
         // files it looked for. Handing LlmModule a missing tokenizer path crashes in native code.
         val tokenizerPath = TokenizerFile.beside(modelPath, files)
@@ -70,8 +71,7 @@ class ExecuTorchModelLoader internal constructor(
 
         val model = withContext(Dispatchers.Default) { bridge.openModel(modelOptions) }
 
-        return ExecuTorchRuntime(
-            bridge = bridge,
+        return ExecuTorchLoadedModel(
             modelOptions = modelOptions,
             model = model,
             sessionOptions = ExecuTorchSessionOptions(

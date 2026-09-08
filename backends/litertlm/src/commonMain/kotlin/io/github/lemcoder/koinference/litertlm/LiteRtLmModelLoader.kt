@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.litertlm
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.runtime.Model
 import io.github.lemcoder.koinference.litertlm.internal.EngineOptions
 import io.github.lemcoder.koinference.litertlm.internal.LiteRtLmBridge
 import io.github.lemcoder.koinference.litertlm.internal.platformBridge
@@ -24,7 +25,7 @@ class LiteRtLmModelLoader internal constructor(
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
-    private val runtimes = mutableMapOf<String, LiteRtLmRuntime>()
+    private val models = mutableMapOf<String, LiteRtLmLoadedModel>()
 
     // Held across the load itself, not only around the map. Two callers asking for the same
     // model would otherwise both miss the cache and both load the weights, and the one that
@@ -33,7 +34,7 @@ class LiteRtLmModelLoader internal constructor(
     // machinery than a loader that is normally used from one place needs.
     private val lock = Mutex()
 
-    override suspend fun load(modelPath: String): LiteRtLmTextRuntime {
+    override suspend fun load(modelPath: String): Model {
         // LiteRT-LM rejects a raw .tflite: weights have to be packaged in one of these two
         // containers, together with the tokenizer and metadata it needs.
         require(modelPath.endsWith(".litertlm") || modelPath.endsWith(".task")) {
@@ -41,25 +42,25 @@ class LiteRtLmModelLoader internal constructor(
         }
 
         return lock.withLock {
-            runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
+            models[modelPath] ?: newModel(modelPath).also { models[modelPath] = it }
         }
     }
 
     override suspend fun unload(modelPath: String) {
         // Unlike the llama.cpp loader, dropping the reference is not enough: the engine is
         // native memory and would leak until the process exits.
-        val runtime = lock.withLock { runtimes.remove(modelPath) }
-        runtime?.close()
+        val model = lock.withLock { models.remove(modelPath) }
+        model?.close()
     }
 
     override suspend fun unloadAll() {
         val all = lock.withLock {
-            runtimes.values.toList().also { runtimes.clear() }
+            models.values.toList().also { models.clear() }
         }
         all.forEach { it.close() }
     }
 
-    private suspend fun newRuntime(modelPath: String): LiteRtLmRuntime {
+    private suspend fun newModel(modelPath: String): LiteRtLmLoadedModel {
         val options = EngineOptions(
             modelPath = modelPath,
             cacheDir = config.cacheDir,
@@ -70,8 +71,7 @@ class LiteRtLmModelLoader internal constructor(
         // Loading maps and prepares the weights, so it does not belong on the caller's
         // thread even though the handle it returns is just a pointer.
         val engine = withContext(Dispatchers.Default) { bridge.openEngine(options) }
-        return LiteRtLmRuntime(
-            bridge = bridge,
+        return LiteRtLmLoadedModel(
             engineOptions = options,
             systemPrompt = config.systemPrompt,
             engine = engine,

@@ -60,7 +60,7 @@ class CeraModelLoaderTest {
                 contextTokens = 2048,
                 maxOutputTokens = 64,
             ),
-        ).load("/m/a.gguf").generateResponse("hi")
+        ).load("/m/a.gguf").open().let { (it as io.github.lemcoder.koinference.runtime.GeneratingConnection).generateAll("hi") }
 
         assertEquals(2048, bridge.model.options.contextTokens)
         assertEquals(Accelerator.CPU, bridge.model.options.accelerator)

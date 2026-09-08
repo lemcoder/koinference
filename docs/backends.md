@@ -15,14 +15,19 @@ and the seam a **backend implementor** sees, below. A caller never names `LlamaC
 
 ```kotlin
 val koi = Koinference(LlamaCpp, LiteRtLm, config = ModelConfig(contextTokens = 512))
-val runtime = koi.load(path)
+val id   = koi.loadModel(path)                     // weights into RAM, a handle back
+val conn = koi.openConnection(id) as GeneratingConnection
+conn.generate("…") { part -> … }                   // callback streaming, no Flow
+conn.close()
 ```
 
-`ModelLoader.load` returns a `TextModelRuntime` — everything a loaded text model can do, as one
-type — so a caller who wants a reply does not first cast to prove what it got. That cast was the
-same hedge the deleted embedding runtime was: room kept for a case that does not exist. If an
-embedding backend is ever added, `load` widens or the registry gains a typed variant, and that
-problem arrives with the code that needs it.
+Loading splits from opening. `loadModel` puts weights in RAM and returns a `ModelId`;
+`openConnection` opens a `Connection` — a decode context — over that handle, possibly several times,
+and each is torn down independently. `ModelLoader.load` returns a `Model`, not a usage of one: a
+loader cannot promise what the weights do, so the caller narrows the *connection* to
+`GeneratingConnection` or `EmbeddingConnection`. `Backend.modalities` says which kinds a backend
+produces without loading anything. Where a model runs (CPU/GPU) is fixed when it is loaded; to move
+it, load a second model — there is no in-place reload, and so no `markClosed`.
 
 `ModelConfig` is one vocabulary for knobs the engines spell differently — llama.cpp's
 `nCtx`/`nPredict` are LiteRT-LM's `maxTokens`/`maxOutputTokens`. A knob an engine has no
@@ -68,54 +73,55 @@ asserts against a value rather than against a call with nine positional argument
 **Every function throws on failure.** Callers do not check for null, zero or -1; a binding turns
 whatever its C API returns into an exception with the model path in the message.
 
-## The runtime above it
+## The connection above it
 
-`RuntimeGuard` in `:core` is the shared scaffolding, and both runtimes use it:
+`ConnectionGuard` in `:core` is the shared scaffolding, and every connection uses it:
 
-- `whileOpen { }` — one caller at a time, and a failure rather than a call into freed memory once
-  the runtime is unloaded. The check is *inside* the lock: outside it, an unload could pass
-  between the check and the call.
-- `streamWhileOpen { }` — the same, held across a whole flow collection. Streaming a reply is one
-  long turn, not a series of independent calls, and a second generation starting half way through
-  would interleave into the decoder state.
+- `whileOpen { }` — one caller at a time, and a `KoinferenceException.ConnectionClosed` rather than
+  a call into freed memory once the connection is closed. The check is *inside* the lock: outside
+  it, a close could pass between the check and the call. A whole generation runs inside one
+  `whileOpen`, so streaming a reply is one held turn — a second call cannot interleave into the
+  decoder state.
 - `close { }` — idempotent, and it waits for an in-flight generation rather than freeing under it.
-- `markClosed()` — for the reload that has already freed the old handles and failed to produce new
-  ones. There is nothing left to release and nothing left that may be called.
 
-A backend change reloads the weights on both engines, for the same underlying reason in two
-different places: llama.cpp fixes GPU offload in `llama_model_params.n_gpu_layers` at load time,
-LiteRT-LM decides where a model runs when the engine is created. If the reload fails, the runtime
-is left unloaded and says so, rather than pretending to be on the new backend.
+There is no `streamWhileOpen` (streaming is a callback, not a `Flow`) and no `markClosed`. The
+latter existed because the old runtime freed a model in place to retune it and could be left holding
+nothing; a connection never frees the weights — that is the `Model`'s job — so its only dead state
+is `close`. Accelerator is a load-time property (`llama_model_params.n_gpu_layers`; LiteRT-LM decides
+at engine creation), so it is fixed when a `Model` is loaded rather than switched under an open
+connection.
 
-## What belongs on ModelRuntime
+## Model and Connection
 
-`ModelRuntime` carries what every engine has: the sampling parameters and device it was loaded
-with, and suspending updates for both. It was an empty marker while both backends declared those
-four members themselves, with near-identical KDoc explaining that the signatures matched but the
-contracts did not.
+A backend's loader returns a `Model` — the weights — and `Model.open()` hands out a `Connection`, a
+decode context over them. This mirrors the internal seam, where a session is already produced by a
+model; the public API used to collapse the two into one `ModelRuntime`, and splitting them is what
+lets several connections share one set of weights and removes the in-place "reload to retune"
+dance.
 
-They differ in cost, not in meaning — llama.cpp rebuilds a session and may reload the weights,
-LiteRT-LM reopens a conversation and loses its prefilled history, and both are "this may throw away
-work the engine had prepared". One contract states that, and stating it is what lets a caller
-holding whatever `load()` returned retune it without knowing which engine answered. Before the
-hoist that took a cast to a backend-specific interface, which put the caller straight back into
-knowing its backend.
+`GeneratingConnection` carries the sampling parameters it was opened with and a suspending
+`updateGenerationParameters` that rebuilds the decode context (the sampler is fixed when the context
+opens). Changing the *device* is not a connection operation: it is a new `Model`. `EmbeddingConnection`
+shares nothing past `Connection` — no reply to stream, no parts — and is a thin lifetime because
+embedding has no KV cache.
 
-The test for it is typed as `ModelRuntime` on purpose: see `ModelRuntimeContractTest`.
-
-**What stays on a backend's interface is what only that backend has.** LiteRT-LM's
+**What stays on a backend's connection is what only that backend has.** LiteRT-LM's
 `resetConversation` has no llama.cpp counterpart — that engine carries no conversation to forget —
-so it is not hoisted. The bar is a counterpart that exists, not a signature that would compile.
+so it is on `LiteRtLmGeneratingConnection`, not hoisted. The bar is a counterpart that exists, not a
+signature that would compile.
 
 ## One runtime, and replies made of parts
 
-`runtime` holds what every model has — settings, sampling parameters, `RuntimeGuard` — and
-`GeneratingRuntime` is the one interface a backend implements to generate anything:
+`GeneratingConnection` is the one interface a backend implements to generate anything, and it
+streams through a callback rather than a `Flow` (a KMP public API — see `CLAUDE.md`):
 
 ```kotlin
-suspend fun generateResponse(prompt: List<PromptPart>, constraint: GenerationConstraint? = null): List<ResponsePart>
-fun streamResponse(prompt: List<PromptPart>, constraint: GenerationConstraint? = null): Flow<ResponsePart>
+suspend fun generate(prompt: List<PromptPart>, constraint: GenerationConstraint? = null, onPart: (ResponsePart) -> Unit)
+suspend fun generateAll(prompt: List<PromptPart>, constraint: GenerationConstraint? = null): List<ResponsePart>
 ```
+
+The backend's internal session still streams a `Flow`; the connection collects it *behind the seam*
+into the public callback, so nothing published sees a `Flow`.
 
 **It was split by output type before, and a real model broke the split.** There was a
 `runtime.text` with `TextRuntime` returning a `String` and a `runtime.vision` with `ImageRuntime`
@@ -128,8 +134,8 @@ that was the whole point.
 `FakeOmniBackend` in `:core`'s tests is written as if it were such an engine, emitting
 `Text("Hello") · Audio · Text(" there") · Audio`, and `MultiModalityTest` asserts the interleaving
 survives both the blocking call and the stream. What it needs from `:core` is one `Modality`
-constant and nothing else; `Backend`, `ModelLoader`, `ModelConfig`, `GeneratingRuntime` and
-`RuntimeGuard` are all reused unchanged. `PromptPart` needed nothing either — it has carried
+constant and nothing else; `Backend`, `ModelLoader`, `ModelConfig`, `GeneratingConnection` and
+`ConnectionGuard` are all reused unchanged. `PromptPart` needed nothing either — it has carried
 `ImageFile` and `AudioFile` from the start, which is why a vision-language model answering in words
 is `Modality.TEXT`: **modality is named for the output**, because input was already multimodal.
 
@@ -237,7 +243,7 @@ facade through cinterop.
 **It needed nothing added to `:core`, and that is the point of it.** A prompt has carried
 `PromptPart.AudioFile` since before any engine could read one, and a reply has been a list of
 `ResponsePart` since a model that interleaves speech with its transcript broke the older design.
-Speech to text is exactly that shape, so `WhisperTextRuntime` is a plain `GeneratingRuntime`: hand it
+Speech to text is exactly that shape, so `WhisperGeneratingConnection` is a plain `GeneratingConnection`: hand it
 audio, collect text. Until now the multimodal claim rested on `FakeOmniBackend` alone.
 
 `Modality` stays `TEXT`, because it is named for the **output**. An engine that reads audio and
@@ -342,7 +348,7 @@ implementation was silently giving Linux the Darwin one. See the rules at the to
 1. `internal interface XBridge` / `XModel` / `XSession` in `commonMain/internal`, plus
    `internal expect fun platformBridge(): XBridge` and the two options data classes.
 2. A `FacadeBridge.kt` and/or `JniBridge.kt` per leg.
-3. A runtime in `commonMain` that owns a `RuntimeGuard` and holds no platform types.
+3. A connection in `commonMain` that owns a `ConnectionGuard` and holds no platform types.
 4. A loader in `commonMain` with an `internal constructor` taking the bridge, and a public one
    taking a `ModelConfig` and defaulting to `platformBridge()`. That constructor pair is what lets
    tests inject a fake. Map `ModelConfig`'s fields onto the engine's own names here — this is the

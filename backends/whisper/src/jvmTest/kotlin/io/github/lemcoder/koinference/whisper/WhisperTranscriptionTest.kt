@@ -1,10 +1,10 @@
 package io.github.lemcoder.koinference.whisper
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.prompt.PromptPart
-import io.github.lemcoder.koinference.runtime.media.ResponsePart
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertTrue
@@ -28,8 +28,8 @@ class WhisperTranscriptionTest {
         runBlocking {
             val koi = Koinference(Whisper)
             try {
-                val text = koi.load(modelPath)
-                    .generateResponse(listOf(PromptPart.AudioFile(wavPath)))
+                val text = (koi.openConnection(koi.loadModel(modelPath)) as GeneratingConnection)
+                    .generateAll(listOf(PromptPart.AudioFile(wavPath)))
                     .filterIsInstance<ResponsePart.Text>()
                     .joinToString("") { it.text }
 
@@ -53,8 +53,8 @@ class WhisperTranscriptionTest {
                 val arrivals = mutableListOf<Double>()
                 val segments = mutableListOf<String>()
 
-                koi.load(modelPath).streamResponse(listOf(PromptPart.AudioFile(wavPath)))
-                    .collect { part ->
+                (koi.openConnection(koi.loadModel(modelPath)) as GeneratingConnection)
+                    .generate(listOf(PromptPart.AudioFile(wavPath))) { part ->
                         if (part is ResponsePart.Text) {
                             arrivals += (System.nanoTime() - started) / 1e6
                             segments += part.text

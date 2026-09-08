@@ -1,4 +1,7 @@
 package io.github.lemcoder.koinference.litertlm
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
+import io.github.lemcoder.koinference.prompt.promptOf
 
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.toKString
@@ -28,7 +31,7 @@ class LiteRtLmTokenizerTest {
         runBlocking {
             val loader = LiteRtLmModelLoader()
             try {
-                val runtime = loader.load(path)
+                val runtime = loader.load(path).open() as LiteRtLmGeneratingConnection
 
                 val short = runtime.countTokens("Hello")
                 val long = runtime.countTokens(
@@ -58,7 +61,7 @@ class LiteRtLmTokenizerTest {
 
         runBlocking {
             val loader = LiteRtLmModelLoader()
-            val runtime = loader.load(path)
+            val runtime = loader.load(path).open() as LiteRtLmGeneratingConnection
             loader.unloadAll()
 
             // The engine is freed on unload; counting through it afterwards would be a

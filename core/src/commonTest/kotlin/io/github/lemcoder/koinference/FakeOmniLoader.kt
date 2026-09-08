@@ -2,18 +2,16 @@ package io.github.lemcoder.koinference
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
-import io.github.lemcoder.koinference.runtime.ModelRuntime
+import io.github.lemcoder.koinference.runtime.Model
 
 internal class FakeOmniLoader(val config: ModelConfig) : ModelLoader {
 
-    private val runtimes = mutableMapOf<String, FakeOmniRuntime>()
+    private val models = mutableMapOf<String, FakeOmniModel>()
 
-    override suspend fun load(modelPath: String): ModelRuntime =
-        runtimes.getOrPut(modelPath) { FakeOmniRuntime(config) }
+    override suspend fun load(modelPath: String): Model =
+        models.getOrPut(modelPath) { FakeOmniModel(config) }
 
-    override suspend fun unload(modelPath: String) {
-        runtimes.remove(modelPath)
-    }
+    override suspend fun unload(modelPath: String) { models.remove(modelPath) }
 
-    override suspend fun unloadAll() = runtimes.clear()
+    override suspend fun unloadAll() = models.clear()
 }

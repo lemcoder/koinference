@@ -1,10 +1,10 @@
 package io.github.lemcoder.koinference.cera
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
 
 import io.github.lemcoder.koinference.Koinference
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import java.io.File
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,7 +28,7 @@ class CeraDeviceTest {
         runBlocking {
             val koi = Koinference(Cera, config = ModelConfig(maxOutputTokens = 24))
             try {
-                val reply = koi.load(modelPath).generateResponse("What is the capital of France?")
+                val reply = (koi.openConnection(koi.loadModel(modelPath)) as GeneratingConnection).generateAll("What is the capital of France?")
                     .filterIsInstance<ResponsePart.Text>().joinToString("") { it.text }
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
                 println("CERA-DEVICE reply: $reply")
@@ -51,21 +51,21 @@ class CeraDeviceTest {
         runBlocking {
             val koi = Koinference(Cera, config = ModelConfig(maxOutputTokens = 64))
             try {
-                val runtime = koi.load(modelPath) as CeraTextRuntime
+                val runtime = koi.openConnection(koi.loadModel(modelPath)) as CeraGeneratingConnection
                 val prompt = "Count from one to forty, separated by commas."
 
                 // Warmup: the first generation on a freshly loaded engine is not the steady state.
-                runtime.generateResponse(prompt)
+                runtime.generateAll(prompt)
 
                 val blockingStart = System.nanoTime()
-                val blocking = runtime.generateResponse(prompt)
+                val blocking = runtime.generateAll(prompt)
                     .filterIsInstance<ResponsePart.Text>().joinToString("") { it.text }
                 val blockingMs = (System.nanoTime() - blockingStart) / 1_000_000.0
                 val blockingTokens = runtime.countTokens(blocking)
 
                 val streamStart = System.nanoTime()
-                val parts = runtime.streamResponse(prompt).toList()
-                    .filterIsInstance<ResponsePart.Text>()
+                val parts = mutableListOf<ResponsePart.Text>()
+                runtime.generate(prompt) { if (it is ResponsePart.Text) parts += it }
                 val streamMs = (System.nanoTime() - streamStart) / 1_000_000.0
                 val streamed = parts.joinToString("") { it.text }
                 val streamedTokens = runtime.countTokens(streamed)

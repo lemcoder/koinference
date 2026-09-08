@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.onnx
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.runtime.Model
 import io.github.lemcoder.koinference.onnx.internal.ModelFiles
 import io.github.lemcoder.koinference.onnx.internal.OnnxBridge
 import io.github.lemcoder.koinference.onnx.internal.OnnxModelOptions
@@ -28,31 +29,31 @@ class OnnxModelLoader internal constructor(
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
-    private val runtimes = mutableMapOf<String, OnnxEmbeddingRuntime>()
+    private val models = mutableMapOf<String, OnnxLoadedModel>()
 
     private val lock = Mutex()
 
-    override suspend fun load(modelPath: String): OnnxEmbeddingRuntime {
+    override suspend fun load(modelPath: String): Model {
         require(modelPath.endsWith(".onnx")) {
             "ONNX loader expects a .onnx model path, got: $modelPath"
         }
 
         return lock.withLock {
-            runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
+            models[modelPath] ?: newModel(modelPath).also { models[modelPath] = it }
         }
     }
 
     override suspend fun unload(modelPath: String) {
-        val runtime = lock.withLock { runtimes.remove(modelPath) }
-        runtime?.close()
+        val model = lock.withLock { models.remove(modelPath) }
+        model?.close()
     }
 
     override suspend fun unloadAll() {
-        val all = lock.withLock { runtimes.values.toList().also { runtimes.clear() } }
+        val all = lock.withLock { models.values.toList().also { models.clear() } }
         all.forEach { it.close() }
     }
 
-    private suspend fun newRuntime(modelPath: String): OnnxEmbeddingRuntime {
+    private suspend fun newModel(modelPath: String): OnnxLoadedModel {
         val directory = modelPath.substringBeforeLast('/', "")
         val vocabularyText = vocabularyBeside(directory)
             ?: error(
@@ -75,13 +76,12 @@ class OnnxModelLoader internal constructor(
             bridge.openModel(OnnxModelOptions(modelPath = modelPath, threads = config.threads))
         }
 
-        return OnnxEmbeddingRuntime(
+        return OnnxLoadedModel(
             model = model,
             vocabulary = vocabulary,
             poolingMode = pooling,
             maxTokens = config.contextTokens.takeIf { it > 0 } ?: DEFAULT_MAX_TOKENS,
             modelPath = modelPath,
-            parameters = config.parameters,
         )
     }
 

@@ -2,6 +2,7 @@ package io.github.lemcoder.koinference.cera
 
 import io.github.lemcoder.koinference.backend.ModelConfig
 import io.github.lemcoder.koinference.backend.ModelLoader
+import io.github.lemcoder.koinference.runtime.Model
 import io.github.lemcoder.koinference.cera.internal.CeraBridge
 import io.github.lemcoder.koinference.cera.internal.CeraModelOptions
 import io.github.lemcoder.koinference.cera.internal.CeraSessionOptions
@@ -24,36 +25,36 @@ class CeraModelLoader internal constructor(
 
     constructor(config: ModelConfig = ModelConfig()) : this(platformBridge(), config)
 
-    private val runtimes = mutableMapOf<String, CeraRuntime>()
+    private val models = mutableMapOf<String, CeraLoadedModel>()
 
     // Held across the load, not only around the map: two callers asking for the same model would
     // otherwise both load the weights, and the loser would be dropped with no way left to free it.
     private val lock = Mutex()
 
-    override suspend fun load(modelPath: String): CeraTextRuntime {
+    override suspend fun load(modelPath: String): Model {
         require(modelPath.endsWith(".gguf")) {
             "Cera loader expects a .gguf model path, got: $modelPath"
         }
 
         return lock.withLock {
-            runtimes[modelPath] ?: newRuntime(modelPath).also { runtimes[modelPath] = it }
+            models[modelPath] ?: newModel(modelPath).also { models[modelPath] = it }
         }
     }
 
     override suspend fun unload(modelPath: String) {
         // Dropping the reference is not enough: the engine is Rust-side memory that would live
         // until the process exits.
-        val runtime = lock.withLock { runtimes.remove(modelPath) }
-        runtime?.close()
+        val model = lock.withLock { models.remove(modelPath) }
+        model?.close()
     }
 
     override suspend fun unloadAll() {
-        val all = lock.withLock { runtimes.values.toList().also { runtimes.clear() } }
+        val all = lock.withLock { models.values.toList().also { models.clear() } }
         all.forEach { it.close() }
     }
 
     // The one place that knows both vocabularies: ModelConfig's and Cera's.
-    private suspend fun newRuntime(modelPath: String): CeraRuntime {
+    private suspend fun newModel(modelPath: String): CeraLoadedModel {
         val modelOptions = CeraModelOptions(
             modelPath = modelPath,
             accelerator = config.settings.accelerator,
@@ -62,8 +63,7 @@ class CeraModelLoader internal constructor(
 
         val model = withContext(Dispatchers.Default) { bridge.openModel(modelOptions) }
 
-        return CeraRuntime(
-            bridge = bridge,
+        return CeraLoadedModel(
             modelOptions = modelOptions,
             model = model,
             sessionOptions = CeraSessionOptions(

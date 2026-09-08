@@ -5,11 +5,12 @@ import io.github.lemcoder.koinference.llamacpp.internal.ModelOptions
 import io.github.lemcoder.koinference.llamacpp.internal.unsupportedReason
 import io.github.lemcoder.koinference.llamacpp.internal.SessionOptions
 import io.github.lemcoder.koinference.llamacpp.internal.platformBridge
-import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import android.util.Log
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
+import io.github.lemcoder.koinference.runtime.media.ResponsePart
 import java.io.File
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -94,13 +95,12 @@ class LlamaCppDeviceTest {
         // the loader owns backend init and session creation, which the bridge test does by hand.
         runBlocking {
             val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 16))
-            val runtime = loader.load(modelPath)
+            val conn = loader.load(modelPath).open() as GeneratingConnection
             try {
-                assertIs<LlamaCppTextRuntime>(runtime)
-                val reply = runtime.generateResponse("Once upon a time").text()
+                val reply = conn.generateAll("Once upon a time").text()
                 assertTrue(reply.isNotBlank(), "expected generated text, got: '$reply'")
             } finally {
-                loader.unload(modelPath)
+                conn.close(); loader.unload(modelPath)
             }
         }
     }
@@ -119,13 +119,14 @@ class LlamaCppDeviceTest {
 
         runBlocking {
             val loader = LlamaCppModelLoader(ModelConfig(contextTokens = 256, maxOutputTokens = 24))
-            val runtime = loader.load(modelPath)
+            val conn = loader.load(modelPath).open() as GeneratingConnection
             try {
                 // Greedy, so the two calls answer identically rather than by luck.
-                runtime.updateGenerationParameters(GenerationParameters(temperature = 0.0))
+                conn.updateGenerationParameters(GenerationParameters(temperature = 0.0))
 
-                val streamed = runtime.streamResponse("Once upon a time").toList().textParts()
-                val blocking = runtime.generateResponse("Once upon a time").text()
+                val streamed = mutableListOf<String>()
+                conn.generate("Once upon a time") { if (it is ResponsePart.Text) streamed += it.text }
+                val blocking = conn.generateAll("Once upon a time").text()
 
                 Log.i(
                     "koinference-benchmark",
@@ -136,7 +137,7 @@ class LlamaCppDeviceTest {
                 assertTrue(streamed.size > 1, "expected several chunks, got ${streamed.size}")
                 assertEquals(blocking, streamed.joinToString(""))
             } finally {
-                loader.unload(modelPath)
+                conn.close(); loader.unload(modelPath)
             }
         }
     }

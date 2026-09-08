@@ -10,10 +10,12 @@ import io.github.lemcoder.koinference.benchmark.config.WorkloadConfig
 import io.github.lemcoder.koinference.litertlm.LiteRtLm
 import io.github.lemcoder.koinference.llamacpp.LlamaCpp
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.runtime.GeneratingRuntime
+import io.github.lemcoder.koinference.runtime.GeneratingConnection
 import io.github.lemcoder.koinference.runtime.generation.GenerationParameters
 import io.github.lemcoder.koinference.runtime.RuntimeSettings
 import io.github.lemcoder.koinference.runtime.text.TokenCounting
+import kotlinx.coroutines.channels.trySendBlocking
+import kotlinx.coroutines.flow.channelFlow
 
 /**
  * Adapts any [Backend] to the harness.
@@ -73,23 +75,29 @@ internal class BackendEngine(private val backend: Backend) : BenchmarkInferenceE
                 cacheDir = config.cacheDir,
             ),
         )
-        val runtime = loader.load(config.modelPath) as GeneratingRuntime
-        return RuntimeSession(runtime) { loader.unload(config.modelPath) }
+        val model = loader.load(config.modelPath)
+        val connection = model.open() as GeneratingConnection
+        return ConnectionSession(connection) { loader.unload(config.modelPath) }
     }
 
-    private class RuntimeSession(
-        private val runtime: GeneratingRuntime,
+    private class ConnectionSession(
+        private val connection: GeneratingConnection,
         private val release: suspend () -> Unit,
     ) : BenchmarkInferenceEngine.EngineSession {
 
-        // Hands back the backend's flow untouched. Anything done to it here — buffering, mapping,
-        // a dispatcher hop — would land in the first-chunk measurement for this engine and not
-        // for the other.
-        override fun stream(request: GenerationRequest) = runtime.streamResponse(request.prompt)
+        // Bridges the connection's callback to the harness's internal Flow with channelFlow — the
+        // consumer-side wrap the public no-Flow rule expects. Nothing else is done to the parts, so
+        // the first-chunk measurement is the engine's and not this adapter's.
+        override fun stream(request: GenerationRequest) = channelFlow {
+            connection.generate(request.prompt) { part -> trySendBlocking(part) }
+        }
 
         override suspend fun countTokens(text: String): Int? =
-            (runtime as? TokenCounting)?.countTokens(text)
+            (connection as? TokenCounting)?.countTokens(text)
 
-        override suspend fun close() = release()
+        override suspend fun close() {
+            connection.close()
+            release()
+        }
     }
 }

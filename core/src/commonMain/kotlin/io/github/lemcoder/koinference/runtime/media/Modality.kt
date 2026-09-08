@@ -23,7 +23,7 @@ enum class Modality {
      * The odd one out, and deliberately here rather than in a type of its own: this enum answers
      * "what does asking this backend for something get you", and for an embedding model the answer
      * is numbers. A backend declaring this implements
-     * [io.github.lemcoder.koinference.runtime.EmbeddingRuntime], not `GeneratingRuntime`.
+     * [io.github.lemcoder.koinference.runtime.EmbeddingConnection], not `GeneratingConnection`.
      */
     EMBEDDING,
 }
