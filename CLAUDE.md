@@ -394,7 +394,9 @@ natives. No CMake, no cinterop, no C in `:backends:cera` at all.
   same profile — CI and publish differ only by `ffi-buffer`, which is Dart-only — so it is not a
   build-flag artifact. Unreleased code, so this is a snapshot rather than a verdict; the point is
   that the perf work landed since v0.4.0 targets Q4_K/Q5_K, prefill and GPU, and **nothing on
-  `main` mentions Q4_0**, which is what this repository benchmarks.
+  `main` mentions Q4_0** — which is the quant *this particular comparison* happened to use. The
+  harness runs whatever a model ships (Q4_0, Q4_K, Q5_K_M, …), so re-measuring on a Q4_K/Q5_K model
+  is the fair place to look for that work rather than concluding `main` is simply slower.
 - **Two backends now read `.gguf`.** Registration order decides; `backendById("cera")` is how a
   caller means one specifically. See `docs/backends.md`.
 
