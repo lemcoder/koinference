@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
+import io.github.lemcoder.koinference.requireModelFits
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
 import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
@@ -27,6 +28,7 @@ internal object JniBridge : LlamaCppBridge {
     private val backendInit: Unit by lazy { kniBridge0() }
 
     override fun openModel(options: ModelOptions): LlamaCppModel {
+        requireModelFits(options.modelPath)
         backendInit
         val handle = kniBridge3(
             options.modelPath,

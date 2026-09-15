@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
+import io.github.lemcoder.koinference.requireModelFits
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
 import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
@@ -22,6 +23,7 @@ import java.nio.ByteOrder
 
 internal object JniBridge : LiteRtLmBridge {
     override fun openEngine(options: EngineOptions): LiteRtLmEngine {
+        requireModelFits(options.modelPath)
         val handle = kniBridge1(
             options.modelPath,
             options.cacheDir,
