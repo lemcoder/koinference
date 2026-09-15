@@ -31,6 +31,25 @@ two numbers *mean* something.
 A Google Sheet is **not** the backbone (it is not versioned and forces the static site to pull over
 CORS). It stays an optional mirror in v2 if spreadsheet views are wanted.
 
+## What this branch implements
+
+The code-side of the pipeline that needs no live infra is built and verified on this branch; the
+FTL/GCP legs are wired but need your credentials to run.
+
+| Piece | This branch |
+|---|---|
+| NDJSON rollup | ✅ `analyze_results.py --emit-ndjson` (idempotent append), tested against the existing raw results |
+| Static site | ✅ `site/index.html` (Chart.js, tok/s + TTFT + PSS + RAG delta + device cards + table), JS-checked, seeded with `site/data.ndjson` |
+| RAG axis (data) | ✅ `RagMode`, `WorkloadConfig`/`WorkloadInfo` fields, `--ragMode`/`--ragK`, pure `Retriever` + tests |
+| RAG axis (device) | ⛔ retrieval wired to the ONNX encoder + corpus fixture in `BenchmarkRunner` — the remaining integration, needs device artifacts |
+| Pages deploy | ✅ `.github/workflows/pages.yml` (publishes `site/`) |
+| FTL automation | ✅ `.github/workflows/device-benchmark.yml` — needs `FIREBASE_PROJECT_ID`, `GCP_SA_KEY`, `FTL_RESULTS_BUCKET` secrets + a GCS-hosted model to actually run |
+| Reference model | ⛔ host Gemma 3 1B Q4_0 on GCS, pin sha256 (needs the bucket) |
+
+**Dataset location:** `site/data.ndjson`, tracked. `results/` is gitignored (scratch for raw run
+output), so the accumulating rollup lives in the published `site/` dir the page serves directly.
+The FTL workflow commits fresh rows there on `main`, which triggers `pages.yml`.
+
 ## What already exists — do not rebuild it
 
 A surprising amount of this is done, and the plan is mostly *completion and two new legs*, not
@@ -90,7 +109,8 @@ Prove the existing script end-to-end against the model we will standardise on.
 `analyze_results.py` summarises *one* run; the site needs *every* run over time in one flat file.
 
 - Add a `--emit-ndjson <path>` mode (or a small `to_site.py`) that flattens each raw
-  `BenchmarkRecord` into one denormalised row and **appends** to `results/site/data.ndjson`:
+  `BenchmarkRecord` into one denormalised row and **appends** to `site/data.ndjson` (tracked;
+  `results/` is gitignored so the rollup lives in the published dir):
 
   ```json
   {"runId":"20260915T…","ts":"2026-09-15T…","device":{"model":"shiba","label":"Pixel 8",
@@ -144,9 +164,10 @@ Turn the manual script into a workflow.
   1. Authenticate to GCP (service-account secret).
   2. Build the app + androidTest APKs.
   3. `run-ftl-benchmark.sh --engine llama.cpp --model gs://…/gemma-3-1b-it-Q4_0.gguf …`.
-  4. Pull raw JSON from the FTL results bucket; flatten → append `results/site/data.ndjson`;
-     commit (a bot commit to a `results` branch, to keep churn off `main`).
-  5. Build `site/` → `actions/deploy-pages`.
+  4. Pull raw JSON from the FTL results bucket (the script does this into `results/raw/`); flatten
+     → append `site/data.ndjson`; bot-commit it to `main`. The data must live on the branch Pages
+     deploys, so it goes to `main` (one small appended file), not a side branch.
+  5. The commit to `site/**` triggers `pages.yml` → `actions/deploy-pages`.
 - Secrets: `FIREBASE_PROJECT_ID`, `GCP_SA_KEY`, `FTL_RESULTS_BUCKET`, model bucket. None hard-coded —
   the script already refuses to run without `FIREBASE_PROJECT_ID`.
 - **Not** per-PR — FTL device-minutes cost money and take real wall-clock. Nightly + manual only.

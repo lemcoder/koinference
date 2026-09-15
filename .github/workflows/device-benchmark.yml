@@ -1,0 +1,99 @@
+name: Device benchmark (Firebase Test Lab)
+
+# Runs the reference model on a matrix of real phones in Firebase Test Lab, rolls the results into
+# site/data.ndjson, and commits it — which triggers pages.yml to redeploy the site.
+#
+# Manual by default. FTL physical-device minutes are billed (a Blaze project), so this is not a
+# per-PR check; enable the nightly schedule below once the numbers and the cost are understood.
+on:
+  workflow_dispatch:
+    inputs:
+      engines:
+        description: "Comma-separated engine ids (v1: llama.cpp)"
+        default: "llama.cpp"
+      model_uri:
+        description: "gs:// URI to the reference GGUF (e.g. Gemma 3 1B Q4_0)"
+        required: true
+      model_id:
+        description: "Model id recorded in results"
+        default: "gemma-3-1b-it"
+      quantization:
+        default: "Q4_0"
+      prompt_set:
+        default: "default"
+      iterations:
+        default: "5"
+      rag_mode:
+        description: "OFF or ON (run twice to compare)"
+        default: "OFF"
+  # schedule:
+  #   - cron: "0 6 * * *"   # nightly — costs FTL minutes; leave commented until intended
+
+permissions:
+  contents: write   # commits the refreshed site/data.ndjson back to main
+
+concurrency:
+  group: device-benchmark
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      FTL_RESULTS_BUCKET: ${{ secrets.FTL_RESULTS_BUCKET }}   # gs://... where FTL writes artifacts
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      # The benchmark app packages the JNI libraries per ABI via the interop's CMake build, so this
+      # job needs the NDK, like the Android AAR job in gradle.yml.
+      - name: Setup Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      # Builds both APKs, runs FTL across benchmark/scripts/devices.yaml one shard per engine, and
+      # copies each device's benchmark-results.json into results/raw/ (FTL_RESULTS_BUCKET set above).
+      - name: Run Firebase Test Lab
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          ./benchmark/scripts/run-ftl-benchmark.sh \
+            --engine "${{ inputs.engines }}" \
+            --model "${{ inputs.model_uri }}" \
+            --model-id "${{ inputs.model_id }}" \
+            --quantization "${{ inputs.quantization }}" \
+            --prompt-set "${{ inputs.prompt_set }}" \
+            --iterations "${{ inputs.iterations }}"
+
+      - name: Roll results into the site dataset
+        run: |
+          python3 benchmark/analysis/analyze_results.py results/raw \
+            --out results/analysis \
+            --emit-ndjson site/data.ndjson
+
+      - name: Commit the refreshed dataset
+        run: |
+          if git diff --quiet -- site/data.ndjson; then
+            echo "no new rows"; exit 0
+          fi
+          git config user.name  "koinference-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add site/data.ndjson
+          git commit -m "chore(benchmark): device results $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
