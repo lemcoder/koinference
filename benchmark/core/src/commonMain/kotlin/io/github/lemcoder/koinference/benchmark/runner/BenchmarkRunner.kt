@@ -116,6 +116,11 @@ class BenchmarkRunner(
             promptSha256 = prompt.sha256,
             promptChars = prompt.text.length,
             maxNewTokens = workload.maxNewTokens,
+            ragMode = workload.ragMode,
+            ragK = workload.ragK.takeIf { it > 0 },
+            // Filled once retrieval is wired to an on-device embedding engine; null here means the
+            // run did not augment the prompt, which OFF workloads never do.
+            ragContextChars = null,
         )
 
         if (prompt.text.isEmpty()) {

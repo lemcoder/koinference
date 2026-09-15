@@ -16,9 +16,13 @@ import io.github.lemcoder.koinference.benchmark.runner.quantizationOf
  * recorded as given, because a wrong label makes two incomparable runs look comparable and no
  * amount of inspecting the file fixes that.
  */
+import io.github.lemcoder.koinference.benchmark.result.RagMode
+
 object BenchmarkArguments {
 
     const val DEFAULT_MAX_NEW_TOKENS = 128
+    /** Passages retrieved when RAG is on and no --ragK is given. */
+    const val DEFAULT_RAG_K: Int = 3
     const val DEFAULT_WARMUP = 1
     const val DEFAULT_ITERATIONS = 5
     const val DEFAULT_SEED = 42
@@ -77,6 +81,8 @@ object BenchmarkArguments {
                 set = arguments["promptSet"] ?: PROMPT_SET_DEFAULT,
                 corpusPromptIds = corpusPromptIds,
                 maxNewTokens = maxNewTokens,
+                ragMode = if (arguments["ragMode"].equals("ON", ignoreCase = true)) RagMode.ON else RagMode.OFF,
+                ragK = arguments["ragK"]?.toIntOrNull() ?: DEFAULT_RAG_K,
             ),
             sampling = SamplingConfig(
                 temperature = arguments["temperature"]?.toDoubleOrNull() ?: 0.0,
@@ -101,13 +107,16 @@ object BenchmarkArguments {
         set: String,
         corpusPromptIds: List<String>,
         maxNewTokens: Int,
+        ragMode: RagMode = RagMode.OFF,
+        ragK: Int = 0,
     ): List<WorkloadConfig> {
         val ids = when (set) {
             PROMPT_SET_ALL -> corpusPromptIds
             PROMPT_SET_DEFAULT -> DEFAULT_PROMPT_IDS
             else -> set.split(',').map { it.trim() }.filter { it.isNotEmpty() }
         }
-        return ids.map { WorkloadConfig(it, budgetFor(it, maxNewTokens)) }
+        val k = if (ragMode == RagMode.ON) ragK else 0
+        return ids.map { WorkloadConfig(it, budgetFor(it, maxNewTokens), ragMode, k) }
     }
 
     /** The token budget a prompt runs with: the requested one, raised to fit the workload. */
