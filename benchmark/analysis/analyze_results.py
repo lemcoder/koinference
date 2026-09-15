@@ -434,6 +434,109 @@ def write_charts(directory: pathlib.Path, summary: list[dict[str, Any]]) -> list
     return notes
 
 
+SITE_KEY = ("runId", "device", "engine", "workload", "ragMode")
+
+
+def _median(values: list[float]) -> float | None:
+    numeric = [v for v in values if isinstance(v, (int, float))]
+    return statistics.median(numeric) if numeric else None
+
+
+def site_rows(files: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One denormalised, site-ready row per SUCCESS record.
+
+    Medians are precomputed here so the static site is pure fetch-and-render — it never has to
+    reduce raw samples in the browser. The full raw JSON stays under results/raw (and GCS), so
+    nothing is discarded; this is the rollup the GitHub Pages page reads.
+    """
+    rows: list[dict[str, Any]] = []
+    for payload in files:
+        device = payload["device"]
+        for record in payload["records"]:
+            if record["status"] != "SUCCESS":
+                continue
+            samples = record.get("samples") or []
+            memory = record.get("memory") or {}
+            thermal = record.get("thermal") or {}
+            workload = record["workload"]
+            engine = record["engine"]
+            pss_kb = _median([s.get("peakPssKb") for s in samples]) or memory.get("peakPssKb")
+            rows.append(
+                {
+                    "runId": payload["runId"],
+                    "device": {
+                        "label": device_label(device),
+                        "manufacturer": device.get("manufacturer"),
+                        "model": device.get("model"),
+                        "soc": device.get("socModel"),
+                        "ramMb": device.get("ramMb"),
+                        "cores": device.get("cpuCores"),
+                        "abi": device.get("abi"),
+                        "sdk": device.get("sdk"),
+                        "ftlModelId": device.get("ftlModelId"),
+                        "ftlVersion": device.get("ftlVersion"),
+                        "isEmulator": device.get("isEmulator"),
+                    },
+                    "engine": {
+                        "id": engine["id"],
+                        "version": engine.get("version"),
+                        "modelId": engine.get("modelId"),
+                        "quantization": engine.get("quantization"),
+                    },
+                    "workload": {
+                        "promptId": workload.get("promptId"),
+                        # ragMode defaults to OFF so files written before the RAG axis existed
+                        # slot in cleanly as the baseline.
+                        "ragMode": workload.get("ragMode", "OFF"),
+                        "maxNewTokens": workload.get("maxNewTokens"),
+                    },
+                    "kpi": {
+                        "decodeTokPerSecMedian": _median([s.get("tokensPerSecond") for s in samples]),
+                        "ttftMsMedian": _median([s.get("ttftMs") for s in samples]),
+                        "peakPssMb": round(pss_kb / 1024, 1) if pss_kb else None,
+                        "batteryTempPeakC": thermal.get("batteryTemperaturePeakC"),
+                        "samples": len(samples),
+                    },
+                }
+            )
+    return rows
+
+
+def _site_key(row: dict[str, Any]) -> tuple:
+    return (
+        row["runId"],
+        row["device"]["label"],
+        row["engine"]["id"],
+        row["workload"]["promptId"],
+        row["workload"]["ragMode"],
+    )
+
+
+def emit_ndjson(path: pathlib.Path, rows: list[dict[str, Any]]) -> int:
+    """Append rows to an accumulating NDJSON dataset, idempotently.
+
+    A re-run of the same results replaces its own rows rather than duplicating them: any existing
+    line whose (run, device, engine, workload, ragMode) key matches a new row is dropped first.
+    So the file is safe to regenerate, and a nightly CI run only ever adds genuinely new rows.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new_keys = {_site_key(row) for row in rows}
+    kept: list[dict[str, Any]] = []
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            existing = json.loads(line)
+            if _site_key(existing) not in new_keys:
+                kept.append(existing)
+    merged = kept + rows
+    with path.open("w", encoding="utf-8") as handle:
+        for row in merged:
+            handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+    return len(merged)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("results", type=pathlib.Path, help="directory holding benchmark JSON")
@@ -442,6 +545,12 @@ def main() -> int:
         "--strict",
         action="store_true",
         help="exit non-zero if any file failed to parse or any record failed",
+    )
+    parser.add_argument(
+        "--emit-ndjson",
+        type=pathlib.Path,
+        default=None,
+        help="append site-ready rollup rows to this accumulating NDJSON file (idempotent per run)",
     )
     args = parser.parse_args()
 
@@ -458,6 +567,10 @@ def main() -> int:
     write_csv(out / "csv" / "summary.csv", summary)
     write_markdown(out / "markdown" / "summary.md", summary, failures, problems)
     chart_notes = write_charts(out / "charts", summary)
+
+    if args.emit_ndjson is not None:
+        total = emit_ndjson(args.emit_ndjson, site_rows(files))
+        print(f"ndjson:   {args.emit_ndjson} now holds {total} rows")
 
     print(f"files:    {len(files)} parsed, {len(problems)} unreadable")
     print(f"samples:  {len(rows)} measured iterations in {len(summary)} groups")
