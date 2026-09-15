@@ -27,6 +27,7 @@ internal object JniBridge : LlamaCppBridge {
     private val backendInit: Unit by lazy { kniBridge0() }
 
     override fun openModel(options: ModelOptions): LlamaCppModel {
+        requireModelFits(options.modelPath)
         backendInit
         val handle = kniBridge3(
             options.modelPath,

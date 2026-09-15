@@ -22,6 +22,7 @@ import java.nio.ByteOrder
 
 internal object JniBridge : LiteRtLmBridge {
     override fun openEngine(options: EngineOptions): LiteRtLmEngine {
+        requireModelFits(options.modelPath)
         val handle = kniBridge1(
             options.modelPath,
             options.cacheDir,
