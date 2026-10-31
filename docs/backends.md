@@ -151,11 +151,10 @@ not ship one.
 `TokenCounting` stayed in `runtime.text`, because a token is a text notion. It is the only member of
 that package now.
 
-`koi_embed` is still in `koinference_facade.h`. **Leave it there.** The generated JNI bridges are
-numbered by declaration position, so deleting a function from the middle of the header renumbers
-every bridge after it and each hand-written `kniBridgeN` call in `JniBridge.kt` silently starts
-calling a different C function. An unused C function costs nothing; a renumbered ABI costs an
-afternoon. Same rule as ever: **append new functions at the end.**
+`koi_embed` is still in `koinference_facade.h` with no Kotlin caller. It used to have to stay:
+the generated JNI bridges were numbered by declaration position (`kniBridgeN`), so deleting it
+would have renumbered every bridge after it. Since konan plugin 2.0 the bindings are named after
+the C functions, so the header's order is no longer an ABI and it can go whenever it is in the way.
 ## Three engines, and two of them read GGUF
 
 `:backends:cera` reaches a Rust engine through Cera's published UniFFI/JNA Kotlin bindings —
@@ -332,8 +331,8 @@ free to say what it answers.
 `JniBridge.kt` is byte-identical in `jvmMain` and `androidMain`, and `GgufFileSource.kt` is
 byte-identical too. **Keep both copies. Do not add an intermediate source set for them.**
 
-The generated `…llamacpp.jni` bridges are produced per compilation — `generateJvmInterop` for the
-JVM target, the Android interop for each ABI — into each target's own source set. An intermediate
+The generated JNI bindings are added to each JVM-like target's own source set — the JVM target's
+and Android's — by the konan plugin. An intermediate
 `jvmSharedMain` holding the hand-written actual would not see them, so the dedup that looks free
 costs a source-set layout that fights the generator. Two copies of a file that only calls
 generated functions is the cheaper trade.

@@ -71,18 +71,11 @@ The host target is macOS arm64 — the only place outside Android where **both**
 It verifies the harness, not the hardware: no PSS, no thermal, no battery.
 
 ```bash
-# 1. Build the native pieces once.
-cd backends/llamacpp/native
-cmake --preset macosArm64 && cmake --build --preset macosArm64 -j$(sysctl -n hw.ncpu)
-mkdir -p ../build/prebuilt/macos_arm64
-find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
-cd ../../..
-
-# 2. Fetch the models — the same weights in both formats. See "Fairness" below.
+# 1. Fetch the models — the same weights in both formats. See "Fairness" below.
 curl -fsSLO https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/LFM2.5-1.2B-Instruct-Q4_0.gguf
 curl -fsSLO https://huggingface.co/litert-community/LFM2.5-1.2B-Instruct/resolve/main/LFM2.5-1.2B-Instruct_int4.litertlm
 
-# 3. Run the protocol against both engines and write JSON.
+# 2. Run the protocol against both engines and write JSON.
 KOI_TEST_GGUF=$PWD/LFM2.5-1.2B-Instruct-Q4_0.gguf \
 KOI_TEST_LITERTLM=$PWD/LFM2.5-1.2B-Instruct_int4.litertlm \
 KOI_BENCH_FIXTURES=$PWD/benchmark/fixtures/prompts.json \

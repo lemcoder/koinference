@@ -84,7 +84,7 @@ backends/llamacpp/
 │   ├── CMakePresets.json      one preset per target
 │   ├── facade/                koinference_facade.{h,cpp} — the whole native API
 │   └── tests/                 GoogleTest suite for the facade
-└── build/prebuilt/<target>/   libkoinference-facade.a, built by CMake (never committed)
+└── build.gradle.kts           the konan block: which targets CMake builds, and how
 ```
 
 ## Running the tests
@@ -102,49 +102,40 @@ curl -fsSLO https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stori
 KOI_TEST_GGUF=$PWD/stories260K.gguf ./gradlew :backends:llamacpp:jvmTest :backends:llamacpp:macosArm64Test
 ```
 
-`:backends:llamacpp:allTests` links a test executable for *every* native target, and each one
-needs that target's `libkoinference-facade.a` under `build/prebuilt/`. Locally, run the per-target
-task for the archive you actually built.
+`:backends:llamacpp:allTests` builds llama.cpp for *every* native target before linking each test
+executable. Locally, run the per-target task for the target you mean.
 
 ## Building the natives
 
-The Kotlin build consumes a static library per target from `backends/llamacpp/build/prebuilt/`. CI
-builds them (`.github/workflows/build-artifacts.yml`) and passes them along as workflow artifacts.
-Locally, build the one you need:
+Gradle builds them. The [konan plugin](https://github.com/lemcoder/KonanPlugin) drives
+`native/CMakeLists.txt` once per target, so a test task builds what it links and nothing else:
+`./gradlew :backends:llamacpp:macosArm64Test` configures and builds llama.cpp for macOS arm64 only.
+The `konan { }` block in each backend's build file says which targets CMake builds and with which
+arguments.
 
-```bash
-cd backends/llamacpp/native
-cmake --preset macosArm64
-cmake --build --preset macosArm64 -j$(sysctl -n hw.ncpu)
-mkdir -p ../build/prebuilt/macos_arm64
-find build/macosArm64 -name "*.a" | xargs libtool -static -o ../build/prebuilt/macos_arm64/libkoinference-facade.a
-```
+- **Kotlin/Native targets** get a static library per target. The plugin merges the archives CMake
+  leaves into one and embeds it in the cinterop klib, so nothing that links the module names a
+  library — the frameworks ggml needs travel in the `.def`.
+- **The JVM and Android** get a JNI library, which CMake links from the stub the plugin generates
+  (`KOI_BUILD_JNI=ON`, target `koinference-jni`). Keeping the link in CMake keeps one toolchain end
+  to end: the C++ runtime and the Accelerate/Metal frameworks arrive transitively from
+  `koinference-facade` instead of being restated as linker flags in Gradle. Android's ABIs build
+  with the NDK in `ANDROID_NDK_HOME` and package into the AAR.
 
-Presets: `macosArm64`, `macosX64`, `linuxX64`, `iosArm64`, `iosSimulatorArm64`, `androidNativeArm64`,
-`androidNativeX64`. The Android ones need `ANDROID_NDK_HOME`.
+The Gradle daemon does not inherit a login shell's PATH, so point it at CMake when it lives
+somewhere unusual: `-Pkonan.config.cmake=/opt/homebrew/bin/cmake`, or the same key in
+`~/.gradle/gradle.properties`. `./gradlew :backends:llamacpp:konanConfig` prints every path the
+plugin uses and where it came from.
+
+The presets in `native/CMakePresets.json` (`macosArm64`, `macosX64`, `linuxX64`, `iosArm64`,
+`iosSimulatorArm64`, `androidNativeArm64`, `androidNativeX64`) are for building the facade by hand,
+for the GoogleTest suite or a `perf` session. The Android ones need `ANDROID_NDK_HOME`.
 
 ## The JNI leg
 
 `facade/koinference_facade.h` is the single source of truth for both legs. Native targets bind it
-through cinterop; the JVM target goes through JNI bridges that the Konan plugin generates from it
-(`generateJvmInteropKoinference` → Kotlin bridges + a `.c` stub).
-
-The plugin only *generates* — CMake compiles and links the stub (`KOI_BUILD_JNI=ON`, target
-`koinference-jni`). Keeping the link in CMake keeps one toolchain end to end: the C++ runtime and the
-Accelerate/Metal frameworks arrive transitively from `koinference-facade`, instead of being restated
-as linker flags in Gradle.
-
-The interop declares that CMake owns the link (`externalNativeBuild { cmake { … } }`), so the plugin
-drives it: `cmakeBuildKoinference` generates the bridges, configures CMake with
-`KONAN_JNI_STUB_DIR` / `KONAN_JNI_LIB_NAME`, and builds the `koinference-jni` target.
-`./gradlew :backends:llamacpp:jvmTest` runs that chain and loads the result.
-
-| property | purpose |
-|---|---|
-| `-PkoiStubDir=<dir>` | use an already-built stub and skip CMake entirely (this is what CI does) |
-
-`cmake` and a JDK with `include/jni.h` are located by the plugin; set `$CMAKE` if your `cmake` lives
-somewhere unusual, since the Gradle daemon does not inherit a login shell's PATH.
+through cinterop; the JVM and Android go through JNI bindings the konan plugin generates from the
+same `.def`, one Kotlin function per C function and named after it (`koi_generate`).
 
 ### Constrained output
 
@@ -210,11 +201,11 @@ tree, so the CMake build fails on every platform. Google ships the C API prebuil
 `engine.h` in the xcframework is byte-identical to the one at the tag it was cut from, so the
 header and the binary agree. `native/CMakeLists.txt` downloads and hash-checks that archive.
 
-On Apple targets Gradle drives CMake itself (`buildFacade`) rather than through the Konan plugin.
-`./gradlew :backends:litertlm:macosArm64Test` builds the facade, runs cinterop and links against
-both the facade archive and the runtime dylib. The Android leg goes through the plugin, which
-generates the bridges and lets CMake build the stub — the same arrangement `:backends:llamacpp`
-uses.
+Both legs go through the konan plugin, the same arrangement `:backends:llamacpp` uses.
+`./gradlew :backends:litertlm:macosArm64Test` builds the facade with CMake, embeds it in the
+cinterop klib and links the test binary against the runtime dylib, which CMake stages in the
+facade's build directory. On Android CMake links the generated JNI stub against the facade and
+packages `liblitert-lm.so` beside it.
 
 Generation tests need a real model and are skipped without one. The smallest published
 `.litertlm` is SmolLM2-135M-Instruct at 136 MB, too large for CI:

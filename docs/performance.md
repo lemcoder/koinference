@@ -421,14 +421,17 @@ NDK's `shader-tools`.
 
 Three traps cost real time on this hardware.
 
-**The APK can ship a stale `.so`.** `cmakeBuildKoinferenceAndroid` does not track the facade
-sources as inputs, so editing `koinference_facade.cpp`, rebuilding and running can measure the
-*previous* binary — AGP's `mergeAndroidMainJniLibFolders` serves its cached copy. Two experiments
-in a row were void this way. Verify before believing a number:
+**The APK could ship a stale `.so`.** Before konan plugin 2.0, `cmakeBuildKoinferenceAndroid` did
+not track the facade sources as inputs, so editing `koinference_facade.cpp`, rebuilding and running
+could measure the *previous* binary — AGP's `mergeAndroidMainJniLibFolders` served its cached copy.
+Two experiments in a row were void this way. The plugin now runs the CMake build on every
+invocation and leaves staleness to CMake, and a probe symbol appended to the facade did reach the
+APK and leave it again on revert. Checking is still cheap, and worth it before a number you will
+quote:
 
 ```bash
 unzip -p benchmark/core/build/outputs/apk/androidTest/core-androidTest.apk \
-    lib/arm64-v8a/libiogithublemcoderkoinferencellamacppjnistubs.so \
+    lib/arm64-v8a/libkoinferencestubs.so \
   | strings | grep -c cpuinfo_max_freq       # 0 means the change is not in there
 ```
 

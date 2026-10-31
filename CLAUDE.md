@@ -47,68 +47,69 @@ a comment about hardware it has never run on.
 
 ## The native seam
 
-CMake owns the native build. The Konan plugin only *generates* the JNI bindings and the `.c` stub —
-`konanConfig` is deliberately empty in `backends/llamacpp/build.gradle.kts`.
+CMake owns the native build; the konan plugin drives it. Each backend's `konan { }` block declares a
+**library** (the facade plus its engine, built by CMake once per Kotlin/Native target) and a
+**binding** (one `.def`: KGP's cinterop on Kotlin/Native, generated JNI bindings on the JVM and
+Android, whose library CMake links from the plugin's `.c` stub).
 
-This is not a stylistic choice. The plugin can link a stub itself, and doing so here means konan's
-clang linking a CMake/NDK-built archive. Every native bug in this repo's history came from that
-seam: missing host compiler-rt, `-framework` rejected by the Android linker, konan's bundled NDK-r20
-libc++ against an NDK-28 archive, lld unable to read zstd debug sections. A static `.a` carries no
-record of what it needs; CMake's target graph does. Keep the link in CMake.
+The link stays in CMake on purpose. The plugin can link a stub itself, and doing so here means
+konan's clang linking a CMake/NDK-built archive. Every native bug in this repo's history came from
+that seam: missing host compiler-rt, `-framework` rejected by the Android linker, konan's bundled
+NDK-r20 libc++ against an NDK-28 archive, lld unable to read zstd debug sections. A static `.a`
+carries no record of what it needs; CMake's target graph does.
 
-The corollary: **never hardcode a path the plugin owns.** Ask the task.
+The contract arrives as CMake cache entries — `KONAN_JNI_STUB_DIR`, `KONAN_JNI_INCLUDE_DIR`,
+`KONAN_LIB_NAME` — and `native/CMakeLists.txt` reads them with no fallbacks, on purpose: three
+separate breakages came from guessing the plugin's paths instead. The plugin ships `jni.h`, so no
+leg needs a JDK's headers.
 
-```kotlin
-generateJni.get().stubSourceDirectory   // where the .c is
-generateJni.get().stubLibraryBaseName   // what System.loadLibrary will ask for
-interopLibraryDir                       // where the built library landed
-```
+Facts the migration to plugin 2.0 cost:
 
-Three separate breakages came from guessing these instead (`.a` location, then `c/`, then the
-library name). `native/CMakeLists.txt` reads `KONAN_JNI_STUB_DIR` and `KONAN_JNI_LIB_NAME` with no
-fallbacks, on purpose.
+- **Android JNI targets take no preset.** Without one the plugin hands CMake the NDK's
+  `android.toolchain.cmake`, `ANDROID_ABI`, and AGP's `minSdk` as `ANDROID_PLATFORM`; with one it
+  passes no toolchain at all. The preset's variables are spelled out in the build file instead.
+  `CMakePresets.json` stays, for building the facade by hand.
+- **A library and a JNI build of the same preset need different build directories**, or the second
+  configure reuses the first's cache. The libraries set `buildDirectory` to
+  `build/cmake/library-<preset>`.
+- **The archive travels in the klib; a dylib does not.** The plugin merges the archives CMake leaves
+  and embeds them in the cinterop klib, and llama.cpp's frameworks travel as `linkerOpts.osx` in the
+  `.def`. LiteRT-LM's runtime is a dylib, so `:backends:litertlm` and every module linking a binary
+  against it still name it with `-L`, `-l` and `-rpath`.
+- **CMake builds run on every invocation** and leave staleness to CMake's own incremental build. A
+  probe symbol appended to the facade reached the APK and left it again on revert.
+- **Kotlin/Native's Linux sysroot is GCC 8**, whose libstdc++ keeps `std::filesystem` in
+  `libstdc++fs.a`. ggml's backend registry uses it, so the linuxX64 test binary fails on undefined
+  `std::filesystem::…` until the `.def` says `linkerOpts.linux = -lstdc++fs`. The prebuilt archives
+  hid this: nothing linked them for Linux locally.
 
 ## The Kotlin/Native test executable is linked by this project
 
 `main.compileTaskProvider`'s `-linker-options` travel in the klib for whoever links it. They do
 **not** apply to binaries this project links, so `binaries.all { linkerOpts(…) }` is needed as well
-— the same fact `:backends:litertlm` records, discovered again in `:backends:llamacpp` the first
-time a test called a `koi_*` function.
+— which is why `:backends:litertlm` names its dylib twice.
 
-Two consequences that only appear once something actually links the archive:
+**Every target's test binary references `koi_*`,** because `commonMain` calls the bridge — it is not
+limited to the source sets with native tests. So `allTests` builds llama.cpp for every native
+target; locally, run the per-target task.
 
-- **Apple targets need the frameworks named.** ggml's Metal and BLAS backends are inside the `.a`
-  and the link fails on `_MTLCreateSystemDefaultDevice` and `_cblas_sgemm$NEWLAPACK$ILP64` without
-  `-framework Metal -framework MetalKit -framework Foundation -framework Accelerate`. The `.a`
-  carries no record of them; this is the same lesson as the JNI seam, one layer up.
-- **Every target's test binary now references `koi_*`,** because `commonMain` calls the bridge —
-  it is not limited to the source sets with native tests. So `allTests` needs a
-  `libkoinference-facade.a` per target under `build/prebuilt/`; locally, run the per-target task.
+## JNI bindings are named after the C functions
 
-## The facade header's declaration order is an ABI
-
-The generated JNI bridges are numbered by position (`kniBridge0`, `kniBridge1`, …; the index skips
-the struct-returning `koi_default_session_params`). **Append new functions at the end** — inserting
-one renumbers every bridge after it and each hand-written actual in `jvmMain`/`androidMain` silently
-calls the wrong C function.
-
-Deleting one is the same hazard. `koi_embed` (index 9) has no Kotlin caller since the unimplemented
-embedding runtime was removed, and it **stays in the header anyway**: taking it out would renumber
-`koi_json_schema_to_grammar` and the whole streaming trio. An unused C function costs nothing.
+The generated bindings used to be numbered by declaration position (`kniBridge0`, `kniBridge1`, …),
+which made the header's order an ABI: inserting a function renumbered every bridge after it, and
+each hand-written actual silently called the wrong C function. Since plugin 2.0 they are named after
+the C function (`koi_generate`) and land in the package named after the `.def` file (`koinference`,
+`koinference_litertlm`), the same as cinterop's. Enum constants and struct-returning functions are
+generated too, so the JNI leg no longer mirrors the header's values by hand.
 
 ## Toolchain facts
 
-- **`prebuilt/` is keyed by `konanTarget.name`** (`macos_arm64`), not the Kotlin target name
-  (`macosArm64`). Using the wrong one configures fine and fails at link with undefined `koi_*`.
-- **Kotlin/Native must exist before generation.** The generator runs cinterop out of a distribution
-  that KGP only downloads when it first compiles a native target. `generateJvmInterop*` depends on
-  `downloadKotlinNativeDistribution` for that reason — `jvmTest` alone would otherwise fail on a
-  clean machine.
 - **`mavenLocal()` is first in `pluginManagement`**, so local plugin builds shadow the Gradle Plugin
   Portal. Everything can pass locally against a plugin version that means something else in CI. When
   changing the plugin, bump the version and publish; do not reuse an alpha.
-- The Gradle daemon has no login PATH (`-PkoiCmake`) and may run a JBR with `include/` stripped
-  (`-PkoiJniHome`). Both are auto-detected, both overridable.
+- The Gradle daemon has no login PATH. Point the plugin at CMake with
+  `-Pkonan.config.cmake=<path>` (or the same key in `~/.gradle/gradle.properties`);
+  `./gradlew :backends:llamacpp:konanConfig` prints every path and where it came from.
 
 ## Android
 
@@ -121,19 +122,16 @@ embedding runtime was removed, and it **stays in the header anyway**: taking it 
 
 ## CI
 
-- `build-artifacts.yml` is **reusable-only**. It used to also trigger on `pull_request` while being
-  called by `gradle.yml`, which built every native artifact twice.
-- The JVM job consumes a prebuilt stub via `-PkoiStubDir=<module-relative path>`. Relative because
-  `${{ github.workspace }}` is empty inside a matrix definition — it silently produced `/backends/…`
-  and an `UnsatisfiedLinkError`.
-- `fail-fast: false` on the matrix. With it on, one failure cancels the others and one bug looks
+- **No natives job.** Gradle builds the native libraries through the plugin, so each job builds what
+  its tasks link and nothing is handed between jobs. The CPM cache (`CPM_SOURCE_CACHE`) is what
+  keeps llama.cpp from being downloaded on every run.
+- `fail-fast: false` on any matrix. With it on, one failure cancels the others and one bug looks
   like three.
 - The Android job frees disk before the emulator (`dotnet`, `ghc`, CodeQL). Two ABIs of llama.cpp
   plus NDK, SDK and a system image exhaust the runner, and the emulator's refusal is a quiet
   `adb: device not found` loop until timeout.
-- `:backends:litertlm` is **its own job**, not a matrix row: it consumes none of the prebuilt
-  llama.cpp archives and drives its own CMake, which downloads Google's xcframework (cached on the
-  hash of `native/CMakeLists.txt`, so a version bump re-downloads).
+- LiteRT-LM's C API archive is cached on the hash of `native/CMakeLists.txt`, so a version bump
+  re-downloads.
 - Steps run under `bash -e`, so `grep -q … && { exit 1; }` fails the step when the grep matches
   *nothing* — the good case. Use `if grep -q …; then` for a check that something is absent.
 
@@ -211,7 +209,7 @@ LiteRT-LM pins. Those are plain members on the mainline Conversation path, not b
 Hours went into proving this; don't re-run the experiment.
 
 **Consequently the dependency is a binary.** `native/CMakeLists.txt` downloads the
-`CLiteRTLM*.xcframework` release archive with a pinned SHA256. The `engine.h` inside it is
+`litert_lm_c_api` release archive with a pinned SHA256. The `engine.h` inside it is
 byte-identical to `c/engine.h` at the same tag, which is what makes it safe to compile against.
 Note that at v0.15.0 the repo has no `c/conversation.h` — the conversation declarations live in
 `engine.h`, and the separate header on `main` is a later split. Bind against the tag's header,
@@ -225,15 +223,14 @@ JSON-schema path runs through llguidance, which is open and also linked in. So t
 *more* constrained-decoding capability than a source build would, not less.
 
 **A `.a` carries no record of the dylib it needs** — the same lesson as the llama.cpp seam, in a
-new place. The facade archive references `libCLiteRTLM_mac.dylib`, so CMake stages the dylib
-next to the archive and Gradle passes `-lCLiteRTLM_mac` and an `-rpath` alongside
-`-lkoinference-litertlm-facade`. Setting those on `main.compileTaskProvider` alone is not
-enough: the test executable is linked by this project and needs `binaries.all { linkerOpts(…) }`
-too, or it fails with undefined `koilm_*`. The `dependsOn(buildFacade)` goes on
-`binaries.all { linkTaskProvider }` for the same reason — naming link tasks individually covers
-whichever ones existed that day. `cinterop` also needs `native/facade` as an explicit input:
-the task tracks the `.def`, not the header it names, so a new facade function surfaces as an
-unresolved reference in Kotlin rather than as a stale interop.
+new place. The facade archive travels in the cinterop klib, but it references
+`liblitert-lm.dylib`, so CMake stages the dylib in the facade's build directory (with its install
+name corrected from the release's `@rpath/liblitert-lm.so`) and Gradle passes `-llitert-lm` and
+an `-rpath` to it. Setting those on `main.compileTaskProvider` alone is not enough: the test
+executable is linked by this project and needs `binaries.all { linkerOpts(…) }` too, or it fails
+with undefined `litert_lm_*`. `cinterop` also needs `native/facade` as an explicit input: the task
+tracks the `.def`, not the header it names, so a new facade function surfaces as an unresolved
+reference in Kotlin rather than as a stale interop.
 
 **Android binds the facade through JNI.** This paragraph used to say it could not, and that was
 true of the Maven AAR: `liblitertlm_jni.so` is version-scripted (`VERS_1.0`) down to 24
@@ -251,9 +248,8 @@ named after the product. Four things follow from the move:
 - **The runtime ships beside the stub in `jniLibs/<abi>/`**, copied by the JNI target's
   POST_BUILD step, because the stub records it as a DT_NEEDED and Android resolves that from the
   same directory.
-- **The reply reader and the backend ids live in commonMain now**, since both legs parse the
-  same envelope; `BackendIdTest` compares the hand-written ids against the generated ones,
-  because only the cinterop leg gets the enum.
+- **The reply reader lives in commonMain**, since both legs parse the same envelope. The backend
+  ids do not need to: both legs import `KOILM_BACKEND_*` from their generated bindings.
 - **A system prompt is a regression against the AAR.** The Kotlin API accepted one for
   LFM2.5-1.2B; `litert_lm_conversation_config_set_system_message` refuses it, and neither a typed
   content array nor the role-less Contents shape the Kotlin API sends changes that. Models whose
@@ -438,7 +434,7 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
   own package — "unresolved reference" for a type plainly in the header.
 - **The `.def` needs `headerFilter`, or cinterop walks into the system headers.** Without it the
   generator emitted a ninth bridge for `__DARWIN_NULL`, which compiled on macOS and failed against
-  the NDK — and worse, would have made the bridge *numbering* differ per platform, which is an ABI.
+  the NDK — and back when bindings were numbered, would have made the numbering differ per platform.
   Both other backends had the line; this one did not until it broke.
 - **whisper streams by 30-second window, not by segment.** All the segments of a window arrive when
   that window finishes decoding: on a Pixel 8a, 12 segments from a minute of audio arrive with the
@@ -570,13 +566,13 @@ to, by `dlsym` or by linking. Getting it would mean building ExecuTorch from sou
   vendor driver resolves at run time, and packaging it would shadow that driver with a loader this
   device has no ICD for. Unmeasured — it landed after the test device went away.
 
-**A device measurement is not trustworthy until the APK is checked.** `cmakeBuildKoinferenceAndroid`
-does not declare the facade sources as inputs, so an edited `.cpp` can rebuild while AGP's
-`mergeAndroidMainJniLibFolders` still packages its cached `.so`. Two experiments in a row measured
-the old binary. `strings` the `.so` out of the APK for something only the new code contains before
-believing any number, and delete `merged_jni_libs` / `merged_native_libs` / `stripped_native_libs`
-/ `outputs/apk` to force an honest repackage. This is the same missing-input bug the cinterop
-tasks had, in a different task.
+**A device measurement is not trustworthy until the APK is checked.** Before konan plugin 2.0 the
+Android CMake task did not declare the facade sources as inputs, so an edited `.cpp` could rebuild
+while AGP's `mergeAndroidMainJniLibFolders` still packaged its cached `.so`, and two experiments in
+a row measured the old binary. The plugin now runs CMake on every invocation and a probe symbol
+reached the APK, but `strings` the `.so` out of the APK for something only the new code contains
+before quoting a number all the same; deleting `merged_jni_libs` / `merged_native_libs` /
+`stripped_native_libs` / `outputs/apk` forces an honest repackage.
 
 **A pulled results file can be stale too.** `adb pull` of `benchmark-results.json` returns the
 previous run's file when the run wrote none — `adb shell rm -f` it first. An A/B here reported four
