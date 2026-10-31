@@ -30,12 +30,12 @@ concurrency:
 permissions:
   contents: read
 
-jobs:
-  # The .a files are no longer committed, so build them first and hand them over as artifacts.
-  natives:
-    name: Native artifacts
-    uses: ./.github/workflows/build-artifacts.yml
+# The native libraries are built by Gradle itself: the konan plugin drives each target's CMake
+# build. There is no separate natives job and nothing is handed between jobs.
+env:
+  CPM_SOURCE_CACHE: ${{ github.workspace }}/backends/llamacpp/native/.cpm
 
+jobs:
   # Everything that needs a Mac, in one job.
   #
   # This was three: two matrix rows and a separate LiteRT-LM job. Each paid its own checkout, JDK
@@ -43,19 +43,20 @@ jobs:
   # times over on a private repository. One job pays the setup once and runs the lot.
   apple:
     name: Apple targets
-    needs: natives
     runs-on: macos-latest
     steps:
     - uses: actions/checkout@v4
     - name: Validate Gradle Wrapper
       uses: gradle/actions/wrapper-validation@v4
 
-    - name: Download prebuilt natives
-      uses: actions/download-artifact@v4
+    - name: Select Xcode
+      run: sudo xcode-select -s /Applications/Xcode.app
+
+    - name: Cache CPM packages
+      uses: actions/cache@v4
       with:
-        pattern: "*-prebuilt"
-        merge-multiple: true
-        path: backends/llamacpp/build/prebuilt/
+        path: backends/llamacpp/native/.cpm
+        key: cpm-apple-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
 
     # Keyed on the version catalogue, which is where the Kotlin version lives. It used to hash
     # '**/.lock', which matches only git-ignored Gradle files: on a fresh checkout that hashes
@@ -103,15 +104,14 @@ jobs:
 
   jvm:
     name: JVM and Linux
-    needs: natives
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/download-artifact@v4
+    - name: Cache CPM packages
+      uses: actions/cache@v4
       with:
-        pattern: "*-prebuilt"
-        merge-multiple: true
-        path: backends/llamacpp/build/prebuilt/
+        path: backends/llamacpp/native/.cpm
+        key: cpm-linux-${{ hashFiles('backends/llamacpp/native/CMakeLists.txt') }}
     - uses: actions/cache@v4
       with:
         path: ~/.konan
@@ -127,18 +127,13 @@ jobs:
         curl -fsSL -o "$RUNNER_TEMP/stories260K.gguf" \
           https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf
         echo "KOI_TEST_GGUF=$RUNNER_TEMP/stories260K.gguf" >> "$GITHUB_ENV"
-    # The stub comes from the natives job; -PkoiStubDir stops CMake rebuilding it here. Relative
-    # because github.workspace expanded to "" inside the matrix this replaced, which silently
-    # produced /backends/… and an UnsatisfiedLinkError.
     - name: Tests
       run: |
         ./gradlew :core:jvmTest :backends:llamacpp:jvmTest \
-                  :core:linuxX64Test :backends:llamacpp:linuxX64Test \
-                  -PkoiStubDir=build/prebuilt/jni/linux_x64
+                  :core:linuxX64Test :backends:llamacpp:linuxX64Test
 
   android:
     name: Android AAR
-    needs: natives
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -148,8 +143,8 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    # The JNI library is built per ABI by the interop's own CMake build, so this job needs the NDK
-    # rather than the prebuilt archives the other jobs consume.
+    # The JNI library is built per ABI by the plugin's CMake build, which takes the NDK from
+    # ANDROID_NDK_HOME.
     - name: Setup Android NDK
       id: setup-ndk
       uses: nttld/setup-ndk@v1
@@ -184,8 +179,8 @@ jobs:
           echo "the inference service is not in its own process"; exit 1; }
         # Both engines' libraries, both ABIs: the app is useless for benchmarking otherwise.
         for abi in arm64-v8a x86_64; do
-          unzip -l "$apk" | grep -q "lib/$abi/.*llamacpp.*\.so" || { echo "missing llama.cpp for $abi"; exit 1; }
-          unzip -l "$apk" | grep -q "lib/$abi/liblitertlm_jni.so" || { echo "missing LiteRT-LM for $abi"; exit 1; }
+          unzip -l "$apk" | grep -q "lib/$abi/libkoinferencestubs.so" || { echo "missing llama.cpp for $abi"; exit 1; }
+          unzip -l "$apk" | grep -q "lib/$abi/liblitert-lm.so" || { echo "missing LiteRT-LM for $abi"; exit 1; }
         done
         echo "app APK carries both engines for both ABIs, service is process-isolated"
 
@@ -240,7 +235,7 @@ jobs:
 
     # The AAR checks are structural; this is the only step where ART loads the .so and the runtimes
     # execute on the target ABI. LiteRT-LM's generation cases skip — its smallest model is 136 MB —
-    # but loading still proves its liblitertlm_jni.so resolves and is called.
+    # but loading still proves its JNI stub and liblitert-lm.so resolve and are called.
     - name: Instrumented tests
       uses: reactivecircus/android-emulator-runner@v2
       with:
