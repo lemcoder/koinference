@@ -28,6 +28,14 @@ class CpuPlacementDeviceTest {
     private fun maxFrequency(cpu: Int): Long? =
         read("/sys/devices/system/cpu/cpu$cpu/cpufreq/cpuinfo_max_freq")?.trim()?.toLongOrNull()
 
+    /** Cores this process may run on right now, which is not the SoC's topology: see below. */
+    private fun permitted(): Set<Int> = read("/proc/self/status")!!
+        .lineSequence()
+        .first { it.startsWith("Cpus_allowed_list:") }
+        .substringAfter(':')
+        .let(::parseCpuList)
+        .toSet()
+
     @Test
     fun theFilesTheHeuristicNeedsAreReadable() {
         // An app sandbox can read these. If that ever stops being true the heuristic silently
@@ -45,15 +53,20 @@ class CpuPlacementDeviceTest {
 
     @Test
     fun theHeuristicPinsSomewhereOnThisDevice() {
-        // A phone has clusters. If this device has them and we still decline to pin, the rule is
-        // failing to read a topology it should be able to see.
+        // A phone has clusters. If this process may use more than one and we still decline to pin,
+        // the rule is failing to read a topology it should be able to see.
+        //
+        // Tiers are counted over the cores this process may use, not the whole SoC. An
+        // instrumentation process is not the top app, and Android confines it to a smaller cpuset:
+        // on a Galaxy S26 (SM8850) it gets cpu0-5, the six identical 3.63 GHz cores, while the two
+        // 4.74 GHz ones are reserved for the top app. Unpinned is the right answer there, and
+        // counting all eight cores failed this test for it.
         val placement = platformCpuPlacement().choose()
-        val distinctFrequencies = (0 until Runtime.getRuntime().availableProcessors())
-            .mapNotNull(::maxFrequency)
-            .distinct()
+        val allowed = permitted()
+        val distinctFrequencies = allowed.mapNotNull(::maxFrequency).distinct()
 
-        if (distinctFrequencies.size < 2) return  // Genuinely single-cluster: nothing to choose.
-        assertTrue(placement.pinned, "device has ${distinctFrequencies.size} tiers but chose no mask")
+        if (distinctFrequencies.size < 2) return  // One tier within reach: nothing to choose.
+        assertTrue(placement.pinned, "cpus $allowed have ${distinctFrequencies.size} tiers but no mask was chosen")
     }
 
     @Test
@@ -61,12 +74,7 @@ class CpuPlacementDeviceTest {
         val placement = platformCpuPlacement().choose()
         if (!placement.pinned) return
 
-        val permitted = read("/proc/self/status")!!
-            .lineSequence()
-            .first { it.startsWith("Cpus_allowed_list:") }
-            .substringAfter(':')
-            .let(::parseCpuList)
-            .toSet()
+        val permitted = permitted()
         val online = parseCpuList(read("/sys/devices/system/cpu/online")!!).toSet()
 
         // The point of the intersection: pinning to a core outside the cpuset fails rather than
