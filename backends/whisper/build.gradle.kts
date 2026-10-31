@@ -1,9 +1,7 @@
 @file:OptIn(ExperimentalKotlinGradlePluginApi::class)
 
-import io.github.lemcoder.interop.jvmInterops
-import io.github.lemcoder.interop.jvmInteropsContainer
+import io.github.lemcoder.model.NativeTarget
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -22,23 +20,7 @@ val hostPreset: String = System.getProperty("os.name").lowercase().let { os ->
 }
 
 kotlin {
-    jvm {
-        compilations["main"].jvmInterops {
-            create("koinferenceWhisper") {
-                packageName.set("io.github.lemcoder.koinference.whisper.jni")
-                includeDirs.from(file("native/facade"))
-
-                externalNativeBuild {
-                    cmake {
-                        path.set(file("native/CMakeLists.txt"))
-                        preset.set(hostPreset)
-                        targets.add("koinference-whisper-jni")
-                        arguments.add("-DKOI_BUILD_JNI=ON")
-                    }
-                }
-            }
-        }
-    }
+    jvm()
 
     // ART takes the JNI leg, exactly as it does for llama.cpp.
     android {
@@ -49,74 +31,13 @@ kotlin {
         withDeviceTest {
             instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
-
-        compilations["main"].jvmInterops {
-            create("koinferenceWhisperAndroid") {
-                defFile(project.file("src/nativeInterop/cinterop/koinferenceWhisper.def"))
-                packageName.set("io.github.lemcoder.koinference.whisper.jni")
-                includeDirs.from(file("native/facade"))
-
-                externalNativeBuild {
-                    cmake {
-                        path.set(file("native/CMakeLists.txt"))
-                        targets.add("koinference-whisper-jni")
-                        arguments.add("-DKOI_BUILD_JNI=ON")
-                        // The NDK compiles with -g whatever the build type, and DWARF rides inside
-                        // the .so.
-                        arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
-
-                        abi("arm64-v8a") { preset.set("androidNativeArm64") }
-                        abi("x86_64") { preset.set("androidNativeX64") }
-                    }
-                }
-            }
-        }
     }
 
-    listOf<KotlinNativeTarget>(
-        iosArm64(),
-        iosSimulatorArm64(),
-        linuxX64(),
-        macosArm64(),
-        macosX64(),
-    ).forEach { target ->
-        val main = target.compilations["main"]
-
-        main.cinterops.create("koinferenceWhisper") {
-            compilerOpts("-I${projectDir}/native/facade")
-        }
-
-        val libDir = findProperty("koiLibDir")?.toString()
-            ?: layout.buildDirectory.dir("prebuilt/${target.konanTarget.name}").get().asFile.path
-
-        val isApple = target.konanTarget.family.isAppleFamily
-
-        // A .a records nothing about what it needs: ggml's Metal and Accelerate backends are inside
-        // the archive on Apple targets, and the frameworks have to be named here. Same lesson as
-        // :backends:llamacpp, one module over.
-        val frameworks = if (isApple) {
-            listOf(
-                "-framework", "Metal",
-                "-framework", "MetalKit",
-                "-framework", "Foundation",
-                "-framework", "Accelerate",
-            )
-        } else {
-            emptyList()
-        }
-
-        val linkerOptions = listOf("-L$libDir", "-lkoinference-whisper-facade") + frameworks
-
-        main.compileTaskProvider.configure {
-            compilerOptions.freeCompilerArgs.addAll(linkerOptions.flatMap { listOf("-linker-options", it) })
-        }
-
-        // The klib's linker options travel to whoever links it; they do not apply to the binaries
-        // this project links, so the test executable needs them named again.
-        target.binaries.all {
-            linkerOpts(linkerOptions)
-        }
-    }
+    iosArm64()
+    iosSimulatorArm64()
+    linuxX64()
+    macosArm64()
+    macosX64()
 
     sourceSets {
         commonMain.dependencies {
@@ -137,25 +58,78 @@ kotlin {
     }
 }
 
-// The bridges resolve the stub from java.library.path; the interop reports where its build put it,
-// so nothing here hardcodes a path the plugin owns. -PkoiStubDir points at a prebuilt one, which is
-// how CI reuses the natives job's output.
-val prebuiltStubDir: String? = findProperty("koiStubDir")?.toString()
-val interopLibraryDir = kotlin.jvm().compilations["main"].jvmInteropsContainer()
-    .getByName("koinferenceWhisper").resolvedLibraryDirectory
+konan {
+    config { konanHome.set(kotlinNativeDistribution()) }
 
-// The generator runs cinterop out of a Kotlin/Native distribution the Kotlin plugin downloads in its
-// own task, so jvmTest works on a machine that has never built a native target here.
-tasks.matching { it.name.startsWith("generateJvmInterop") }.configureEach {
-    dependsOn(tasks.matching { it.name == "downloadKotlinNativeDistribution" })
-}
+    // The facade and whisper.cpp for each Kotlin/Native target, built by CMake. The plugin merges the
+    // archives the build leaves into one and embeds it in the cinterop klib.
+    val facade = libraries.create("koinference-whisper") {
+        targets(
+            NativeTarget.MACOS_ARM64, NativeTarget.MACOS_X64,
+            NativeTarget.IOS_ARM64, NativeTarget.IOS_SIMULATOR_ARM64,
+            NativeTarget.LINUX_X64,
+        )
+        cmake {
+            path.set(file("native/CMakeLists.txt"))
+            buildTargets.add("koinference-whisper-facade")
+            listOf(
+                NativeTarget.MACOS_ARM64 to "macosArm64",
+                NativeTarget.MACOS_X64 to "macosX64",
+                NativeTarget.IOS_ARM64 to "iosArm64",
+                NativeTarget.IOS_SIMULATOR_ARM64 to "iosSimulatorArm64",
+            ).forEach { (nativeTarget, presetName) ->
+                target(nativeTarget) {
+                    preset.set(presetName)
+                    // Not build/<preset>, which the JNI build of the same preset uses.
+                    buildDirectory.set(layout.buildDirectory.dir("cmake/library-$presetName"))
+                }
+            }
+            // No preset: off a Linux host the plugin hands CMake Kotlin/Native's toolchain, so the
+            // archive matches Kotlin/Native's sysroot. The preset's variables, spelled out.
+            target(NativeTarget.LINUX_X64) {
+                arguments.addAll(
+                    "-DCMAKE_BUILD_TYPE=Release",
+                    "-DGGML_LLAMAFILE=OFF",
+                    "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+                )
+            }
+        }
+    }
 
-tasks.named<Test>("jvmTest") {
-    if (prebuiltStubDir == null) dependsOn("cmakeBuildKoinferenceWhisper")
-    systemProperty(
-        "java.library.path",
-        prebuiltStubDir?.let { file(it).absolutePath } ?: interopLibraryDir.get().asFile.absolutePath,
-    )
+    // One binding for every consumer: KGP's cinterop on the Kotlin/Native targets, generated JNI
+    // bindings on the JVM and Android. CMake links the JNI library, per target.
+    bindings {
+        create("koinferenceWhisper") {
+            includeDirs.from("native/facade")
+            library(facade)
+            jni {
+                cmake {
+                    path.set(file("native/CMakeLists.txt"))
+                    buildTargets.add("koinference-whisper-jni")
+                    arguments.add("-DKOI_BUILD_JNI=ON")
+                    target(NativeTarget.host) { preset.set(hostPreset) }
+                    // No preset on Android: the plugin hands CMake the NDK's toolchain file, the ABI
+                    // and minSdk as ANDROID_PLATFORM. The preset's variables, spelled out.
+                    mapOf(
+                        NativeTarget.ANDROID_ARM64 to listOf("-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod"),
+                        NativeTarget.ANDROID_X64 to emptyList(),
+                    ).forEach { (nativeTarget, targetArguments) ->
+                        target(nativeTarget) {
+                            arguments.addAll(
+                                "-DCMAKE_BUILD_TYPE=Release",
+                                "-DGGML_LLAMAFILE=OFF",
+                                "-DANDROID_STL=c++_static",
+                            )
+                            arguments.addAll(targetArguments)
+                            // The NDK compiles with -g whatever the build type, and DWARF rides
+                            // inside the .so.
+                            arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // cinterop tracks the .def, not the header it names, so a facade edit would leave the klib

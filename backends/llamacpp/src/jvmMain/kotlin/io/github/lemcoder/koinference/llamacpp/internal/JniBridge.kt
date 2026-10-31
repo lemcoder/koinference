@@ -1,34 +1,34 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge6
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge16
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference.koi_backend_init
+import koinference.koi_generate
+import koinference.koi_generate_begin
+import koinference.koi_generate_end
+import koinference.koi_generate_next
+import koinference.koi_json_schema_to_grammar
+import koinference.koi_model_free
+import koinference.koi_model_load
+import koinference.koi_session_cpu_mask
+import koinference.koi_session_create
+import koinference.koi_session_free
+import koinference.koi_session_set_cpu_mask
+import koinference.koi_token_count
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 internal object JniBridge : LlamaCppBridge {
 
     // See FacadeBridge for why this is initialised once and never freed.
-    private val backendInit: Unit by lazy { kniBridge0() }
+    private val backendInit: Unit by lazy { koi_backend_init() }
 
     override fun openModel(options: ModelOptions): LlamaCppModel {
         backendInit
-        val handle = kniBridge3(
+        val handle = koi_model_load(
             options.modelPath,
             when (options.accelerator) {
                 Accelerator.CPU -> 0
@@ -41,7 +41,7 @@ internal object JniBridge : LlamaCppBridge {
 
     override fun jsonSchemaToGrammar(schema: String): String {
         val out = ByteArray(LARGE_BUFFER_BYTES)
-        val written = kniBridge10(schema, out, out.size)
+        val written = koi_json_schema_to_grammar(schema, out, out.size)
         require(written > 0) { "Not a convertible JSON schema: $schema" }
         return String(out, 0, written, Charsets.UTF_8)
     }

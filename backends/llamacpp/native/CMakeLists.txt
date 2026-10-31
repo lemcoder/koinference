@@ -219,22 +219,22 @@ if (ANDROID)
 endif()
 
 # ── JNI stub ─────────────────────────────────────────────────────────────────
-# The Konan plugin generates the bridge sources from facade/koinference_facade.h
-# (`:backends:llamacpp:generateJvmInterop`); this compiles and links them. Doing the link here rather
-# than in the plugin keeps one toolchain end to end — the C++ runtime and the frameworks ggml's
-# Metal/BLAS backends need arrive transitively from koinference-facade.
+# The konan plugin generates the bindings and the .c stub from facade/koinference_facade.h; this
+# compiles and links them. Doing the link here rather than in the plugin keeps one toolchain end to
+# end — the C++ runtime and the frameworks ggml's Metal/BLAS backends need arrive transitively from
+# koinference-facade.
 option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 
-# Set by the Konan plugin's externalNativeBuild block — its contract with an external build, the way
-# an AGP project reads ANDROID_ABI. Driving this target by hand means supplying them by hand.
-set(KONAN_JNI_STUB_DIR "" CACHE PATH "Directory holding the generated JNI .c sources")
-set(KONAN_JNI_LIB_NAME "" CACHE STRING "Output name of the JNI stub library")
+# The konan plugin's contract with an external build, passed as cache entries.
+set(KONAN_JNI_STUB_DIR    "" CACHE PATH   "Directory holding the generated JNI .c sources")
+set(KONAN_JNI_INCLUDE_DIR "" CACHE PATH   "Directory holding jni.h, which the plugin ships")
+set(KONAN_LIB_NAME        "" CACHE STRING "Name the generated bindings System.loadLibrary")
 
 if(KOI_BUILD_JNI)
-    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_JNI_LIB_NAME)
+    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_LIB_NAME OR NOT KONAN_JNI_INCLUDE_DIR)
         message(FATAL_ERROR
-            "KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME are set by the Konan plugin. "
-            "Build through :backends:llamacpp:cmakeBuildKoinference, or pass both by hand.")
+            "KONAN_JNI_STUB_DIR, KONAN_JNI_INCLUDE_DIR and KONAN_LIB_NAME are set by the konan "
+            "plugin. Build through Gradle (cmakeBuildJniKoinference<Target>), or pass them by hand.")
     endif()
 
     file(GLOB KOI_JNI_SOURCES "${KONAN_JNI_STUB_DIR}/*.c")
@@ -243,30 +243,10 @@ if(KOI_BUILD_JNI)
     endif()
 
     add_library(koinference-jni SHARED ${KOI_JNI_SOURCES})
-    set_target_properties(koinference-jni PROPERTIES OUTPUT_NAME "${KONAN_JNI_LIB_NAME}")
+    set_target_properties(koinference-jni PROPERTIES OUTPUT_NAME "${KONAN_LIB_NAME}")
     target_link_libraries(koinference-jni PRIVATE koinference-facade)
-
-    # The NDK sysroot ships jni.h; every other target needs a JDK to supply it. FindJNI insists on a
-    # full JDK (AWT, the JVM library) when all this needs is the header, so JAVA_HOME wins when set —
-    # Gradle passes its own toolchain that way.
-    if(NOT ANDROID)
-        if(APPLE)
-            set(KOI_JNI_OS_DIR "darwin")
-        elseif(WIN32)
-            set(KOI_JNI_OS_DIR "win32")
-        else()
-            set(KOI_JNI_OS_DIR "linux")
-        endif()
-
-        if(DEFINED ENV{JAVA_HOME} AND EXISTS "$ENV{JAVA_HOME}/include/jni.h")
-            target_include_directories(koinference-jni PRIVATE
-                "$ENV{JAVA_HOME}/include"
-                "$ENV{JAVA_HOME}/include/${KOI_JNI_OS_DIR}")
-        else()
-            find_package(JNI REQUIRED)
-            target_include_directories(koinference-jni PRIVATE ${JNI_INCLUDE_DIRS})
-        endif()
-    endif()
+    # The plugin ships jni.h, so no leg needs a JDK's headers.
+    target_include_directories(koinference-jni PRIVATE "${KONAN_JNI_INCLUDE_DIR}")
 endif()
 
 # ── tests ─────────────────────────────────────────────────────────────────────

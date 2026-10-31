@@ -1,35 +1,24 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge10
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge11
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge2
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge4
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge5
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge6
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge7
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge8
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge9
-import io.github.lemcoder.koinference.litertlm.jni.kniCString
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference_litertlm.KOILM_BACKEND_CPU
+import koinference_litertlm.KOILM_BACKEND_GPU
+import koinference_litertlm.koilm_model_load
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 internal object JniBridge : LiteRtLmBridge {
     override fun openEngine(options: EngineOptions): LiteRtLmEngine {
-        val handle = kniBridge1(
+        val handle = koilm_model_load(
             options.modelPath,
             options.cacheDir,
             when (options.accelerator) {
-                // The cinterop leg imports these from the generated bindings; the JNI leg has no
-                // such bindings, so BackendId mirrors the header. BackendIdTest fails if they drift.
-                Accelerator.GPU -> BackendId.GPU
-                Accelerator.CPU -> BackendId.CPU
+                Accelerator.GPU -> KOILM_BACKEND_GPU
+                Accelerator.CPU -> KOILM_BACKEND_CPU
             },
             options.nThreads,
             options.maxTokens,

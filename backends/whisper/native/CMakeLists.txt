@@ -51,21 +51,18 @@ target_link_libraries(koinference-whisper-facade PUBLIC whisper)
 option(KOI_BUILD_JNI "Build the generated JNI stub for this facade" OFF)
 
 if (KOI_BUILD_JNI)
-    if (NOT DEFINED KONAN_JNI_STUB_DIR OR NOT DEFINED KONAN_JNI_LIB_NAME)
+    if (NOT KONAN_JNI_STUB_DIR OR NOT KONAN_LIB_NAME OR NOT KONAN_JNI_INCLUDE_DIR)
         message(FATAL_ERROR
-            "KOI_BUILD_JNI needs KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME. Ask the generate task "
-            "for them rather than hardcoding: guessing these has broken this build three times.")
+            "KOI_BUILD_JNI needs KONAN_JNI_STUB_DIR, KONAN_LIB_NAME and KONAN_JNI_INCLUDE_DIR, which "
+            "the konan plugin passes. Run it through Gradle rather than configuring by hand.")
     endif()
 
     file(GLOB KONAN_JNI_STUB_SOURCES "${KONAN_JNI_STUB_DIR}/*.c")
 
     add_library(koinference-whisper-jni SHARED ${KONAN_JNI_STUB_SOURCES})
-    set_target_properties(koinference-whisper-jni PROPERTIES OUTPUT_NAME "${KONAN_JNI_LIB_NAME}")
+    set_target_properties(koinference-whisper-jni PROPERTIES OUTPUT_NAME "${KONAN_LIB_NAME}")
 
     target_link_libraries(koinference-whisper-jni PRIVATE koinference-whisper-facade)
-
-    if (NOT ANDROID)
-        find_package(JNI REQUIRED)
-        target_include_directories(koinference-whisper-jni PRIVATE ${JNI_INCLUDE_DIRS})
-    endif()
+    # The plugin ships jni.h, so neither leg needs a JDK's headers.
+    target_include_directories(koinference-whisper-jni PRIVATE "${KONAN_JNI_INCLUDE_DIR}")
 endif()

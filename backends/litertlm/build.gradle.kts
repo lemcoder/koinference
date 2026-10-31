@@ -1,8 +1,7 @@
 @file:OptIn(ExperimentalKotlinGradlePluginApi::class)
 
-import io.github.lemcoder.interop.jvmInterops
+import io.github.lemcoder.model.NativeTarget
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
-import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -11,50 +10,14 @@ plugins {
     alias(libs.plugins.androidKmpLibrary)
 }
 
-// The facade has to exist before Kotlin/Native links against it. Unlike the llama.cpp
-// module there is no Konan plugin task to hang this off, so drive CMake directly. Declared
-// before the kotlin block because the native binaries below depend on it by reference.
-val cmakeExecutable: String = findProperty("koiCmake")?.toString()
-    ?: System.getenv("CMAKE")
-    ?: "cmake"
-
-// Same reason as :backends:llamacpp: cinterop does not treat the headers behind its compiler
-// options as inputs, so a facade edit would otherwise be invisible to the up-to-date check.
-tasks.withType<org.jetbrains.kotlin.gradle.tasks.CInteropProcess>().configureEach {
-    inputs.files(fileTree("native/facade"))
-        .withPropertyName("facadeHeaders")
-        .withPathSensitivity(PathSensitivity.RELATIVE)
-}
-
-val buildFacade by tasks.registering(Exec::class) {
-    group = "interop"
-    description = "Configure and build the LiteRT-LM facade for macOS arm64."
-    workingDir = file("native")
-    // Configure is idempotent and cheap once the prebuilt is cached, so both steps run
-    // together rather than as two tasks that could drift apart.
-    commandLine(
-        "sh", "-c",
-        "$cmakeExecutable --preset macosArm64 && " +
-            "$cmakeExecutable --build --preset macosArm64",
-    )
-    inputs.files(fileTree("native/facade"))
-    inputs.file("native/CMakeLists.txt")
-    // The presets carry the build type, the deployment target and the output directory, so a
-    // preset edit changes the artifacts — without this the task stays UP-TO-DATE and the old
-    // ones are linked instead.
-    inputs.file("native/CMakePresets.json")
-    outputs.dir("native/build/macosArm64")
-}
+// Where CMake builds the macOS facade. It also stages the LiteRT-LM dylib here at configure time,
+// which is what the macOS link below reads.
+val macosFacadeBuildDir: File = layout.buildDirectory.dir("cmake/library-macosArm64").get().asFile
 
 // macOS arm64 and Android. The other Apple targets have presets ready in
 // native/CMakePresets.json but are untried; Linux needs a third runtime source
-// (libLiteRt.so) and is not wired up. Adding a native target here without building its
-// facade first fails at link with undefined koilm_*.
+// (libLiteRt.so) and is not wired up.
 kotlin {
-    // Android takes no part in the native build. The AAR carries its own liblitertlm_jni.so
-    // and exposes only JNI entry points, so there is nothing for CMake to link and no
-    // externalNativeBuild block — unlike :backends:llamacpp, where Android is a JNI leg over
-    // the shared C facade.
     android {
         namespace = "io.github.lemcoder.koinference.litertlm"
         compileSdk = libs.versions.androidCompileSdk.get().toInt()
@@ -70,69 +33,24 @@ kotlin {
         withDeviceTest {
             instrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
-
-        // Android now binds the same C facade the Apple leg does, through generated JNI bridges,
-        // exactly as :backends:llamacpp does. Before 0.16.0 there was nothing to bind: the Maven
-        // AAR exported only its own Java_* entry points. Google's Kotlin API is gone from this
-        // module along with the coroutines-version coupling that came with it.
-        compilations["main"].jvmInterops {
-            create("koinferenceLiteRtLmAndroid") {
-                defFile(project.file("src/nativeInterop/cinterop/koinference_litertlm.def"))
-                packageName.set("io.github.lemcoder.koinference.litertlm.jni")
-                includeDirs.from(file("native/facade"))
-
-                externalNativeBuild {
-                    cmake {
-                        path.set(file("native/CMakeLists.txt"))
-                        targets.add("koinference-litertlm-jni")
-                        arguments.add("-DKOI_BUILD_JNI=ON")
-
-                        // The NDK compiles with -g whatever the build type and ELF carries DWARF
-                        // inside the .so, which is tens of megabytes per ABI of nothing useful.
-                        arguments.add("-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug")
-
-                        abi("arm64-v8a") { preset.set("androidNativeArm64") }
-                        abi("x86_64") { preset.set("androidNativeX64") }
-                    }
-                }
-            }
-        }
     }
 
-    listOf<KotlinNativeTarget>(
-        macosArm64(),
-    ).forEach { target ->
-        val main = target.compilations["main"]
-
-        main.cinterops.create("koinferenceLiteRtLm") {
-            definitionFile.set(file("src/nativeInterop/cinterop/koinference_litertlm.def"))
-            compilerOpts("-I${projectDir}/native/facade")
-        }
-
-        // Keyed by the CMake preset name, which is also the Kotlin target name here —
-        // unlike :backends:llamacpp, whose prebuilt/ is keyed by konanTarget.name because
-        // CI lays those archives out that way. This module's libraries come straight from
-        // the CMake build tree, so they follow the preset.
-        val libDir = findProperty("koiLiteRtLmLibDir")?.toString()
-            ?: file("native/build/${target.name}").path
-
-        // Two libraries, not one: the facade archive plus the prebuilt runtime it calls
-        // into. A .a records nothing about the dylib it needs, so the dylib has to be named
-        // here. CMake stages it alongside the archive so a single -L covers both, and the
-        // rpath is what lets the linked binary find the dylib at run time.
+    macosArm64 {
+        // The facade archive travels inside the cinterop klib; the runtime it calls into is a
+        // dylib, which an archive records nothing about, so it is named here. The rpath is what
+        // lets the linked binary find it at run time.
         //
         // Both paths are absolute and belong to this checkout, so they are right for building
         // and testing here and wrong the moment this klib is published: a consumer needs the
         // dylib shipped alongside and an rpath of their own. Publishing this target needs that
-        // question answered first — -PkoiLiteRtLmLibDir only moves the problem.
+        // question answered first.
         val linkerOptions = listOf(
-            "-L$libDir",
-            "-lkoinference-litertlm-facade",
+            "-L${macosFacadeBuildDir.path}",
             "-llitert-lm",
-            "-rpath", libDir,
+            "-rpath", macosFacadeBuildDir.path,
         )
 
-        main.compileTaskProvider.configure {
+        compilations["main"].compileTaskProvider.configure {
             compilerOptions {
                 freeCompilerArgs.addAll("-linker-options", linkerOptions.joinToString(" "))
             }
@@ -140,13 +58,8 @@ kotlin {
 
         // The klib carries the options above for whoever links it, but every binary this
         // project links — the test executable today, a framework tomorrow — needs them
-        // separately, or it fails with undefined koilm_*. The dependency goes on the link
-        // task rather than on named tasks: naming them missed linkReleaseTest, which then
-        // linked against a facade directory that a clean checkout has not built yet.
-        target.binaries.all {
-            linkerOpts(linkerOptions)
-            linkTaskProvider.configure { dependsOn(buildFacade) }
-        }
+        // separately, or it fails with undefined litert_lm_*.
+        binaries.all { linkerOpts(linkerOptions) }
     }
 
     sourceSets {
@@ -174,15 +87,61 @@ kotlin {
     }
 }
 
-// cinterop reads the facade header, and compileKotlin* carries the -linker-options the klib
-// hands on; both want the facade built. The binaries' own link tasks are wired above.
-tasks.matching {
-    it.name == "cinteropKoinferenceLiteRtLmMacosArm64" || it.name == "compileKotlinMacosArm64"
-}.configureEach { dependsOn(buildFacade) }
+konan {
+    config { konanHome.set(kotlinNativeDistribution()) }
 
-// The header is what cinterop actually binds, but the task only tracks the .def that names
-// it: adding a facade function and rebuilding leaves the klib without it, and the error is an
-// unresolved reference in Kotlin rather than anything pointing at the interop.
-tasks.matching { it.name == "cinteropKoinferenceLiteRtLmMacosArm64" }.configureEach {
+    // The facade for macOS, built by CMake against the prebuilt runtime. The plugin embeds the
+    // archive in the cinterop klib.
+    val facade = libraries.create("koinference-litertlm") {
+        targets(NativeTarget.MACOS_ARM64)
+        cmake {
+            path.set(file("native/CMakeLists.txt"))
+            buildTargets.add("koinference-litertlm-facade")
+            target(NativeTarget.MACOS_ARM64) {
+                preset.set("macosArm64")
+                buildDirectory.set(macosFacadeBuildDir)
+            }
+        }
+    }
+
+    // One binding for both legs: KGP's cinterop on macOS, generated JNI bindings on Android.
+    // CMake links Android's JNI library together with the facade and the runtime, so one NDK
+    // clang sees all three.
+    bindings {
+        create("koinferenceLiteRtLm") {
+            defFile.set(file("src/nativeInterop/cinterop/koinference_litertlm.def"))
+            includeDirs.from("native/facade")
+            library(facade)
+            jni {
+                cmake {
+                    path.set(file("native/CMakeLists.txt"))
+                    buildTargets.add("koinference-litertlm-jni")
+                    arguments.add("-DKOI_BUILD_JNI=ON")
+                    // No preset on Android: the plugin hands CMake the NDK's toolchain file, the ABI
+                    // and minSdk as ANDROID_PLATFORM. The preset's variables, spelled out.
+                    listOf(NativeTarget.ANDROID_ARM64, NativeTarget.ANDROID_X64).forEach { nativeTarget ->
+                        target(nativeTarget) {
+                            arguments.addAll(
+                                "-DCMAKE_BUILD_TYPE=Release",
+                                // liblitert-lm.so links its own C++ runtime statically, so a
+                                // shared STL would share nothing and need packaging besides.
+                                "-DANDROID_STL=c++_static",
+                                // The NDK compiles with -g whatever the build type and ELF carries
+                                // DWARF inside the .so.
+                                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--strip-debug",
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// cinterop tracks the .def, not the header it names, so a facade edit would leave the klib
+// describing the previous API — "unresolved reference koilm_*" for a function plainly in the header.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.CInteropProcess>().configureEach {
     inputs.files(fileTree("native/facade"))
+        .withPropertyName("facadeHeaders")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

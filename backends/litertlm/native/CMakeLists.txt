@@ -107,13 +107,13 @@ target_include_directories(koinference-litertlm-facade
 target_link_libraries(koinference-litertlm-facade
     PUBLIC CLiteRTLM)
 
-# Nothing to stage post-build: the runtime library was copied into this directory at configure
-# time, which is the same place the facade archive lands, so one -L covers the pair. A static
-# archive records nothing about the shared library it needs, which is why they travel together.
+# Nothing to stage post-build: the runtime library was copied into this build directory at
+# configure time, which is where the macOS link looks for it. A static archive records nothing about
+# the shared library it needs, so the build script names it separately.
 
 # ── JNI stub ─────────────────────────────────────────────────────────────────
-# Android reaches the C API the same way the JVM leg of :backends:llamacpp does: the Konan plugin
-# generates the bridge sources from the facade header, and this compiles and links them. Keeping
+# Android reaches the C API the same way the JVM leg of :backends:llamacpp does: the konan plugin
+# generates the bindings and the .c stub from the facade header, and this compiles and links them. Keeping
 # the link here rather than in the plugin keeps one toolchain end to end — the stub, the facade
 # and the prebuilt runtime are all seen by the same NDK clang.
 #
@@ -122,15 +122,16 @@ target_link_libraries(koinference-litertlm-facade
 # litert_lm_* symbols at all. The C API archive's Android slice exports 144.
 option(KOI_BUILD_JNI "Build the generated JNI stub library" OFF)
 
-# Set by the Konan plugin's externalNativeBuild block — its contract with an external build.
-set(KONAN_JNI_STUB_DIR "" CACHE PATH "Directory holding the generated JNI .c sources")
-set(KONAN_JNI_LIB_NAME "" CACHE STRING "Output name of the JNI stub library")
+# The konan plugin's contract with an external build, passed as cache entries.
+set(KONAN_JNI_STUB_DIR    "" CACHE PATH   "Directory holding the generated JNI .c sources")
+set(KONAN_JNI_INCLUDE_DIR "" CACHE PATH   "Directory holding jni.h, which the plugin ships")
+set(KONAN_LIB_NAME        "" CACHE STRING "Name the generated bindings System.loadLibrary")
 
 if(KOI_BUILD_JNI)
-    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_JNI_LIB_NAME)
+    if(NOT KONAN_JNI_STUB_DIR OR NOT KONAN_LIB_NAME OR NOT KONAN_JNI_INCLUDE_DIR)
         message(FATAL_ERROR
-            "KONAN_JNI_STUB_DIR and KONAN_JNI_LIB_NAME are set by the Konan plugin. "
-            "Build through the interop's task, or pass both by hand.")
+            "KONAN_JNI_STUB_DIR, KONAN_JNI_INCLUDE_DIR and KONAN_LIB_NAME are set by the konan "
+            "plugin. Build through Gradle (cmakeBuildJniKoinferenceLiteRtLm<Target>), or pass them by hand.")
     endif()
 
     file(GLOB KOI_JNI_SOURCES "${KONAN_JNI_STUB_DIR}/*.c")
@@ -138,13 +139,13 @@ if(KOI_BUILD_JNI)
         message(FATAL_ERROR "No generated JNI sources under ${KONAN_JNI_STUB_DIR}.")
     endif()
 
-    # The presets build this with ANDROID_STL=c++_static. liblitert-lm.so statically links its
+    # Built with ANDROID_STL=c++_static. liblitert-lm.so statically links its
     # own C++ runtime — its NEEDED list is nine system libraries and no libc++_shared — so there
     # is nothing to share, and a shared STL would mean packaging libc++_shared.so beside the stub
     # or failing at dlopen with "library libc++_shared.so not found".
     add_library(koinference-litertlm-jni SHARED ${KOI_JNI_SOURCES})
     set_target_properties(koinference-litertlm-jni PROPERTIES
-        OUTPUT_NAME "${KONAN_JNI_LIB_NAME}")
+        OUTPUT_NAME "${KONAN_LIB_NAME}")
     target_link_libraries(koinference-litertlm-jni PRIVATE koinference-litertlm-facade)
 
     # The runtime library has to sit beside the stub in the APK, because the stub records it as a
@@ -156,17 +157,8 @@ if(KOI_BUILD_JNI)
             "$<TARGET_FILE_DIR:koinference-litertlm-jni>/${KOILM_LIBRARY}"
         COMMENT "Staging ${KOILM_LIBRARY} beside the JNI stub")
 
-    if(NOT ANDROID)
-        # The NDK sysroot ships jni.h; every other toolchain needs a JDK to supply it, and
-        # FindJNI insists on a full one when all this needs is the header.
-        if(DEFINED ENV{JAVA_HOME} AND EXISTS "$ENV{JAVA_HOME}/include/jni.h")
-            target_include_directories(koinference-litertlm-jni PRIVATE
-                "$ENV{JAVA_HOME}/include" "$ENV{JAVA_HOME}/include/darwin")
-        else()
-            find_package(JNI REQUIRED)
-            target_include_directories(koinference-litertlm-jni PRIVATE ${JNI_INCLUDE_DIRS})
-        endif()
-    endif()
+    # The plugin ships jni.h, so no leg needs a JDK's headers.
+    target_include_directories(koinference-litertlm-jni PRIVATE "${KONAN_JNI_INCLUDE_DIR}")
 endif()
 
 # ── tests ─────────────────────────────────────────────────────────────────────

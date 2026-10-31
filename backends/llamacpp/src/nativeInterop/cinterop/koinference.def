@@ -1,2 +1,9 @@
 headers = koinference_facade.h
 headerFilter = koinference_facade.h
+# ggml's Metal and BLAS backends are inside the archive, and an archive records nothing about what it
+# needs. Named here, the frameworks travel in the klib to whoever links it.
+linkerOpts.osx = -framework Metal -framework MetalKit -framework Foundation -framework Accelerate
+linkerOpts.ios = -framework Metal -framework MetalKit -framework Foundation -framework Accelerate
+# Kotlin/Native's Linux sysroot is GCC 8, whose libstdc++ keeps std::filesystem in a separate
+# archive; ggml's backend registry uses it.
+linkerOpts.linux = -lstdc++fs

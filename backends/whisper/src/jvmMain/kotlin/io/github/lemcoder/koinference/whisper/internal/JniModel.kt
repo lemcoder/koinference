@@ -1,10 +1,10 @@
 package io.github.lemcoder.koinference.whisper.internal
 
-import io.github.lemcoder.koinference.whisper.jni.kniBridge2
-import io.github.lemcoder.koinference.whisper.jni.kniBridge3
-import io.github.lemcoder.koinference.whisper.jni.kniBridge4
-import io.github.lemcoder.koinference.whisper.jni.kniBridge5
-import io.github.lemcoder.koinference.whisper.jni.kniBridge6
+import koinference_whisper.koiw_model_free
+import koinference_whisper.koiw_transcribe
+import koinference_whisper.koiw_transcribe_begin
+import koinference_whisper.koiw_transcribe_end
+import koinference_whisper.koiw_transcribe_next
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
@@ -23,7 +23,7 @@ internal class JniModel(private val handle: Long) : WhisperModel {
         // snprintf's contract: ask once, and grow only if the transcript did not fit. A long
         // recording can outrun any fixed guess.
         val first = ByteArray(SEGMENT_BYTES)
-        val needed = kniBridge3(
+        val needed = koiw_transcribe(
             handle, samples, samples.size, options.language, options.threads, first, first.size,
         )
         check(needed >= 0) { "whisper failed to transcribe: ${lastError()}" }
@@ -32,7 +32,7 @@ internal class JniModel(private val handle: Long) : WhisperModel {
             first.decodeToString(0, needed)
         } else {
             val exact = ByteArray(needed + 1)
-            val again = kniBridge3(
+            val again = koiw_transcribe(
                 handle, samples, samples.size, options.language, options.threads, exact, exact.size,
             )
             check(again >= 0) { "whisper failed to transcribe: ${lastError()}" }
@@ -44,7 +44,7 @@ internal class JniModel(private val handle: Long) : WhisperModel {
         samples: FloatArray,
         options: WhisperTranscriptionOptions,
     ): Flow<String> = channelFlow {
-        val stream = kniBridge4(handle, samples, samples.size, options.language, options.threads)
+        val stream = koiw_transcribe_begin(handle, samples, samples.size, options.language, options.threads)
         check(stream != 0L) { "whisper could not start transcribing: ${lastError()}" }
 
         try {
@@ -53,7 +53,7 @@ internal class JniModel(private val handle: Long) : WhisperModel {
                 // produces a segment, which is what makes time to first segment mean anything.
                 val buffer = ByteArray(SEGMENT_BYTES)
                 while (true) {
-                    val size = kniBridge5(stream, buffer, buffer.size)
+                    val size = koiw_transcribe_next(stream, buffer, buffer.size)
                     if (size == 0) break
                     check(size > 0) { "whisper failed mid-transcription: ${lastError()}" }
                     trySendBlocking(buffer.decodeToString(0, minOf(size, buffer.size - 1)))
@@ -62,10 +62,10 @@ internal class JniModel(private val handle: Long) : WhisperModel {
         } finally {
             // Joins whisper's thread. Skipping it on cancellation would leave it writing into a
             // queue nobody drains.
-            kniBridge6(stream)
+            koiw_transcribe_end(stream)
         }
     }
 
-    override fun close() = kniBridge2(handle)
+    override fun close() = koiw_model_free(handle)
 }
 

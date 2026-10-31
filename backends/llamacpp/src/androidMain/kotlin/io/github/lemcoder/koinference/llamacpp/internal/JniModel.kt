@@ -1,25 +1,25 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge6
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge16
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference.koi_backend_init
+import koinference.koi_generate
+import koinference.koi_generate_begin
+import koinference.koi_generate_end
+import koinference.koi_generate_next
+import koinference.koi_json_schema_to_grammar
+import koinference.koi_model_free
+import koinference.koi_model_load
+import koinference.koi_session_cpu_mask
+import koinference.koi_session_create
+import koinference.koi_session_free
+import koinference.koi_session_set_cpu_mask
+import koinference.koi_token_count
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 internal class JniModel(private val handle: Long) : LlamaCppModel {
 
@@ -34,10 +34,10 @@ internal class JniModel(private val handle: Long) : LlamaCppModel {
             .putInt(options.topK)
             .putFloat(options.minP)
 
-        val session = kniBridge6(handle, params.array())
+        val session = koi_session_create(handle, params.array())
         check(session != 0L) { "llama.cpp could not create a session" }
         return JniSession(session)
     }
 
-    override fun close() = kniBridge4(handle)
+    override fun close() = koi_model_free(handle)
 }

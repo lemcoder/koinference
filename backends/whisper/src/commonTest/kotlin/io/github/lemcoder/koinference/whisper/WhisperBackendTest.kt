@@ -26,7 +26,7 @@ class WhisperBackendTest {
     }
 
     @Test
-    fun `is a text engine, because modality is named for the output`() {
+    fun `is a text engine because modality is named for the output`() {
         // It reads audio. What it produces is words, and that is what Modality describes — the same
         // reason a vision-language model is TEXT.
         assertEquals(setOf(Modality.TEXT), Whisper.modalities)

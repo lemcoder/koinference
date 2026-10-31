@@ -1,31 +1,28 @@
 package io.github.lemcoder.koinference.llamacpp.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge0
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge3
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge4
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge6
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge7
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge8
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge10
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge11
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge12
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge13
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge14
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge15
-import io.github.lemcoder.koinference.llamacpp.jni.kniBridge16
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference.koi_backend_init
+import koinference.koi_generate
+import koinference.koi_generate_begin
+import koinference.koi_generate_end
+import koinference.koi_generate_next
+import koinference.koi_json_schema_to_grammar
+import koinference.koi_model_free
+import koinference.koi_model_load
+import koinference.koi_session_cpu_mask
+import koinference.koi_session_create
+import koinference.koi_session_free
+import koinference.koi_session_set_cpu_mask
+import koinference.koi_token_count
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
-// The kniBridgeN functions are generated from native/facade/koinference_facade.h by the Konan
-// plugin's `generateJvmInterop` task, numbered by the header's declaration order — see the
-// generated file's `/** C: … */` comments. Index 5 is koi_default_session_params, which returns a
-// struct by value and gets no bridge; index 9 is koi_embed, which nothing calls (see
-// docs/backends.md on why it stays in the header).
+// The koi_* functions are JNI bindings the konan plugin generates from
+// native/facade/koinference_facade.h, one per C function and named after it.
 //
 // This file is duplicated verbatim in the other ART leg. That is deliberate — see
 // docs/backends.md.

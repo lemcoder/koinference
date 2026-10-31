@@ -1,7 +1,12 @@
 headers = koinference_whisper.h
-# Without this, cinterop walks into the system headers our header includes and emits bridges for
-# what it finds there: a ninth bridge for __DARWIN_NULL, generated on macOS, which then fails to
-# compile against the NDK. It also means the bridge numbering could differ per platform, and that
-# numbering is an ABI — see docs/backends.md.
+# Without this, cinterop walks into the system headers our header includes and emits bindings for
+# what it finds there — __DARWIN_NULL on macOS, which then fails to compile against the NDK.
 headerFilter = koinference_whisper.h
+# ggml's Metal and Accelerate backends are inside the archive, and an archive records nothing about
+# what it needs. Named here, they travel in the klib to whoever links it.
+linkerOpts.osx = -framework Metal -framework MetalKit -framework Foundation -framework Accelerate
+linkerOpts.ios = -framework Metal -framework MetalKit -framework Foundation -framework Accelerate
+# Kotlin/Native's Linux sysroot is GCC 8, whose libstdc++ keeps std::filesystem in a separate
+# archive; ggml's backend registry uses it.
+linkerOpts.linux = -lstdc++fs
 package = koinference_whisper

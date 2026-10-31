@@ -1,12 +1,11 @@
 package io.github.lemcoder.koinference.whisper.internal
 
-import io.github.lemcoder.koinference.whisper.jni.kniBridge0
-import io.github.lemcoder.koinference.whisper.jni.kniBridge1
-import io.github.lemcoder.koinference.whisper.jni.kniBridge7
+import koinference_whisper.koiw_last_error
+import koinference_whisper.koiw_model_load
+import koinference_whisper.koiw_system_info
 
-// The kniBridgeN functions are generated from native/facade/koinference_whisper.h by the Konan
-// plugin, numbered by the header's declaration order — see the generated file's `/** C: … */`
-// comments, and docs/backends.md on why that order is an ABI.
+// The koiw_* functions are JNI bindings the Konan plugin generates from
+// native/facade/koinference_whisper.h, one per C function and named after it.
 //
 // This file is duplicated verbatim in the other ART leg. Deliberate: the generated bridges land in
 // each target's own source set, so a shared parent could not see them.
@@ -20,7 +19,7 @@ internal const val INFO_BYTES = 1024
 internal object JniBridge : WhisperBridge {
 
     override fun openModel(options: WhisperModelOptions): WhisperModel {
-        val handle = kniBridge1(options.modelPath, if (options.useGpu) 1 else 0)
+        val handle = koiw_model_load(options.modelPath, if (options.useGpu) 1 else 0)
         check(handle != 0L) { "whisper could not load ${options.modelPath}: ${lastError()}" }
         return JniModel(handle)
     }
@@ -29,13 +28,13 @@ internal object JniBridge : WhisperBridge {
 /** Whatever the facade recorded on this thread, for a message worth reading. */
 internal fun lastError(): String {
     val buffer = ByteArray(INFO_BYTES)
-    val size = kniBridge7(buffer, buffer.size)
+    val size = koiw_last_error(buffer, buffer.size)
     return if (size <= 0) "no detail" else buffer.decodeToString(0, minOf(size, buffer.size - 1))
 }
 
 /** What whisper.cpp was compiled with. Unused by the runtime; kept for a results file to record. */
 internal fun whisperSystemInfo(): String {
     val buffer = ByteArray(INFO_BYTES)
-    val size = kniBridge0(buffer, buffer.size)
+    val size = koiw_system_info(buffer, buffer.size)
     return if (size <= 0) "" else buffer.decodeToString(0, minOf(size, buffer.size - 1))
 }

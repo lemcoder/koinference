@@ -1,30 +1,24 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge10
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge11
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge2
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge4
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge5
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge6
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge7
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge8
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge9
-import io.github.lemcoder.koinference.litertlm.jni.kniCString
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference_litertlm.koilm_generate
+import koinference_litertlm.koilm_last_response
+import koinference_litertlm.koilm_session_free
+import koinference_litertlm.koilm_stream_begin
+import koinference_litertlm.koilm_stream_end
+import koinference_litertlm.koilm_stream_next
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 internal class JniConversation(private val handle: Long) : LiteRtLmConversation {
 
     override fun generate(prompt: String, jsonSchema: String?): String {
         val buffer = ByteArray(INITIAL_REPLY_BYTES)
-        val needed = kniBridge6(handle, prompt, jsonSchema, buffer, buffer.size)
+        val needed = koilm_generate(handle, prompt, jsonSchema, buffer, buffer.size)
         check(needed >= 0) { "LiteRT-LM generation failed: ${lastError()}" }
 
         // needed is what the reply wants, not what was written. A reply longer than the first
@@ -34,7 +28,7 @@ internal class JniConversation(private val handle: Long) : LiteRtLmConversation 
             String(buffer, 0, needed, Charsets.UTF_8)
         } else {
             val grown = ByteArray(needed + 1)
-            val collected = kniBridge7(grown, grown.size)
+            val collected = koilm_last_response(grown, grown.size)
             check(collected == needed) {
                 "LiteRT-LM reply changed size while being collected: $needed then $collected"
             }
@@ -51,13 +45,13 @@ internal class JniConversation(private val handle: Long) : LiteRtLmConversation 
      * chunk exists, so it runs on Dispatchers.IO rather than on the collector's thread.
      */
     override fun stream(prompt: String, jsonSchema: String?): Flow<String> = flow {
-        check(kniBridge8(handle, prompt, jsonSchema) == 0) {
+        check(koilm_stream_begin(handle, prompt, jsonSchema) == 0) {
             "LiteRT-LM could not start streaming: ${lastError()}"
         }
         try {
             val buffer = ByteArray(CHUNK_BYTES)
             while (true) {
-                val written = withContext(Dispatchers.IO) { kniBridge9(handle, buffer, buffer.size) }
+                val written = withContext(Dispatchers.IO) { koilm_stream_next(handle, buffer, buffer.size) }
                 check(written >= 0) { "LiteRT-LM streaming failed: ${lastError()}" }
                 if (written == 0) break
 
@@ -70,9 +64,9 @@ internal class JniConversation(private val handle: Long) : LiteRtLmConversation 
         } finally {
             // Also on cancellation: the runtime is still decoding, and dropping the state without
             // cancelling would leave it writing into a freed buffer.
-            kniBridge10(handle)
+            koilm_stream_end(handle)
         }
     }
 
-    override fun close() = kniBridge5(handle)
+    override fun close() = koilm_session_free(handle)
 }

@@ -26,30 +26,15 @@ kotlin {
     }
 
     macosArm64 {
-        // Both backends' native libraries, named again here.
-        //
-        // A klib does not carry the linker options of the project that produced it, so every
-        // module that links a binary against these backends repeats them — the same lesson as
-        // the .a that records nothing about what it needs, one level further out. Without this
-        // the test executable fails on undefined koi_* and koilm_*.
-        val llamaCppLibDir = project(":backends:llamacpp")
-            .layout.buildDirectory.dir("prebuilt/${konanTarget.name}").get().asFile.path
+        // Both facade archives travel inside their backends' cinterop klibs, and so do the
+        // frameworks llama.cpp needs. What does not is LiteRT-LM's runtime, a dylib: an archive
+        // records nothing about it, so every module that links a binary names it again.
         val liteRtLmLibDir = project(":backends:litertlm")
-            .layout.projectDirectory.dir("native/build/$name").asFile.path
+            .layout.buildDirectory.dir("cmake/library-macosArm64").get().asFile.path
 
         binaries.all {
-            linkerOpts(
-                "-L$llamaCppLibDir", "-lkoinference-facade",
-                "-L$liteRtLmLibDir", "-lkoinference-litertlm-facade", "-llitert-lm",
-                // The facade archive references the runtime dylib, which CMake stages beside
-                // it; without the rpath the binary links and then dies at load time.
-                "-rpath", liteRtLmLibDir,
-                // ggml's Metal and BLAS backends are inside the llama.cpp archive.
-                "-framework", "Metal",
-                "-framework", "MetalKit",
-                "-framework", "Foundation",
-                "-framework", "Accelerate",
-            )
+            // Without the rpath the binary links and then dies at load time.
+            linkerOpts("-L$liteRtLmLibDir", "-llitert-lm", "-rpath", liteRtLmLibDir)
         }
     }
 
@@ -80,8 +65,3 @@ kotlin {
         }
     }
 }
-
-// The LiteRT-LM facade is produced by CMake rather than by any Kotlin compilation, so nothing
-// in this module's task graph would otherwise cause it to exist before the link.
-tasks.matching { it.name.startsWith("linkDebugTestMacosArm64") }
-    .configureEach { dependsOn(":backends:litertlm:buildFacade") }

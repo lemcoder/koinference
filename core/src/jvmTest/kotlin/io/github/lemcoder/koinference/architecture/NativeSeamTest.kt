@@ -19,13 +19,10 @@ class NativeSeamTest {
     /**
      * Two tests are allowed to name native symbols because comparing the two sides is their whole
      * purpose: `SessionDefaultsTest` checks the hand-written Kotlin sampler defaults against
-     * `koilm_default_session_params()`, and `BackendIdTest` checks the hand-written backend ids
-     * against the generated enum. Both exist because those values are duplicated on purpose — only
-     * the cinterop leg gets generated constants — and they are what stops the copies drifting.
+     * `koilm_default_session_params()`, which is what stops the two copies drifting, and
+     * `LlamaCppBridgeJvmSmokeTest` calls the generated JNI bindings directly.
      */
-    private val boundaryTests = setOf(
-        "LlamaCppBridgeJvmSmokeTest.kt", "SessionDefaultsTest.kt", "BackendIdTest.kt",
-    )
+    private val boundaryTests = setOf("LlamaCppBridgeJvmSmokeTest.kt", "SessionDefaultsTest.kt")
 
     /**
      * A binding file, by name rather than by an exhaustive list.
@@ -45,8 +42,7 @@ class NativeSeamTest {
                 file.imports.any { import ->
                     import.name.contains(".koi_") ||
                         import.name.contains(".koilm_") ||
-                        import.name.contains(".kniBridge") ||
-                        import.name.contains(".kniCString")
+                        import.name.contains(".koiw_")
                 }
             }
             .filterNot { isBinding(it.basename()) || it.basename() in boundaryTests }

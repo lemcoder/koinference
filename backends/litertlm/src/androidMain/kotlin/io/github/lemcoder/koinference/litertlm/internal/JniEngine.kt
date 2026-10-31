@@ -1,24 +1,15 @@
 package io.github.lemcoder.koinference.litertlm.internal
 
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge0
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge1
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge10
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge11
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge2
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge4
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge5
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge6
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge7
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge8
-import io.github.lemcoder.koinference.litertlm.jni.kniBridge9
-import io.github.lemcoder.koinference.litertlm.jni.kniCString
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import koinference_litertlm.koilm_model_free
+import koinference_litertlm.koilm_session_create
+import koinference_litertlm.koilm_token_count
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 internal class JniEngine(private val handle: Long) : LiteRtLmEngine {
 
@@ -33,16 +24,16 @@ internal class JniEngine(private val handle: Long) : LiteRtLmEngine {
             .putInt(options.seed ?: UNSEEDED)
             .putInt(if (options.greedy) 1 else 0)
 
-        val conversation = kniBridge4(handle, params.array(), options.systemPrompt)
+        val conversation = koilm_session_create(handle, params.array(), options.systemPrompt)
         check(conversation != 0L) { "LiteRT-LM could not open a conversation: ${lastError()}" }
         return JniConversation(conversation)
     }
 
     override fun tokenCount(text: String): Int {
-        val count = kniBridge11(handle, text)
+        val count = koilm_token_count(handle, text)
         check(count >= 0) { "LiteRT-LM could not tokenize: ${lastError()}" }
         return count
     }
 
-    override fun close() = kniBridge2(handle)
+    override fun close() = koilm_model_free(handle)
 }
