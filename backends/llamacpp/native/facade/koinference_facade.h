@@ -105,9 +105,6 @@ int koi_embed(KoiSession* session, const char* text, float* out_buf, int buf_siz
  * (common/json-schema-to-grammar.cpp, ~1000 lines with a regex-to-grammar compiler in it) and
  * a second implementation would drift from the sampler that consumes its output.
  *
- * Appended at the end of this header on purpose: the JNI bridge numbering follows declaration
- * order, so inserting anywhere else renumbers every bridge after it.
- *
  * @param schema    JSON schema text.
  * @param out_buf   Destination buffer for the null-terminated grammar.
  * @param buf_size  Size of out_buf in bytes (including space for the null terminator).
@@ -159,9 +156,6 @@ void koi_generate_end(KoiSession* session);
  * template tokenizes to more than this, which is why koi_generate_begin reports the prompt's
  * real length separately.
  *
- * Appended at the end, like every addition here — the JNI bridge numbering follows declaration
- * order, so inserting above renumbers every bridge after it.
- *
  * @return the number of tokens, or -1 on invalid arguments.
  */
 int koi_token_count(KoiSession* session, const char* text);
@@ -174,9 +168,6 @@ int koi_token_count(KoiSession* session, const char* text);
  * Pinning is what makes the thread count worth choosing: unpinned, a worker scheduled onto a
  * little core makes every barrier wait for it. Reporting the mask is how a caller can tell what
  * actually happened on a device nobody has measured, instead of inferring it from timings.
- *
- * Appended at the end, like every addition here — the JNI bridge numbering follows declaration
- * order, so inserting above renumbers every bridge after it.
  *
  * @param out_cpus  filled with CPU indices, ascending.
  * @param max_cpus  capacity of out_cpus.
