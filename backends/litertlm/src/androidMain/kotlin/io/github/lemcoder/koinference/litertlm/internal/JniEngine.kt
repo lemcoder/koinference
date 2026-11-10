@@ -3,6 +3,7 @@ package io.github.lemcoder.koinference.litertlm.internal
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import koinference_litertlm.KoiLmEnginePointer
 import koinference_litertlm.koilm_model_free
 import koinference_litertlm.koilm_session_create
 import koinference_litertlm.koilm_token_count
@@ -11,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
-internal class JniEngine(private val handle: Long) : LiteRtLmEngine {
+internal class JniEngine(private val handle: KoiLmEnginePointer) : LiteRtLmEngine {
 
     override fun openConversation(options: ConversationOptions): LiteRtLmConversation {
         // Packed by hand for the same reason the llama.cpp bridge does it: the generator marshals
@@ -25,7 +26,7 @@ internal class JniEngine(private val handle: Long) : LiteRtLmEngine {
             .putInt(if (options.greedy) 1 else 0)
 
         val conversation = koilm_session_create(handle, params.array(), options.systemPrompt)
-        check(conversation != 0L) { "LiteRT-LM could not open a conversation: ${lastError()}" }
+        checkNotNull(conversation) { "LiteRT-LM could not open a conversation: ${lastError()}" }
         return JniConversation(conversation)
     }
 

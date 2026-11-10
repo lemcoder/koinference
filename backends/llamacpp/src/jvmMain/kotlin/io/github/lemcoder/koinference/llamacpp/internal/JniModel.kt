@@ -3,6 +3,7 @@ package io.github.lemcoder.koinference.llamacpp.internal
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import koinference.KoiModelPointer
 import koinference.koi_backend_init
 import koinference.koi_generate
 import koinference.koi_generate_begin
@@ -21,7 +22,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
-internal class JniModel(private val handle: Long) : LlamaCppModel {
+internal class JniModel(private val handle: KoiModelPointer) : LlamaCppModel {
 
     override fun openSession(options: SessionOptions): LlamaCppSession {
         // Packed by hand: the generator marshals a by-value struct as a byte array, so the field
@@ -35,7 +36,7 @@ internal class JniModel(private val handle: Long) : LlamaCppModel {
             .putFloat(options.minP)
 
         val session = koi_session_create(handle, params.array())
-        check(session != 0L) { "llama.cpp could not create a session" }
+        checkNotNull(session) { "llama.cpp could not create a session" }
         return JniSession(session)
     }
 

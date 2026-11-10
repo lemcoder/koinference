@@ -427,9 +427,11 @@ Second C-facade backend, same construction as `:backends:llamacpp`. Facts worth 
   LiteRT-LM facade. A blocking transcription drains the same loop.
 - **WAV decoding is Kotlin** (`WavAudio`): 16-bit PCM at 16 kHz, stereo averaged, unknown chunks
   walked past, everything else refused by name. A silent resample would transcribe as noise.
-- **Strings cross the JNI seam through out-buffers, never as `const char*`.** A returned pointer
-  arrives as an opaque `Long`; the generator does emit a `kniCString` helper, but the out-buffer is
-  what the rest of this repository does.
+- **Strings come back through out-buffers, not as a returned `const char*`.** Since plugin
+  alpha04 a returned `const char*` arrives as `String?`, so the generator would allow it, but the
+  out-buffer is what the rest of this repository does. Since alpha05 a pointer to a facade struct
+  arrives as a typed handle (`KoiwModelPointer?`, null for NULL), not a `Long`, so a failed load
+  is a `checkNotNull` and one handle cannot be passed where another is expected.
 - **An opaque `typedef struct X X;` lands under `cnames.structs`** for cinterop, not in the interop's
   own package — "unresolved reference" for a type plainly in the header.
 - **The `.def` needs `headerFilter`, or cinterop walks into the system headers.** Without it the

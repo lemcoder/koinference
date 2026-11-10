@@ -23,7 +23,7 @@ internal object JniBridge : LiteRtLmBridge {
             options.nThreads,
             options.maxTokens,
         )
-        check(handle != 0L) { "LiteRT-LM could not load ${options.modelPath}: ${lastError()}" }
+        checkNotNull(handle) { "LiteRT-LM could not load ${options.modelPath}: ${lastError()}" }
         return JniEngine(handle)
     }
 }

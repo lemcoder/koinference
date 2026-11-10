@@ -1,5 +1,6 @@
 package io.github.lemcoder.koinference.whisper.internal
 
+import koinference_whisper.KoiwModelPointer
 import koinference_whisper.koiw_model_free
 import koinference_whisper.koiw_transcribe
 import koinference_whisper.koiw_transcribe_begin
@@ -14,7 +15,7 @@ import kotlinx.coroutines.withContext
 // This file is duplicated verbatim in the other ART leg. Deliberate: the generated bridges land in
 // each target's own source set, so a shared parent could not see them.
 
-internal class JniModel(private val handle: Long) : WhisperModel {
+internal class JniModel(private val handle: KoiwModelPointer) : WhisperModel {
 
     override suspend fun transcribe(
         samples: FloatArray,
@@ -45,7 +46,7 @@ internal class JniModel(private val handle: Long) : WhisperModel {
         options: WhisperTranscriptionOptions,
     ): Flow<String> = channelFlow {
         val stream = koiw_transcribe_begin(handle, samples, samples.size, options.language, options.threads)
-        check(stream != 0L) { "whisper could not start transcribing: ${lastError()}" }
+        checkNotNull(stream) { "whisper could not start transcribing: ${lastError()}" }
 
         try {
             withContext(Dispatchers.IO) {

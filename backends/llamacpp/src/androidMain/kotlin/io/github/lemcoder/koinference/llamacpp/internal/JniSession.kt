@@ -3,6 +3,7 @@ package io.github.lemcoder.koinference.llamacpp.internal
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import koinference.KoiSessionPointer
 import koinference.koi_backend_init
 import koinference.koi_generate
 import koinference.koi_generate_begin
@@ -21,7 +22,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
-internal class JniSession(private val handle: Long) : LlamaCppSession {
+internal class JniSession(private val handle: KoiSessionPointer) : LlamaCppSession {
 
     override fun generate(systemPrompt: String?, prompt: String, grammar: String?): String {
         val out = ByteArray(LARGE_BUFFER_BYTES)

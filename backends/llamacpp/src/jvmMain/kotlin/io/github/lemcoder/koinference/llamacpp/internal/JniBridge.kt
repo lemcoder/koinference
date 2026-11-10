@@ -35,7 +35,7 @@ internal object JniBridge : LlamaCppBridge {
                 Accelerator.GPU -> ALL_GPU_LAYERS
             },
         )
-        check(handle != 0L) { "llama.cpp could not load ${options.modelPath}" }
+        checkNotNull(handle) { "llama.cpp could not load ${options.modelPath}" }
         return JniModel(handle)
     }
 

@@ -3,6 +3,7 @@ package io.github.lemcoder.koinference.litertlm.internal
 import io.github.lemcoder.koinference.runtime.generation.Accelerator
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import koinference_litertlm.KoiLmConversationPointer
 import koinference_litertlm.koilm_generate
 import koinference_litertlm.koilm_last_response
 import koinference_litertlm.koilm_session_free
@@ -14,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
-internal class JniConversation(private val handle: Long) : LiteRtLmConversation {
+internal class JniConversation(private val handle: KoiLmConversationPointer) : LiteRtLmConversation {
 
     override fun generate(prompt: String, jsonSchema: String?): String {
         val buffer = ByteArray(INITIAL_REPLY_BYTES)

@@ -20,7 +20,7 @@ internal object JniBridge : WhisperBridge {
 
     override fun openModel(options: WhisperModelOptions): WhisperModel {
         val handle = koiw_model_load(options.modelPath, if (options.useGpu) 1 else 0)
-        check(handle != 0L) { "whisper could not load ${options.modelPath}: ${lastError()}" }
+        checkNotNull(handle) { "whisper could not load ${options.modelPath}: ${lastError()}" }
         return JniModel(handle)
     }
 }
